@@ -1219,15 +1219,27 @@ def schedule_grid_view():
 # -------------------------
 
 def main():
+    # Always initialize defaults first
     init_session_state()
 
-    # One global provider picker
-    provider_selector()
+    # Three columns:
+    #   left  = Engine (all controls, incl. the ONLY provider selector)
+    #   mid   = Calendar + Monthly Grid (both respond to highlight_provider)
+    #   right = Provider Rules editor (driven by the same highlight_provider)
+    left, mid, right = st.columns([3, 5, 3], gap="large")
 
+    with left:
+        engine_panel()          # includes the single Provider dropdown
 
-if __name__ == "__main__":
-    main()
+    with mid:
+        render_calendar()       # reads st.session_state.highlight_provider
+        schedule_grid_view()    # reads st.session_state.highlight_provider
 
+    with right:
+        provider_rules_panel()  # reads st.session_state.highlight_provider
+
+# Run
+main()
 
 
 
