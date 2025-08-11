@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+pydantic
+streamlit-calendar
+python-dateutil
