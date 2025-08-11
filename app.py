@@ -18,7 +18,6 @@
 # Run:
 #   streamlit run app.py
 
-import json
 import uuid
 from datetime import datetime, date, timedelta, time
 from dateutil.relativedelta import relativedelta
@@ -567,41 +566,6 @@ def top_controls():
     with g4:
         st.download_button("Download JSON", data=json.dumps(st.session_state.events, indent=2), file_name=f"schedule_{st.session_state.month:%Y_%m}.json")
 
-    # Upload/Load
-    up = st.file_uploader("Load events JSON/CSV", type=["json", "csv"], key="events_up")
-    if up is not None:
-        if up.name.endswith(".json"):
-            try:
-                data = json.load(up)
-                if isinstance(data, list):
-                    st.session_state.events = data
-                    st.success("Loaded JSON events.")
-                else:
-                    st.error("Invalid JSON format (expected a list).")
-            except Exception as e:
-                st.error(f"JSON load error: {e}")
-        else:  # CSV
-            try:
-                df = pd.read_csv(up)
-                req_cols = {"title", "start", "end"}
-                if not req_cols.issubset(set(df.columns)):
-                    st.error(f"CSV must include columns: {sorted(req_cols)}")
-                else:
-                    events = []
-                    for _, r in df.iterrows():
-                        ev = {
-                            "id": str(uuid.uuid4()),
-                            "title": r["title"],
-                            "start": pd.to_datetime(r["start"]).to_pydatetime().isoformat(),
-                            "end": pd.to_datetime(r["end"]).to_pydatetime().isoformat(),
-                            "allDay": False,
-                            "extendedProps": json.loads(r.get("extendedProps", "{}")) if isinstance(r.get("extendedProps"), str) else {},
-                        }
-                        events.append(ev)
-                    st.session_state.events = events
-                    st.success("Loaded CSV events.")
-            except Exception as e:
-                st.error(f"CSV load error: {e}")
 
 
 def render_calendar():
@@ -783,19 +747,18 @@ def schedule_grid_view():
             })
     row_meta.sort(key=lambda r: (r["gorder"], start_minutes(r["sdef"]), r["skey"], r["slot"]))
 
-    # ---------- build grid (ONLY Color + day columns; remove 'Shift') ----------
+    # ---------- build RAW grid (Color + day columns) ----------
     import pandas as pd
     row_labels = [rm["row_label"] for rm in row_meta]
-    grid = pd.DataFrame("", index=row_labels, columns=day_cols, dtype="object")
+    grid_raw = pd.DataFrame("", index=row_labels, columns=day_cols, dtype="object")
     color_tags = [emoji_for_hex(rm["sdef"].get("color")) for rm in row_meta]
-    grid.insert(0, "Color", color_tags)  # keep color tag only
+    grid_raw.insert(0, "Color", color_tags)  # keep color tag only
 
-    # quick index for filling
+    # fill from existing events into first empty slot
     rows_for_key = {}
     for rm in row_meta:
         rows_for_key.setdefault(rm["skey"], []).append(rm["row_label"])
 
-    # fill from existing events into first empty slot
     for e in st.session_state.events:
         ext  = (e.get("extendedProps") or {})
         skey = ext.get("shift_key")
@@ -810,16 +773,27 @@ def schedule_grid_view():
         prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
         col  = str(d.day)
         for row_label in rows_for_key.get(skey, []):
-            if grid.at[row_label, col] == "":
-                grid.at[row_label, col] = prov
+            if grid_raw.at[row_label, col] == "":
+                grid_raw.at[row_label, col] = prov
                 break
 
-    # ---------- editor config ----------
+    # ---------- highlight inside the ORIGINAL editor ----------
+    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+    grid_display = grid_raw.copy()
+
+    # prefix matches with a star so they pop visually in the editor
+    if hi:
+        for c in day_cols:
+            # Only alter display; underlying provider is restored on Apply
+            grid_display[c] = [
+                (f"★ {v}" if str(v).strip().upper() == hi else v)
+                for v in grid_display[c].tolist()
+            ]
+
+    # editor config
     valid_provs = sorted(
         st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
     ) if not st.session_state.providers_df.empty else []
-
-    st.caption("Each cell holds a single provider (blank = unassigned). Rows grouped Day → Evening → Night → Late Night.")
 
     col_config = {
         "Color": st.column_config.TextColumn(disabled=True, help="Shift color tag"),
@@ -831,33 +805,18 @@ def schedule_grid_view():
     except Exception:
         pass  # fallback for older Streamlit
 
-    # Tall enough to avoid scrolling
+    # tall enough to avoid vertical scrolling
     height_px = min(2000, 110 + len(row_meta) * 38)
 
+    # render ONE editor (highlight applied in-place)
     edited_grid = st.data_editor(
-        grid,
+        grid_display,
         num_rows="fixed",
         use_container_width=True,
         height=height_px,
         column_config=col_config,
         key="grid_editor",
     )
-
-    # ---------- optional highlight view (read-only) ----------
-    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
-    if hi:
-        st.markdown(f"**Highlighting:** {hi}")
-        # Build a styled copy of the edited grid (Color + days)
-        styled = edited_grid.copy()
-        day_only_cols = [c for c in styled.columns if c.isdigit()]
-
-        def _cell_style(val):
-            try:
-                return "background-color: #fff3bf; font-weight: 700;" if str(val).strip().upper() == hi else ""
-            except Exception:
-                return ""
-
-        st.dataframe(styled.style.applymap(_cell_style, subset=day_only_cols), use_container_width=True, height=height_px)
 
     # ---------- map back to events ----------
     c1, c2 = st.columns(2)
@@ -877,8 +836,8 @@ def schedule_grid_view():
                 except Exception:
                     continue
                 if d.year == year and d.month == month:
-                    prov = (ext.get("provider") or "").strip().upper()
-                    comments_by_key[(d, skey, prov)] = list(st.session_state.comments.get(e["id"], []))
+                    prov0 = (ext.get("provider") or "").strip().upper()
+                    comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
 
             # keep non-grid events
             def is_grid_event(E: Dict[str, Any]) -> bool:
@@ -911,9 +870,14 @@ def schedule_grid_view():
                     continue
                 for col in day_only_cols:
                     prov = edited_grid.at[row_label, col]
-                    prov = ("" if prov is None else str(prov)).strip().upper()
+                    if prov is None:
+                        prov = ""
+                    prov = str(prov).strip().upper()
+                    if prov.startswith("★ "):  # strip highlight marker before saving
+                        prov = prov[2:].strip()
                     if not prov:
                         continue
+
                     day_date = date(year, month, int(col))
                     key_dp = (day_date, prov)
                     if key_dp in seen_day_provider:
@@ -960,6 +924,7 @@ def schedule_grid_view():
 
 
 
+
 # -------------------------
 # App entry
 # -------------------------
@@ -974,6 +939,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
