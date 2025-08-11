@@ -1486,7 +1486,10 @@ def schedule_grid_view():
 
         def _style_fn(val):
             try:
-                return "background-color: #fff3bf;" if str(val).strip().upper() == hi else ""
+                return (
+                    "background-color:#fff3bf; color:#111111; font-weight:700;"
+                    if str(val).strip().upper() == hi else ""
+                )
             except Exception:
                 return ""
 
