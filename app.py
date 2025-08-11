@@ -237,8 +237,6 @@ def init_session_state():
             })
 
     # Eligibility & capacities defaults
-    st.session_state.setdefault("provider_caps", {})  # initials -> allowed shift keys
-    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
     
 def _bootstrap_session_state():
     from datetime import date
@@ -1492,6 +1490,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
