@@ -573,34 +573,34 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
 
    def score(provider_id: str, day: date, shift_key: str) -> float:
-    """
-    Compute a score to choose among eligible providers for a given shift.
-    Higher scores favor assignment.  The scoring logic pushes providers
-    toward their minimum shifts, prefers contiguous blocks up to the preferred
-    minimum block size, balances workload, and lightly penalizes hitting the
-    maximum block size cap.
-    """
-    sc = 0.0
-    # Push toward the minimum required shifts for the month
-    if counts[provider_id] < min_required:
-        sc += 4.0
-
-    # Prefer extending existing blocks, especially up to the preferred min block size
-    days_set = provider_days(provider_id)
-    block_len = left_run_len(days_set, day)
-    if block_len > 0:
-        sc += 2.0  # reward extending a block
-    if block_len < mbs:
-        sc += 4.0  # strong reward until the preferred min block size is met
-
-    # Slight load balancing: fewer shifts → slightly higher score
-    sc += max(0, 20 - counts[provider_id]) * 0.01
-
-    # Soft penalty if this assignment would hit the max block size (still allowed)
-    if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
-        sc -= 0.2
-
-    return sc
+        """
+        Compute a score to choose among eligible providers for a given shift.
+        Higher scores favor assignment.  The scoring logic pushes providers
+        toward their minimum shifts, prefers contiguous blocks up to the preferred
+        minimum block size, balances workload, and lightly penalizes hitting the
+        maximum block size cap.
+        """
+        sc = 0.0
+        # Push toward the minimum required shifts for the month
+        if counts[provider_id] < min_required:
+            sc += 4.0
+    
+        # Prefer extending existing blocks, especially up to the preferred min block size
+        days_set = provider_days(provider_id)
+        block_len = left_run_len(days_set, day)
+        if block_len > 0:
+            sc += 2.0  # reward extending a block
+        if block_len < mbs:
+            sc += 4.0  # strong reward until the preferred min block size is met
+    
+        # Slight load balancing: fewer shifts → slightly higher score
+        sc += max(0, 20 - counts[provider_id]) * 0.01
+    
+        # Soft penalty if this assignment would hit the max block size (still allowed)
+        if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
+            sc -= 0.2
+    
+        return sc
 
 
 for current_day in days:
@@ -1819,6 +1819,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
