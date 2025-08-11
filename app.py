@@ -64,9 +64,9 @@ def _normalize_initials_list(items):
 
 
 class RuleConfig(BaseModel):
-    max_shifts_per_provider: int = Field(12, ge=1, le=31)
+    max_shifts_per_provider: int = Field(15, ge=1, le=31)
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
-    min_block_size: int = Field(2, ge=1, le=7, description="Minimum consecutive days in a block when possible")
+    min_block_size: int = Field(3, ge=1, le=7, description="Minimum consecutive days in a block when possible")
     require_at_least_one_weekend: bool = True
     # Optional caps per shift type
     max_nights_per_provider: Optional[int] = Field(6, ge=0, le=31)
@@ -531,6 +531,8 @@ def top_controls():
         idx = options.index(default) if default in options else 0
         sel = st.selectbox("Highlight provider (initials)", options=options, index=idx)
         st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+        st.experimental_rerun()
+
 
     # Generate & Validate buttons
     g1, g2, g3 = st.columns(3)
@@ -559,6 +561,21 @@ def top_controls():
             st.session_state.events = []
             st.session_state.comments = {}
 
+def provider_selector():
+    """One provider dropdown to rule them all."""
+    roster = (
+        st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+        if not st.session_state.providers_df.empty else []
+    )
+    roster = sorted(roster)
+
+    # Build options and current index
+    options = ["(All providers)"] + roster
+    cur = st.session_state.get("highlight_provider", "") or ""
+    idx = options.index(cur) if cur and cur in options else 0
+
+    sel = st.selectbox("Provider", options=options, index=idx, key="provider_selector")
+    st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
 
 
 def render_calendar():
@@ -674,25 +691,33 @@ def render_calendar():
 def provider_rules_panel():
     st.header("Provider-specific rules")
 
-    roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
+    roster = (
+        st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+        if not st.session_state.providers_df.empty else []
+    )
     if not roster:
         st.info("Add providers first.")
         return
 
-    sel = st.selectbox("Choose provider", options=roster, key="pr_sel")
+    sel = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+    if not sel:
+        st.info("Select a provider at the top to edit rules.")
+        return
+    if sel not in roster:
+        st.warning(f"{sel} not in current roster.")
+        return
 
-    # Existing values (overrides are optional)
-    rules_map = st.session_state.provider_rules
-    curr = rules_map.get(sel, {})
+    # Backing stores
+    rules_map = st.session_state.setdefault("provider_rules", {})
     global_rules = RuleConfig(**st.session_state.rules)
 
-    # Allowed shift types (kept in provider_caps to stay consistent)
+    # Allowed shifts (kept in provider_caps, consistent with scheduler)
     label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
     key_for_label = {v: k for k, v in label_for_key.items()}
-    current_allowed = st.session_state.provider_caps.get(sel, [])
+    current_allowed = st.session_state.get("provider_caps", {}).get(sel, [])
     default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
-    st.subheader("Allowed shift types")
+    st.subheader(f"Allowed shift types — {sel}")
     picked_labels = st.multiselect(
         "Assign only these shift types (leave empty to allow ALL)",
         options=list(label_for_key.values()),
@@ -700,23 +725,27 @@ def provider_rules_panel():
         key=f"pr_allowed_{sel}"
     )
     if len(picked_labels) == 0:
-        st.session_state.provider_caps.pop(sel, None)  # no restriction
+        st.session_state["provider_caps"].pop(sel, None)
     else:
-        st.session_state.provider_caps[sel] = [key_for_label[lbl] for lbl in picked_labels]
+        st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
 
     st.markdown("---")
     st.subheader("Overrides (optional)")
+    curr = rules_map.get(sel, {})
     c1, c2 = st.columns(2)
     with c1:
         use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
-        max_sh = st.number_input("Max shifts (this month)", 1, 50, value=int(curr.get("max_shifts", global_rules.max_shifts_per_provider)))
+        max_sh = st.number_input("Max shifts (this month)", 1, 50,
+                                 value=int(curr.get("max_shifts", global_rules.max_shifts_per_provider)))
     with c2:
         use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
         default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
-        max_n  = st.number_input("Max nights (this month)", 0, 50, value=int(curr.get("max_nights", default_max_n)))
+        max_n  = st.number_input("Max nights (this month)", 0, 50,
+                                 value=int(curr.get("max_nights", default_max_n)))
 
     use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
-    min_rest = st.number_input("Min rest hours between shifts", 0, 48, value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
+    min_rest = st.number_input("Min rest hours between shifts", 0, 48,
+                               value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
 
     st.markdown("---")
     st.subheader("Unavailable dates")
@@ -730,9 +759,9 @@ def provider_rules_panel():
 
     if st.button("Save provider rules", key=f"pr_save_{sel}"):
         new_entry = {}
-        if use_max:   new_entry["max_shifts"] = int(max_sh)
+        if use_max:    new_entry["max_shifts"] = int(max_sh)
         if use_nights: new_entry["max_nights"] = int(max_n)
-        if use_rest:  new_entry["min_rest_hours"] = int(min_rest)
+        if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
 
         # normalize dates
         unavail = []
@@ -751,8 +780,9 @@ def provider_rules_panel():
         if new_entry:
             rules_map[sel] = new_entry
         else:
-            rules_map.pop(sel, None)  # remove if everything cleared
+            rules_map.pop(sel, None)
         st.success("Saved.")
+
 
 
 
@@ -988,14 +1018,28 @@ def schedule_grid_view():
 
 def main():
     init_session_state()
-    sidebar_inputs()
+
+    # One global provider picker
+    provider_selector()
+
+    # Whatever other top controls you keep (month nav, buttons, etc.)
     top_controls()
-    render_calendar()
-    schedule_grid_view()
+
+    # Separate sections
+    tab1, tab2 = st.tabs(["Schedule", "Provider rules"])
+
+    with tab1:
+        # Show calendar + grid together if you want
+        render_calendar()
+        schedule_grid_view()
+
+    with tab2:
+        provider_rules_panel()
 
 
 if __name__ == "__main__":
     main()
+
 
 
 
