@@ -576,62 +576,62 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         # Unavailability (specific + vacations
         if is_provider_unavailable_on_date(p, d):
             return False
+            
+    def ok(p: str, d: date, skey: str) -> bool:
+    """Return True if provider p can take shift skey on date d."""
+    p_upper = (p or "").strip().upper()
 
+    # 1) Eligibility (allowed shift keys)
+    allowed = st.session_state.get("provider_caps", {}).get(p_upper, [])
+    if allowed and skey not in allowed:
+        return False
 
-   def ok(p: str, d: date, skey: str) -> bool:
-        """Return True if provider p can take shift skey on date d."""
-        p_upper = (p or "").strip().upper()
-    
-        # 1) Eligibility (allowed shift keys)
-        allowed = st.session_state.get("provider_caps", {}).get(p_upper, [])
-        if allowed and skey not in allowed:
+    # 2) Provider-specific overrides + month-aware effective max
+    pr = st.session_state.get("provider_rules", {}).get(p_upper, {}) or {}
+    eff_max = pr.get("max_shifts", base_max)
+    if _provider_has_vacation_in_month(pr):
+        eff_max = max(0, (eff_max or 0) - 3)
+    max_nights = pr.get("max_nights", rules.max_nights_per_provider)
+    min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+
+    # 3) Hard block: unavailable (specific date or vacation range)
+    if is_provider_unavailable_on_date(p_upper, d):
+        return False
+
+    # 4) Per-day caps and single-shift-per-day
+    if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+        return False
+    if provider_has_shift_on_day(p, d):
+        return False
+
+    # 5) Max totals (per-provider)
+    if eff_max is not None and counts[p] + 1 > eff_max:
+        return False
+    if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
+        return False
+
+    # 6) Max block size (don’t create a block longer than mbx)
+    if mbx and mbx > 0:
+        if total_block_len_if_assigned(p, d) > mbx:
             return False
-    
-        # 2) Provider-specific overrides + month-aware effective max
-        pr = st.session_state.get("provider_rules", {}).get(p_upper, {}) or {}
-        eff_max = pr.get("max_shifts", base_max)
-        if _provider_has_vacation_in_month(pr):
-            eff_max = max(0, (eff_max or 0) - 3)
-        max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
-    
-        # 3) Hard block: unavailable (specific date or vacation range)
-        if is_provider_unavailable_on_date(p_upper, d):
+
+    # 7) Rest windows with existing assignments for this provider
+    sdef = sdefs[skey]
+    start_dt = datetime.combine(d, parse_time(sdef["start"]))
+    end_dt   = datetime.combine(d, parse_time(sdef["end"]))
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+
+    for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper):
+        rest_after_prev = (start_dt - e.end).total_seconds() / 3600
+        rest_before_next = (e.start - end_dt).total_seconds() / 3600
+        if -(min_rest or 0) < rest_after_prev < (min_rest or 0):
             return False
-    
-        # 4) Per-day caps and single-shift-per-day
-        if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+        if -(min_rest or 0) < rest_before_next < (min_rest or 0):
             return False
-        if provider_has_shift_on_day(p, d):
-            return False
-    
-        # 5) Max totals (per-provider)
-        if eff_max is not None and counts[p] + 1 > eff_max:
-            return False
-        if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
-            return False
-    
-        # 6) Max block size (don’t create a block longer than mbx)
-        if mbx and mbx > 0:
-            if total_block_len_if_assigned(p, d) > mbx:
-                return False
-    
-        # 7) Rest windows with existing assignments for this provider
-        sdef = sdefs[skey]
-        start_dt = datetime.combine(d, parse_time(sdef["start"]))
-        end_dt   = datetime.combine(d, parse_time(sdef["end"]))
-        if end_dt <= start_dt:
-            end_dt += timedelta(days=1)
-    
-        for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper):
-            rest_after_prev = (start_dt - e.end).total_seconds() / 3600
-            rest_before_next = (e.start - end_dt).total_seconds() / 3600
-            if -(min_rest or 0) < rest_after_prev < (min_rest or 0):
-                return False
-            if -(min_rest or 0) < rest_before_next < (min_rest or 0):
-                return False
-    
-        return True
+
+    return True
+
 
 
     def score(p: str, d: date, skey: str) -> float:
@@ -1863,6 +1863,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
