@@ -331,7 +331,7 @@ def top_controls():
         default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
         idx = options.index(default) if default in options else 0
         sel = st.selectbox("Highlight provider (initials)", options=options, index=idx)
-        st.session_state.highlight_provider = "" if sel == "(All providers)" else sel", value=st.session_state.highlight_provider)
+        st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
 
     # Generate & Validate buttons
     g1, g2, g3, g4 = st.columns(4)
