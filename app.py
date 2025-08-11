@@ -106,6 +106,8 @@ def init_session_state():
     st.session_state.setdefault("month", date.today().replace(day=1))
     st.session_state.setdefault("rules", RuleConfig().dict())
     st.session_state.setdefault("highlight_provider", "")
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+
 
     # Provider roster (preloaded with your list)
     if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
@@ -939,6 +941,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
