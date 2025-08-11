@@ -561,15 +561,214 @@ def top_controls():
             st.session_state.events = []
             st.session_state.comments = {}
 
+def engine_panel():
+    st.header("Engine")
+
+    # --- Global provider selector here (the only one) ---
+    provider_selector()
+
+    # ===== Providers (manage roster) =====
+    st.subheader("Providers")
+    current_list = st.session_state.providers_df["initials"].astype(str).tolist()
+    st.caption(f"{len(current_list)} providers loaded.")
+
+    with st.expander("Add providers", expanded=False):
+        new_one = st.text_input("Add single provider (initials)", key="add_single_init")
+        c1, c2 = st.columns([1,1])
+        with c1:
+            if st.button("Add", key="btn_add_single"):
+                cand = _normalize_initials_list([new_one])
+                if cand:
+                    initial = list(cand)[0]
+                    if initial not in current_list:
+                        st.session_state.providers_df = pd.DataFrame(
+                            {"initials": _normalize_initials_list(current_list + [initial])}
+                        )
+                        st.toast(f"Added {initial}", icon="✅")
+                else:
+                    st.warning("Enter initials to add.")
+        st.markdown("---")
+        batch = st.text_area("Add multiple (comma/space/newline separated)", key="add_batch_area")
+        if st.button("Add batch", key="btn_add_batch"):
+            tokens = _normalize_initials_list(batch.replace(",", "\n").split())
+            if tokens:
+                merged = _normalize_initials_list(current_list + list(tokens))
+                st.session_state.providers_df = pd.DataFrame({"initials": merged})
+                st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
+            else:
+                st.warning("Nothing to add.")
+
+    with st.expander("Remove providers", expanded=False):
+        to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
+        if st.button("Remove selected", key="btn_rm"):
+            if to_remove:
+                remaining = [p for p in current_list if p not in set(to_remove)]
+                st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
+                st.session_state["provider_caps"] = {
+                    k: v for k, v in st.session_state.provider_caps.items() if k in remaining
+                }
+                st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
+            else:
+                st.info("No providers selected.")
+
+    with st.expander("Replace entire list", expanded=False):
+        repl = st.text_area("Paste full roster (will replace all)", value="\n".join(current_list), key="replace_all_area")
+        if st.button("Replace list", key="btn_replace_all"):
+            new_roster = _normalize_initials_list(repl.replace(",", "\n").split())
+            if new_roster:
+                st.session_state.providers_df = pd.DataFrame({"initials": new_roster})
+                st.session_state["provider_caps"] = {
+                    k: v for k, v in st.session_state.provider_caps.items() if k in new_roster
+                }
+                st.toast("Provider roster replaced.", icon="♻️")
+            else:
+                st.warning("Replacement list is empty — keeping current roster.")
+
+    # ===== Global rules =====
+    st.subheader("Rules (global)")
+    rc = RuleConfig(**st.session_state.rules)
+    rc.max_shifts_per_provider = st.number_input("Max shifts/provider", 1, 50, value=int(rc.max_shifts_per_provider))
+    rc.min_rest_hours_between_shifts = st.number_input("Min rest hours between shifts", 0, 48, value=int(rc.min_rest_hours_between_shifts))
+    rc.min_block_size = st.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
+    rc.require_at_least_one_weekend = st.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
+    limit_nights = st.checkbox("Limit 7pm–7am (N12) nights per provider", value=st.session_state.rules.get("max_nights_per_provider", 6) is not None)
+    if limit_nights:
+        default_nights = int(st.session_state.rules.get("max_nights_per_provider", 6) or 0)
+        rc.max_nights_per_provider = st.number_input("Max nights/provider", 0, 50, value=default_nights)
+    else:
+        rc.max_nights_per_provider = None
+    st.session_state.rules = rc.dict()
+
+    # ===== Shift Types =====
+    st.subheader("Shift Types")
+    st.caption("Edit labels/times; colors only affect calendar display.")
+    for i, s in enumerate(st.session_state.shift_types):
+        with st.expander(f"{s['label']} ({s['key']})", expanded=False):
+            s["label"] = st.text_input("Label", value=s["label"], key=f"s_lbl_{i}")
+            s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
+            s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
+            s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
+
+    # ===== Daily capacities (with default reset) =====
+    st.subheader("Daily shift capacities")
+    if st.button("Reset to default capacities"):
+        st.session_state["shift_capacity"] = DEFAULT_SHIFT_CAPACITY.copy()
+        st.toast("Capacities reset to defaults.", icon="♻️")
+
+    cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+    for s in st.session_state.shift_types:
+        key = s["key"]; label = s["label"]
+        default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
+        cap_map[key] = int(
+            st.number_input(f"{label} ({key}) capacity/day", min_value=0, max_value=50, value=default_cap, key=f"cap_{key}")
+        )
+    st.session_state["shift_capacity"] = cap_map
+
+    # ===== Provider eligibility (bulk) =====
+    st.subheader("Provider shift eligibility (bulk)")
+    with st.expander("Assign allowed shift types per provider", expanded=False):
+        label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+        key_for_label = {v: k for k, v in label_for_key.items()}
+        roster = st.session_state.providers_df["initials"].astype(str).tolist()
+        if not roster:
+            st.caption("Add providers to configure eligibility.")
+        else:
+            filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
+            view_roster = [p for p in roster if filt in p] if filt else roster
+            st.caption("Tip: leave empty or select all to allow ALL shifts.")
+            for init in view_roster:
+                allowed_keys = st.session_state.provider_caps.get(init, [])
+                default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
+                selected = st.multiselect(init, options=list(label_for_key.values()), default=default_labels, key=f"elig_{init}")
+                if len(selected) == 0 or len(selected) == len(label_for_key):
+                    st.session_state.provider_caps.pop(init, None)
+                else:
+                    st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
+
+    # ===== Actions (navigation / draft / validate / export) =====
+    st.subheader("Actions")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("◀ Prev month"):
+            m = st.session_state.month
+            y = m.year - (1 if m.month == 1 else 0)
+            mm = 12 if m.month == 1 else m.month - 1
+            st.session_state.month = date(y, mm, 1)
+    with c2:
+        st.write(f"{st.session_state.month:%B %Y}")
+    with c3:
+        if st.button("Next month ▶"):
+            m = st.session_state.month
+            y = m.year + (1 if m.month == 12 else 0)
+            mm = 1 if m.month == 12 else m.month + 1
+            st.session_state.month = date(y, mm, 1)
+
+    cc1, cc2, cc3 = st.columns(3)
+    with cc1:
+        if st.button("Generate Draft from Rules"):
+            providers = st.session_state.providers_df["initials"].astype(str).tolist()
+            days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+            evs = assign_greedy(providers, days, st.session_state.shift_types, RuleConfig(**st.session_state.rules))
+            # preserve outside-month events
+            def is_this_month(e):
+                try:
+                    d = pd.to_datetime(e["start"]).date()
+                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
+                except Exception:
+                    return False
+            others = [E for E in st.session_state.events if not is_this_month(E)]
+            st.session_state.events = others + [e.to_json_event() if hasattr(e, "to_json_event") else e for e in evs]
+            st.success("Draft generated.")
+    with cc2:
+        if st.button("Validate schedule"):
+            # Convert JSON events to SEvent if needed
+            def _to_sevent(E):
+                if isinstance(E, dict):
+                    ext = E.get("extendedProps") or {}
+                    return SEvent(
+                        id=E.get("id",""),
+                        title=E.get("title",""),
+                        start=pd.to_datetime(E["start"]).to_pydatetime(),
+                        end=pd.to_datetime(E["end"]).to_pydatetime(),
+                        backgroundColor=E.get("backgroundColor"),
+                        extendedProps={"provider": ext.get("provider"), "shift_key": ext.get("shift_key"), "label": ext.get("label")}
+                    )
+                return E
+            events_obj = [_to_sevent(E) for E in st.session_state.events]
+            viol = validate_rules(events_obj, RuleConfig(**st.session_state.rules))
+            if not viol:
+                st.success("No violations found.")
+            else:
+                for who, msgs in viol.items():
+                    st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
+    with cc3:
+        ccc1, ccc2 = st.columns(2)
+        with ccc1:
+            if st.button("Clear month"):
+                def is_this_month(e):
+                    try:
+                        d = pd.to_datetime(e["start"]).date()
+                        return d.year == st.session_state.month.year and d.month == st.session_state.month.month
+                    except Exception:
+                        return False
+                st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
+                st.toast("Cleared this month.", icon="🧹")
+        with ccc2:
+            import json
+            st.download_button(
+                "Download JSON",
+                data=json.dumps(st.session_state.events, indent=2),
+                file_name=f"schedule_{st.session_state.month:%Y_%m}.json"
+            )
+
+
 def provider_selector():
-    """One provider dropdown to rule them all."""
+    """One provider dropdown that updates global selection."""
     roster = (
         st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
         if not st.session_state.providers_df.empty else []
     )
     roster = sorted(roster)
-
-    # Build options and current index
     options = ["(All providers)"] + roster
     cur = st.session_state.get("highlight_provider", "") or ""
     idx = options.index(cur) if cur and cur in options else 0
@@ -688,6 +887,7 @@ def render_calendar():
 
 
 # provider rules section
+# make sure this version is in your codebase
 def provider_rules_panel():
     st.header("Provider-specific rules")
 
@@ -701,11 +901,13 @@ def provider_rules_panel():
 
     sel = (st.session_state.get("highlight_provider", "") or "").strip().upper()
     if not sel:
-        st.info("Select a provider at the top to edit rules.")
+        st.info("Select a provider in the Engine to edit rules.")
         return
     if sel not in roster:
         st.warning(f"{sel} not in current roster.")
         return
+
+    # ... (rest of the rules editor as previously provided)
 
     # Backing stores
     rules_map = st.session_state.setdefault("provider_rules", {})
@@ -1022,23 +1224,10 @@ def main():
     # One global provider picker
     provider_selector()
 
-    # Whatever other top controls you keep (month nav, buttons, etc.)
-    top_controls()
-
-    # Separate sections
-    tab1, tab2 = st.tabs(["Schedule", "Provider rules"])
-
-    with tab1:
-        # Show calendar + grid together if you want
-        render_calendar()
-        schedule_grid_view()
-
-    with tab2:
-        provider_rules_panel()
-
 
 if __name__ == "__main__":
     main()
+
 
 
 
