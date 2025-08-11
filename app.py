@@ -100,6 +100,8 @@ class SEvent(BaseModel):
 # -------------------------
 
 def init_session_state():
+    st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
+
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
     st.session_state.setdefault("events", [])
     st.session_state.setdefault("comments", {})
@@ -1219,26 +1221,21 @@ def schedule_grid_view():
 # -------------------------
 
 def main():
-    # Always initialize defaults first
     init_session_state()
 
-    # Three columns:
-    #   left  = Engine (all controls, incl. the ONLY provider selector)
-    #   mid   = Calendar + Monthly Grid (both respond to highlight_provider)
-    #   right = Provider Rules editor (driven by the same highlight_provider)
-    left, mid, right = st.columns([3, 5, 3], gap="large")
+    # Three columns across the whole page
+    left_col, mid_col, right_col = st.columns([3, 5, 3], gap="large")
 
-    with left:
-        engine_panel()          # includes the single Provider dropdown
+    with left_col:
+        engine_panel()          # includes the ONE provider dropdown
 
-    with mid:
-        render_calendar()       # reads st.session_state.highlight_provider
-        schedule_grid_view()    # reads st.session_state.highlight_provider
+    with mid_col:
+        render_calendar()       # uses st.session_state.highlight_provider
+        schedule_grid_view()    # uses st.session_state.highlight_provider
 
-    with right:
-        provider_rules_panel()  # reads st.session_state.highlight_provider
+    with right_col:
+        provider_rules_panel()  # uses st.session_state.highlight_provider
 
-# Run
 main()
 
 
