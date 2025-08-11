@@ -352,17 +352,29 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 def sidebar_inputs():
     st.sidebar.header("Providers & Rules")
 
-    # -------- Providers (manage in-app) --------
-    st.sidebar.subheader("Providers")
+    # ---- Safety bootstraps (avoid missing-key errors) ----
+    st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+    st.session_state.setdefault("provider_caps", {})
+    # Ensure providers_df exists with your preloaded roster
+    base_roster = _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)
+    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
+        st.session_state["providers_df"] = pd.DataFrame({"initials": base_roster})
+    elif st.session_state.providers_df.empty:
+        st.session_state["providers_df"] = pd.DataFrame({"initials": base_roster})
+    else:
+        st.session_state["providers_df"] = pd.DataFrame({
+            "initials": _normalize_initials_list(st.session_state.providers_df["initials"].tolist())
+        })
 
-    # Show current count
+    # ===================== Providers (manage in-app) =====================
+    st.sidebar.subheader("Providers")
     current_list = st.session_state.providers_df["initials"].astype(str).tolist()
     st.sidebar.caption(f"{len(current_list)} providers loaded.")
 
-    # Add new provider(s)
     with st.sidebar.expander("Add providers", expanded=False):
         new_one = st.text_input("Add single provider (initials)", key="add_single_init")
-        c1, c2 = st.columns([1,1])
+        c1, c2 = st.columns([1, 1])
         with c1:
             if st.button("Add", key="btn_add_single"):
                 cand = _normalize_initials_list([new_one])
@@ -373,7 +385,9 @@ def sidebar_inputs():
                     if initial in current_list:
                         st.info(f"{initial} is already in the list.")
                     else:
-                        st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(current_list + [initial])})
+                        st.session_state.providers_df = pd.DataFrame(
+                            {"initials": _normalize_initials_list(current_list + [initial])}
+                        )
                         st.toast(f"Added {initial}", icon="✅")
 
         st.markdown("---")
@@ -387,7 +401,6 @@ def sidebar_inputs():
                 st.session_state.providers_df = pd.DataFrame({"initials": merged})
                 st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
 
-    # Remove providers
     with st.sidebar.expander("Remove providers", expanded=False):
         to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
         if st.button("Remove selected", key="btn_rm"):
@@ -396,11 +409,9 @@ def sidebar_inputs():
             else:
                 remaining = [p for p in current_list if p not in set(to_remove)]
                 st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
-                # prune eligibility map
                 st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
                 st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
 
-    # Optional: bulk replace entire list
     with st.sidebar.expander("Replace entire list", expanded=False):
         repl = st.text_area("Paste full roster (will replace all)", value="\n".join(current_list), key="replace_all_area")
         if st.button("Replace list", key="btn_replace_all"):
@@ -412,14 +423,13 @@ def sidebar_inputs():
                 st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in new_roster}
                 st.toast("Provider roster replaced.", icon="♻️")
 
-    # -------- Rules --------
+    # ===================== Rules =====================
     st.sidebar.subheader("Rules")
-    rc = RuleConfig(**st.session_state.rules)
+    rc = RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
     rc.max_shifts_per_provider = st.sidebar.number_input("Max shifts/provider", 1, 31, value=int(rc.max_shifts_per_provider))
     rc.min_rest_hours_between_shifts = st.sidebar.number_input("Min rest hours between shifts", 0, 48, value=int(rc.min_rest_hours_between_shifts))
     rc.min_block_size = st.sidebar.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
     rc.require_at_least_one_weekend = st.sidebar.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
-
     limit_nights = st.sidebar.checkbox(
         "Limit 7pm–7am (N12) nights per provider",
         value=st.session_state.rules.get("max_nights_per_provider", 6) is not None
@@ -429,94 +439,78 @@ def sidebar_inputs():
         rc.max_nights_per_provider = st.sidebar.number_input("Max nights/provider", 0, 31, value=default_nights)
     else:
         rc.max_nights_per_provider = None
-
     st.session_state.rules = rc.dict()
 
-    # -------- Shift Types editor --------
+    # ===================== Shift Types editor =====================
     st.sidebar.subheader("Shift Types")
     st.sidebar.caption("Edit labels/times; colors only affect calendar display.")
-    for i, s in enumerate(st.session_state.shift_types):
+    for i, s in enumerate(st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())):
         with st.sidebar.expander(f"{s['label']} ({s['key']})", expanded=False):
             s["label"] = st.text_input("Label", value=s["label"], key=f"s_lbl_{i}")
             s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
             s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
             s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
+    # write back edited shifts
+    st.session_state["shift_types"] = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
 
-    # -------- Daily shift capacities (A10=2, NB=1 by default) -------
-# -------- Daily shift capacities --------
-st.sidebar.subheader("Daily shift capacities")
+    # ===================== Daily shift capacities =====================
+    st.sidebar.subheader("Daily shift capacities")
+    if st.sidebar.button("Reset to default capacities"):
+        st.session_state["shift_capacity"] = DEFAULT_SHIFT_CAPACITY.copy()
+        st.toast("Capacities reset to defaults.", icon="♻️")
 
-# Optional: reset button
-if st.sidebar.button("Reset to default capacities"):
-    st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
-    st.toast("Capacities reset to defaults.", icon="♻️")
-
-
-cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
-
-for s in st.session_state.shift_types:
-    key = s["key"]; label = s["label"]
-    default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
-    cap_map[key] = int(
-        st.sidebar.number_input(
-            f"{label} ({key}) capacity/day",
-            min_value=0, max_value=50, value=default_cap, key=f"cap_{key}"
+    cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+    for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy()):
+        key = s["key"]; label = s["label"]
+        default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
+        cap_map[key] = int(
+            st.sidebar.number_input(
+                f"{label} ({key}) capacity/day",
+                min_value=0, max_value=50, value=default_cap, key=f"cap_{key}"
+            )
         )
-    )
-st.session_state.shift_capacity = cap_map
+    st.session_state["shift_capacity"] = cap_map
 
+    # ===================== Provider shift eligibility =====================
+    st.sidebar.subheader("Provider shift eligibility")
+    with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
+        label_for_key = {s["key"]: s["label"] for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())}
+        key_for_label = {v: k for k, v in label_for_key.items()}
+        all_shift_labels = list(label_for_key.values())
 
+        roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
+        if not roster:
+            st.caption("Add providers to configure eligibility.")
+        else:
+            filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
+            view_roster = [p for p in roster if filt in p] if filt else roster
+            st.caption("Tip: leave a provider empty (or select all shifts) to allow ALL shift types for that provider.")
 
-    # -------- Provider shift eligibility --------
+            for init in view_roster:
+                allowed_keys = st.session_state.provider_caps.get(init, None)
+                default_labels = [label_for_key[k] for k in (allowed_keys or []) if k in label_for_key]
 
-st.sidebar.subheader("Provider shift eligibility")
-with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
-    label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-    key_for_label = {v: k for k, v in label_for_key.items()}
-    all_shift_labels = list(label_for_key.values())
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    selected_labels = st.multiselect(
+                        init,
+                        options=all_shift_labels,
+                        default=default_labels,
+                        key=f"elig_{init}"
+                    )
+                with c2:
+                    if st.button("All shifts", key=f"elig_all_{init}", help="Remove restrictions for this provider"):
+                        if init in st.session_state.provider_caps:
+                            del st.session_state.provider_caps[init]
+                        st.session_state[f"elig_{init}"] = []
+                        st.experimental_rerun()
 
-    roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
-    if not roster:
-        st.caption("Add providers to configure eligibility.")
-    else:
-        # Quick filter to find a provider fast
-        filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
-        view_roster = [p for p in roster if filt in p] if filt else roster
-
-        # Hint
-        st.caption("Tip: leave a provider empty (or select all shifts) to allow ALL shift types for that provider.")
-
-        for init in view_roster:
-            allowed_keys = st.session_state.provider_caps.get(init, None)  # None => no restriction stored
-            # Build current defaults (labels) if we have a restriction list
-            default_labels = [label_for_key[k] for k in (allowed_keys or []) if k in label_for_key]
-
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                selected_labels = st.multiselect(
-                    init,
-                    options=all_shift_labels,
-                    default=default_labels,
-                    key=f"elig_{init}"
-                )
-
-            with c2:
-                if st.button("All shifts", key=f"elig_all_{init}", help="Remove restrictions for this provider"):
-                    # Remove restriction entirely
-                    if "provider_caps" in st.session_state and init in st.session_state.provider_caps:
+                # Persist: empty or all selected => no restriction
+                if len(selected_labels) == 0 or len(selected_labels) == len(all_shift_labels):
+                    if init in st.session_state.provider_caps:
                         del st.session_state.provider_caps[init]
-                    # Also update the widget value and rerun to reflect
-                    st.session_state[f"elig_{init}"] = []
-                    st.experimental_rerun()
-
-            # Persist selection:
-            # - If nothing selected OR all selected => treat as NO restriction (remove from map)
-            # - Else store the exact allowed shift keys
-            if len(selected_labels) == 0 or len(selected_labels) == len(all_shift_labels):
-                if init in st.session_state.provider_caps:
-                    del st.session_state.provider_caps[init]
-            else:
-                st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected_labels]
+                else:
+                    st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected_labels]
 
 
               
@@ -943,8 +937,10 @@ def main():
     render_calendar()
     schedule_grid_view()
 
+
 if __name__ == "__main__":
     main()
+
 
 
 
