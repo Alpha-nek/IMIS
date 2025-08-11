@@ -572,52 +572,70 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
 
 
-    def score(p: str, d: date, skey: str) -> float:
-        sc = 0.0
-        # push toward minimum shifts
-        if counts[p] < min_required: sc += 4.0
-        # prefer extending blocks; especially up to preferred min block size
-        ds = provider_days(p)
-        tlen = left_run_len(ds, d)
-        if tlen > 0: sc += 2.0
-        if tlen < mbs: sc += 4.0
-        # slight load balancing
-        sc += max(0, 20 - counts[p]) * 0.01
-        # soft penalty if we’re about to hit the max block (still allowed)
-        if mbx and mbx > 0 and total_block_len_if_assigned(p, d) == mbx:
-            sc -= 0.2
-        return sc
+   def score(provider_id: str, day: date, shift_key: str) -> float:
+    """
+    Compute a score to choose among eligible providers for a given shift.
+    Higher scores favor assignment.  The scoring logic pushes providers
+    toward their minimum shifts, prefers contiguous blocks up to the preferred
+    minimum block size, balances workload, and lightly penalizes hitting the
+    maximum block size cap.
+    """
+    sc = 0.0
+    # Push toward the minimum required shifts for the month
+    if counts[provider_id] < min_required:
+        sc += 4.0
 
-    for d in days:
-        for skey in stypes:
-            capacity = cap_map.get(skey, 1)
-            for _ in range(capacity):
-                cands = [p for p in providers if ok(p, d, skey)]
-                if not cands:
-                    continue
-                best = max(cands, key=lambda p: score(p, d, skey))
+    # Prefer extending existing blocks, especially up to the preferred min block size
+    days_set = provider_days(provider_id)
+    block_len = left_run_len(days_set, day)
+    if block_len > 0:
+        sc += 2.0  # reward extending a block
+    if block_len < mbs:
+        sc += 4.0  # strong reward until the preferred min block size is met
 
-                sdef = sdefs[skey]
-                start_dt = datetime.combine(d, parse_time(sdef["start"]))
-                end_dt   = datetime.combine(d, parse_time(sdef["end"]))
-                if end_dt <= start_dt: end_dt += timedelta(days=1)
-                ev = SEvent(
-                    id=str(uuid.uuid4()),
-                    title=f"{sdef['label']} — {best}",
-                    start=start_dt,
-                    end=end_dt,
-                    backgroundColor=sdef.get("color"),
-                    extendedProps={"provider": best, "shift_key": skey, "label": sdef["label"]},
-                )
-                events.append(ev)
-                counts[best] += 1
-                if skey == "N12": nights[best] += 1
+    # Slight load balancing: fewer shifts → slightly higher score
+    sc += max(0, 20 - counts[provider_id]) * 0.01
 
-    return events
+    # Soft penalty if this assignment would hit the max block size (still allowed)
+    if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
+        sc -= 0.2
+
+    return sc
 
 
+for current_day in days:
+    for shift_key in stypes:
+        capacity = cap_map.get(shift_key, 1)
+        for _ in range(capacity):
+            # Find eligible providers using ok()
+            candidates = [prov for prov in providers if ok(prov, current_day, shift_key)]
+            if not candidates:
+                continue
 
+            # Pick the candidate with the best score
+            best_provider = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
+            sdef = sdefs[shift_key]
 
+            # Build the event for best_provider on current_day
+            start_dt = datetime.combine(current_day, parse_time(sdef["start"]))
+            end_dt = datetime.combine(current_day, parse_time(sdef["end"]))
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
+
+            event = SEvent(
+                id=str(uuid.uuid4()),
+                title=f"{sdef['label']} — {best_provider}",
+                start=start_dt,
+                end=end_dt,
+                backgroundColor=sdef.get("color"),
+                extendedProps={"provider": best_provider, "shift_key": shift_key, "label": sdef["label"]},
+            )
+            events.append(event)
+            counts[best_provider] += 1
+            if shift_key == "N12":
+                nights[best_provider] += 1
+
+return events
 
 # -------------------------
 # UI
@@ -1801,6 +1819,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
