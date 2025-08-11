@@ -326,7 +326,12 @@ def top_controls():
         if st.button("Go to Month"):
             st.session_state.month = date(int(year), int(month), 1)
     with c4:
-        st.session_state.highlight_provider = st.text_input("Highlight provider (initials)", value=st.session_state.highlight_provider)
+        provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()) if not st.session_state.providers_df.empty else []
+        options = ["(All providers)"] + provs
+        default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
+        idx = options.index(default) if default in options else 0
+        sel = st.selectbox("Highlight provider (initials)", options=options, index=idx)
+        st.session_state.highlight_provider = "" if sel == "(All providers)" else sel", value=st.session_state.highlight_provider)
 
     # Generate & Validate buttons
     g1, g2, g3, g4 = st.columns(4)
@@ -401,16 +406,13 @@ def render_calendar():
         return
 
     # Prepare events for FullCalendar
-    events = st.session_state.events
-
-    # Apply highlighting by adjusting opacity via event classNames
-    hi = st.session_state.highlight_provider.strip().upper()
-    for e in events:
-        prov = (e.get("extendedProps", {}) or {}).get("provider")
-        if hi and prov and prov != hi:
-            e["classNames"] = ["dim"]
-        else:
-            e.pop("classNames", None)
+    all_events = st.session_state.events
+    hi = (st.session_state.highlight_provider or "").strip().upper()
+    if hi:
+        # Show only the selected provider's shifts
+        events = [e for e in all_events if ((e.get("extendedProps") or {}).get("provider", "").strip().upper() == hi)]
+    else:
+        events = list(all_events)
 
     # FullCalendar options
     cal_options = {
@@ -506,24 +508,51 @@ def render_calendar():
         st.toast("Calendar updated", icon="✅")
 
 
-def events_table_and_export():
-    st.subheader("Events Table")
-    if not st.session_state.events:
-        st.info("No events yet.")
+def schedule_grid_view():
+    st.subheader("Monthly Grid — Shifts × Days")
+    if not st.session_state.shift_types:
+        st.info("No shift types configured.")
         return
-    df = pd.DataFrame(st.session_state.events)
-    # Flatten extendedProps for readability
-    ext = df.get("extendedProps").apply(lambda x: x or {})
-    df["provider"] = ext.apply(lambda d: d.get("provider"))
-    df["shift_key"] = ext.apply(lambda d: d.get("shift_key"))
-    df["label"] = ext.apply(lambda d: d.get("label"))
-    st.dataframe(df[["title", "start", "end", "provider", "shift_key", "label"]], use_container_width=True, height=300)
+    # Determine days for the selected month
+    year = st.session_state.month.year
+    month = st.session_state.month.month
+    days = make_month_days(year, month)
+    day_nums = [d.day for d in days]
 
-    # Export CSV
-    out = df.copy()
-    out["extendedProps"] = out["extendedProps"].apply(lambda d: json.dumps(d or {}))
-    csv = out.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", data=csv, file_name=f"schedule_{st.session_state.month:%Y_%m}.csv", mime="text/csv")
+    # Build row labels and mapping
+    stypes = st.session_state.shift_types
+    row_labels = [f"{s['key']} — {s['label']}" for s in stypes]
+    key_to_label = {s["key"]: f"{s['key']} — {s['label']}" for s in stypes}
+
+    # Initialize empty grid
+    import pandas as pd
+    grid = pd.DataFrame("", index=row_labels, columns=day_nums)
+
+    # Fill from events (ignore custom events without a shift_key)
+    for e in st.session_state.events:
+        ext = (e.get("extendedProps") or {})
+        skey = ext.get("shift_key")
+        if not skey or skey not in key_to_label:
+            continue
+        try:
+            d = pd.to_datetime(e["start"]).date()
+        except Exception:
+            continue
+        if d.year != year or d.month != month:
+            continue
+        col = d.day
+        row = key_to_label[skey]
+        prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
+        prev = grid.at[row, col]
+        grid.at[row, col] = (prev + ", " + prov) if isinstance(prev, str) and prev else prov
+
+    # Show grid
+    st.dataframe(grid, use_container_width=True, height=400)
+
+    # Optional: download grid as CSV
+    csv = grid.to_csv().encode("utf-8")
+    st.download_button("Download Grid CSV", data=csv, file_name=f"shift_grid_{st.session_state.month:%Y_%m}.csv", mime="text/csv")
+
 
 # -------------------------
 # App entry
@@ -534,7 +563,7 @@ def main():
     sidebar_inputs()
     top_controls()
     render_calendar()
-    events_table_and_export()
+    schedule_grid_view()
 
 if __name__ == "__main__":
     main()
