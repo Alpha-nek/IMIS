@@ -853,16 +853,6 @@ def sidebar_inputs():
                 st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
                 st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
 
-    with st.sidebar.expander("Replace entire list", expanded=False):
-        repl = st.text_area("Paste full roster (will replace all)", value="\n".join(current_list), key="replace_all_area")
-        if st.button("Replace list", key="btn_replace_all"):
-            new_roster = _normalize_initials_list(repl.replace(",", "\n").split())
-            if not new_roster:
-                st.warning("Replacement list is empty — keeping current roster.")
-            else:
-                st.session_state.providers_df = pd.DataFrame({"initials": new_roster})
-                st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in new_roster}
-                st.toast("Provider roster replaced.", icon="♻️")
 
     # ===================== Rules =====================
     st.sidebar.subheader("Rules")
@@ -912,48 +902,7 @@ def sidebar_inputs():
         )
     st.session_state["shift_capacity"] = cap_map
 
-    # ===================== Provider shift eligibility =====================
-    st.sidebar.subheader("Provider shift eligibility")
-    with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
-        label_for_key = {s["key"]: s["label"] for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())}
-        key_for_label = {v: k for k, v in label_for_key.items()}
-        all_shift_labels = list(label_for_key.values())
-
-        roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
-        if not roster:
-            st.caption("Add providers to configure eligibility.")
-        else:
-            filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
-            view_roster = [p for p in roster if filt in p] if filt else roster
-            st.caption("Tip: leave a provider empty to allow ALL shift types for that provider.")
-
-            for init in view_roster:
-                allowed_keys = st.session_state.provider_caps.get(init, None)
-                default_labels = [label_for_key[k] for k in (allowed_keys or []) if k in label_for_key]
-
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    selected_labels = st.multiselect(
-                        init,
-                        options=all_shift_labels,
-                        default=default_labels,
-                        key=f"elig_{init}"
-                    )
-                with c2:
-                    if st.button("All shifts", key=f"elig_all_{init}", help="Remove restrictions for this provider"):
-                        if init in st.session_state.provider_caps:
-                            del st.session_state.provider_caps[init]
-                        st.session_state[f"elig_{init}"] = []
-                        st.experimental_rerun()
-
-                # Persist: empty or all selected => no restriction
-                if len(selected_labels) == 0 or len(selected_labels) == len(all_shift_labels):
-                    if init in st.session_state.provider_caps:
-                        del st.session_state.provider_caps[init]
-                else:
-                    st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected_labels]
-
-
+   
               
 @st.cache_data
 def make_month_days(year: int, month: int) -> List[date]:
@@ -1199,77 +1148,6 @@ def engine_panel():
                 else:
                     st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
 
-    # ===== Actions =====
-    st.subheader("Actions")
-
-    # Month nav row
-    nav_prev, nav_label, nav_next = st.columns([1, 2, 1])
-    with nav_prev:
-        if st.button("◀ Prev month"):
-            m = st.session_state.month
-            y = m.year - (1 if m.month == 1 else 0)
-            mm = 12 if m.month == 1 else m.month - 1
-            st.session_state.month = date(y, mm, 1)
-    with nav_label:
-        st.markdown(f"<div style='text-align:center;font-weight:600'>{st.session_state.month:%B %Y}</div>", unsafe_allow_html=True)
-    with nav_next:
-        if st.button("Next month ▶"):
-            m = st.session_state.month
-            y = m.year + (1 if m.month == 12 else 0)
-            mm = 1 if m.month == 12 else m.month + 1
-            st.session_state.month = date(y, mm, 1)
-
-    # Action buttons row (no JSON download)
-    act1, act2, act3 = st.columns(3)
-    with act1:
-        if st.button("Generate Draft from Rules"):
-            providers = st.session_state.providers_df["initials"].astype(str).tolist()
-            days = make_month_days(st.session_state.month.year, st.session_state.month.month)
-            evs = assign_greedy(providers, days, st.session_state.shift_types, RuleConfig(**st.session_state.rules))
-            # preserve events outside this month
-            def is_this_month(e):
-                try:
-                    d = pd.to_datetime(e["start"]).date()
-                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
-                except Exception:
-                    return False
-            keep_others = [E for E in st.session_state.events if not is_this_month(E)]
-            new_json = [e.to_json_event() if hasattr(e, "to_json_event") else e for e in evs]
-            st.session_state.events = events_for_calendar(keep_others + new_json)
-            st.success("Draft generated.")
-    with act2:
-        if st.button("Validate schedule"):
-            # Convert JSON events to SEvent if needed
-            def _to_sevent(E):
-                if isinstance(E, dict):
-                    ext = E.get("extendedProps") or {}
-                    return SEvent(
-                        id=E.get("id", ""),
-                        title=E.get("title", ""),
-                        start=pd.to_datetime(E["start"]).to_pydatetime(),
-                        end=pd.to_datetime(E["end"]).to_pydatetime(),
-                        backgroundColor=E.get("backgroundColor"),
-                        extendedProps={"provider": ext.get("provider"), "shift_key": ext.get("shift_key"), "label": ext.get("label")},
-                    )
-                return E
-            events_obj = [_to_sevent(E) for E in st.session_state.events]
-            viol = validate_rules(events_obj, RuleConfig(**st.session_state.rules))
-            if not viol:
-                st.success("No violations found.")
-            else:
-                for who, msgs in viol.items():
-                    st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
-    with act3:
-        if st.button("Clear month"):
-            def is_this_month(e):
-                try:
-                    d = pd.to_datetime(e["start"]).date()
-                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
-                except Exception:
-                    return False
-            st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
-            st.toast("Cleared this month.", icon="🧹")
-
 def google_calendar_panel():
     st.subheader("Google Calendar Sync")
 
@@ -1499,6 +1377,95 @@ def render_calendar():
     if changed:
         st.toast("Calendar updated", icon="✅")
 
+def middle_actions_panel():
+    """Month nav + generate/validate/clear, shown under the calendar (middle column)."""
+    import pandas as pd
+
+    st.subheader("Actions")
+
+    # Month navigation row
+    nav_prev, nav_label, nav_next = st.columns([1, 2, 1])
+    with nav_prev:
+        if st.button("◀ Prev month", key="mid_prev_month"):
+            m = st.session_state.month
+            y = m.year - (1 if m.month == 1 else 0)
+            mm = 12 if m.month == 1 else m.month - 1
+            st.session_state.month = date(y, mm, 1)
+    with nav_label:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:600'>{st.session_state.month:%B %Y}</div>",
+            unsafe_allow_html=True
+        )
+    with nav_next:
+        if st.button("Next month ▶", key="mid_next_month"):
+            m = st.session_state.month
+            y = m.year + (1 if m.month == 12 else 0)
+            mm = 1 if m.month == 12 else m.month + 1
+            st.session_state.month = date(y, mm, 1)
+
+    # Action buttons row
+    act1, act2, act3 = st.columns(3)
+    with act1:
+        if st.button("Generate Draft from Rules", key="mid_generate"):
+            providers = st.session_state.providers_df["initials"].astype(str).tolist()
+            if not providers:
+                st.warning("Add providers first.")
+            else:
+                rules = RuleConfig(**st.session_state.rules)
+                days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+                evs = assign_greedy(providers, days, st.session_state.shift_types, rules)
+
+                # preserve events outside this month
+                def is_this_month(e):
+                    try:
+                        d = pd.to_datetime(e["start"]).date()
+                        return d.year == st.session_state.month.year and d.month == st.session_state.month.month
+                    except Exception:
+                        return False
+
+                keep_others = [E for E in st.session_state.events if not is_this_month(E)]
+                new_json = [e.to_fc() if hasattr(e, "to_fc") else e for e in evs]
+                st.session_state.events = events_for_calendar(keep_others + new_json)
+                st.success("Draft generated.")
+
+    with act2:
+        if st.button("Validate schedule", key="mid_validate"):
+            # Convert JSON events to SEvent if needed
+            def _to_sevent(E):
+                if isinstance(E, dict):
+                    ext = E.get("extendedProps") or {}
+                    return SEvent(
+                        id=E.get("id", ""),
+                        title=E.get("title", ""),
+                        start=pd.to_datetime(E["start"]).to_pydatetime(),
+                        end=pd.to_datetime(E["end"]).to_pydatetime(),
+                        backgroundColor=E.get("backgroundColor"),
+                        extendedProps={
+                            "provider": ext.get("provider"),
+                            "shift_key": ext.get("shift_key"),
+                            "label": ext.get("label"),
+                        },
+                    )
+                return E
+
+            events_obj = [_to_sevent(E) for E in st.session_state.events]
+            viol = validate_rules(events_obj, RuleConfig(**st.session_state.rules))
+            if not viol:
+                st.success("No violations found.")
+            else:
+                for who, msgs in viol.items():
+                    st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
+
+    with act3:
+        if st.button("Clear month", key="mid_clear"):
+            def is_this_month(e):
+                try:
+                    d = pd.to_datetime(e["start"]).date()
+                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
+                except Exception:
+                    return False
+            st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
+            st.toast("Cleared this month.", icon="🧹")
 
 # provider rules section
 # make sure this version is in your codebase
@@ -2013,16 +1980,16 @@ def main():
     init_session_state()
     left_col, mid_col, right_col = st.columns([3,5,3], gap="large")
     with left_col:
-        engine_panel()          # your existing engine UI
-        st.markdown("---")
-        google_calendar_panel() # ← add this line
+        engine_panel()                 # (now without bulk eligibility + actions)
     with mid_col:
         render_calendar()
+        middle_actions_panel()         # ← new spot for actions
         schedule_grid_view()
     with right_col:
         provider_rules_panel()
 
 main()
+
 
 
 
