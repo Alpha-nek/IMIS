@@ -630,31 +630,89 @@ def render_calendar():
 
 
 def schedule_grid_view():
-    st.subheader("Monthly Grid — Shifts × Days (Editable)")
+    st.subheader("Monthly Grid — Shifts × Days (one provider per cell)")
+
     if not st.session_state.shift_types:
         st.info("No shift types configured.")
         return
 
     import re
 
-    # Month context
+    # --- Helpers ---
+    def tod_group_and_order(skey: str, sdef: Dict[str, Any]):
+        """
+        Map shift types to a time-of-day group and sort order.
+        Uses known keys when available; falls back to start time.
+        """
+        start = parse_time(sdef["start"])
+        if skey in ("R12", "A12"):
+            return "Day (07:00–19:00)", 1
+        if skey == "A10":
+            return "Evening (10:00–22:00)", 2
+        if skey == "N12":
+            return "Night (19:00–07:00)", 3
+        if skey == "NB":
+            return "Late Night (23:00–03:00)", 4
+        # Fallback by hour if new shift types are added
+        if 5 <= start.hour < 12:
+            return "Day", 1
+        if 12 <= start.hour < 18:
+            return "Evening", 2
+        return "Night", 3
+
+    # --- Month context ---
     year = st.session_state.month.year
     month = st.session_state.month.month
     days = make_month_days(year, month)
     day_nums = [d.day for d in days]
+    col_labels = [str(n) for n in day_nums]
 
-    # Shift rows
+    # --- Build row map: multiple rows per shift type (capacity slots) ---
     stypes = st.session_state.shift_types
-    key_to_label = {s["key"]: f"{s['key']} — {s['label']}" for s in stypes}
-    label_to_key = {v: k for k, v in key_to_label.items()}
-    row_labels = [key_to_label[s["key"]] for s in stypes]
+    cap_map = st.session_state.get("shift_capacity", {}) or {}
 
-    # Build grid from existing events
-    grid = pd.DataFrame("", index=row_labels, columns=day_nums)
-    for e in st.session_state.events:
+    # row_meta: list of dicts with metadata for each visible row
+    row_meta = []
+    for s in stypes:
+        skey = s["key"]
+        sdef = s
+        cap = int(cap_map.get(skey, 1))
+        group_label, group_order = tod_group_and_order(skey, sdef)
+        for slot in range(1, cap + 1):
+            row_label = f"{skey} — {sdef['label']} [{slot}]"
+            row_meta.append({
+                "row_label": row_label,
+                "skey": skey,
+                "sdef": sdef,
+                "slot": slot,
+                "group": group_label,
+                "gorder": group_order,
+            })
+
+    # Sort rows by time-of-day group and then by start time
+    def start_minutes(sdef):
+        t = parse_time(sdef["start"])
+        return t.hour * 60 + t.minute
+
+    row_meta.sort(key=lambda r: (r["gorder"], start_minutes(r["sdef"]), r["skey"], r["slot"]))
+
+    # Build a MultiIndex (group, row) for nicer grouping in the editor
+    import pandas as pd
+    index_tuples = [(rm["group"], rm["row_label"]) for rm in row_meta]
+    idx = pd.MultiIndex.from_tuples(index_tuples, names=["Time of Day", "Shift / Slot"])
+    grid = pd.DataFrame("", index=idx, columns=col_labels)
+
+    # --- Fill grid from existing events (first empty slot for that shift/day) ---
+    events = st.session_state.events
+    # Quick index: rows for a given shift key in order
+    rows_for_key = {}
+    for rm in row_meta:
+        rows_for_key.setdefault(rm["skey"], []).append((rm["group"], rm["row_label"]))
+
+    for e in events:
         ext = (e.get("extendedProps") or {})
         skey = ext.get("shift_key")
-        if not skey or skey not in key_to_label:
+        if not skey:
             continue
         try:
             d = pd.to_datetime(e["start"]).date()
@@ -662,36 +720,54 @@ def schedule_grid_view():
             continue
         if d.year != year or d.month != month:
             continue
+
         prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
-        r = key_to_label[skey]
-        c = d.day
-        prev = grid.at[r, c]
-        grid.at[r, c] = (prev + ", " + prov) if prev else prov
+        day_col = str(d.day)
 
-    # Helper: show valid providers
-    valid_provs = sorted(
+        # Find the first empty slot (row) for this shift key on that day
+        for grp_label, row_label in rows_for_key.get(skey, []):
+            if grid.at[(grp_label, row_label), day_col] == "":
+                grid.at[(grp_label, row_label), day_col] = prov
+                break
+        # If all slots full, silently ignore (grid reflects capacities)
+
+    # --- Valid provider list for dropdowns ---
+    valid_provs = (
         st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
-    ) if not st.session_state.providers_df.empty else []
-    st.caption("Edit cells with provider initials (comma-separated for multiple).")
-    if valid_provs:
-        st.write("**Valid provider initials:**", ", ".join(valid_provs))
+        if not st.session_state.providers_df.empty else []
+    )
+    valid_provs = sorted(valid_provs)
 
-    # Make it editable
+    st.caption("Each cell holds one provider (leave blank for unassigned). "
+               "Use sidebar ‘Daily shift capacities’ to change the number of rows per shift.")
+
+    # Configure each day column as a selectbox for cleaner entries
+    try:
+        col_config = {
+            c: st.column_config.SelectboxColumn(options=[""] + valid_provs,
+                                                help=f"Assignments for day {c}")
+            for c in col_labels
+        }
+    except Exception:
+        col_config = None  # Streamlit < 1.32 fallback
+
+    # --- Editable grid ---
     edited_grid = st.data_editor(
         grid,
         num_rows="fixed",
         use_container_width=True,
-        height=480,
+        height=560,
+        column_config=col_config,
         key="grid_editor",
     )
 
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("Apply grid to calendar"):
-            # Lookups
+            # Shift lookups
             sdefs = {s["key"]: s for s in st.session_state.shift_types}
 
-            # Map old comments by (date, shift_key, provider) so we can reattach after rebuild
+            # Keep comments mapped by (date, shift_key, provider)
             comments_by_key = {}
             for e in st.session_state.events:
                 ext = (e.get("extendedProps") or {})
@@ -708,7 +784,7 @@ def schedule_grid_view():
                     if e["id"] in st.session_state.comments:
                         comments_by_key[k] = list(st.session_state.comments.get(e["id"], []))
 
-            # Keep events that are NOT part of this month's shift grid
+            # Preserve events outside this month or non-shift events
             def is_grid_event(E: Dict[str, Any]) -> bool:
                 ext = (E.get("extendedProps") or {})
                 skey = ext.get("shift_key")
@@ -722,61 +798,73 @@ def schedule_grid_view():
 
             preserved = [E for E in st.session_state.events if not is_grid_event(E)]
 
-            # Rebuild month events from edited grid
+            # Rebuild events from the edited grid
             new_events = []
-            for row_label in edited_grid.index:
-                skey = label_to_key.get(row_label)
-                if not skey:
+            seen_day_provider = set()  # enforce: one shift per provider per day
+            conflicts = []  # collect duplicates we skip
+
+            for (grp_label, row_label), row_vals in edited_grid.iterrows():
+                # Identify the shift key from the row label "KEY — Label [slot]"
+                # This is robust to label text since we split by " — "
+                try:
+                    skey = row_label.split(" — ", 1)[0].strip()
+                except Exception:
                     continue
-                sdef = sdefs[skey]
+                sdef = sdefs.get(skey)
+                if not sdef:
+                    continue
+
                 for col in edited_grid.columns:
-                    cell = edited_grid.at[row_label, col]
-                    if cell is None:
-                        cell = ""
-                    if not isinstance(cell, str):
-                        cell = str(cell)
-
-                    # Split tokens (commas, semicolons, or multiple spaces)
-                    tokens = [t.strip().upper() for t in re.split(r"[,;/]+|\s{2,}", cell) if t.strip()]
-                    if len(tokens) == 0 and cell.strip():
-                        tokens = [cell.strip().upper()]  # single value without commas
-
+                    prov = str(row_vals[col]).strip().upper() if row_vals[col] is not None else ""
+                    if not prov:
+                        continue
                     day_date = date(year, month, int(col))
 
-                    for prov in tokens:
-                        # Build event datetimes (handle overnight)
-                        def _parse(hhmm: str):
-                            hh, mm = hhmm.split(":")
-                            return time(int(hh), int(mm))
-                        start_dt = datetime.combine(day_date, _parse(sdef["start"]))
-                        end_dt = datetime.combine(day_date, _parse(sdef["end"]))
-                        if end_dt <= start_dt:
-                            end_dt += timedelta(days=1)
+                    # Enforce one shift per provider per day (skip duplicates)
+                    key_dp = (day_date, prov)
+                    if key_dp in seen_day_provider:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
+                        continue
+                    seen_day_provider.add(key_dp)
 
-                        eid = str(uuid.uuid4())
-                        ev = {
-                            "id": eid,
-                            "title": f"{sdef['label']} — {prov if prov else 'UNASSIGNED'}",
-                            "start": start_dt.isoformat(),
-                            "end": end_dt.isoformat(),
-                            "allDay": False,
-                            "backgroundColor": sdef.get("color"),
-                            "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
-                        }
-                        new_events.append(ev)
+                    # Build start/end datetimes
+                    def _parse(hhmm: str):
+                        hh, mm = hhmm.split(":")
+                        return time(int(hh), int(mm))
 
-                        # Reattach comments if we had any for this (date, shift, provider)
-                        k = (day_date, skey, prov)
-                        if k in comments_by_key:
-                            st.session_state.comments[eid] = comments_by_key[k]
+                    start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+                    end_dt = datetime.combine(day_date, _parse(sdef["end"]))
+                    if end_dt <= start_dt:
+                        end_dt += timedelta(days=1)
+
+                    eid = str(uuid.uuid4())
+                    ev = {
+                        "id": eid,
+                        "title": f"{sdef['label']} — {prov}",
+                        "start": start_dt.isoformat(),
+                        "end": end_dt.isoformat(),
+                        "allDay": False,
+                        "backgroundColor": sdef.get("color"),
+                        "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+                    }
+                    new_events.append(ev)
+
+                    # Reattach comments if match
+                    k = (day_date, skey, prov)
+                    if k in comments_by_key:
+                        st.session_state.comments[eid] = comments_by_key[k]
 
             st.session_state.events = preserved + new_events
-            st.success("Applied grid to calendar.")
+
+            if conflicts:
+                st.warning("Some duplicates were skipped to enforce one shift per provider/day:\n- " +
+                           "\n- ".join(conflicts))
+            else:
+                st.success("Applied grid to calendar.")
 
     with c2:
         if st.button("Reload grid from calendar"):
             st.experimental_rerun()
-
 
 # -------------------------
 # App entry
@@ -791,3 +879,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
