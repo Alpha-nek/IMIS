@@ -95,6 +95,68 @@ class SEvent(BaseModel):
         d["end"] = self.end.isoformat()
         return d
 
+import json
+from datetime import datetime
+
+def _ensure_iso(v):
+    if isinstance(v, str):
+        return v
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    if hasattr(v, "to_pydatetime"):
+        return v.to_pydatetime().isoformat()
+    return str(v) if v is not None else None
+
+def _event_to_dict(e):
+    # Normalize any event-like object to a plain dict with ISO datetimes
+    if isinstance(e, dict):
+        d = dict(e)
+    elif hasattr(e, "to_json_event"):
+        d = dict(e.to_json_event())
+    else:
+        d = {
+            "id": getattr(e, "id", None),
+            "title": getattr(e, "title", ""),
+            "start": getattr(getattr(e, "start", None), "isoformat", lambda: None)(),
+            "end": getattr(getattr(e, "end", None), "isoformat", lambda: None)(),
+            "backgroundColor": getattr(e, "backgroundColor", None),
+            "extendedProps": getattr(e, "extendedProps", {}) or {},
+        }
+
+    d["title"] = str(d.get("title", ""))
+    d["start"] = _ensure_iso(d.get("start"))
+    d["end"]   = _ensure_iso(d.get("end"))
+    d["allDay"] = bool(d.get("allDay", False))
+    if d.get("backgroundColor") is not None:
+        d["backgroundColor"] = str(d["backgroundColor"])
+
+    # extendedProps must be a JSON-safe dict
+    ext = d.get("extendedProps") or {}
+    if not isinstance(ext, dict):
+        ext = {}
+    ext2 = {}
+    for k, v in ext.items():
+        try:
+            json.dumps(v)
+            ext2[str(k)] = v
+        except Exception:
+            ext2[str(k)] = str(v)
+    d["extendedProps"] = ext2
+
+    # Drop events missing required fields
+    if not d.get("start") or not d.get("end"):
+        return None
+    return d
+
+def events_for_calendar(raw_events):
+    out = []
+    for e in (raw_events or []):
+        d = _event_to_dict(e)
+        if d is not None:
+            out.append(d)
+    return out
+
+
 # -------------------------
 # State helpers
 # -------------------------
@@ -524,7 +586,7 @@ def sidebar_inputs():
         else:
             filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
             view_roster = [p for p in roster if filt in p] if filt else roster
-            st.caption("Tip: leave a provider empty (or select all shifts) to allow ALL shift types for that provider.")
+            st.caption("Tip: leave a provider empty to allow ALL shift types for that provider.")
 
             for init in view_roster:
                 allowed_keys = st.session_state.provider_caps.get(init, None)
@@ -791,7 +853,7 @@ def engine_panel():
                 for who, msgs in viol.items():
                     st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
     with cc3:
-        ccc1, ccc2 = st.columns(2)
+        ccc1 = st.columns(1)
         with ccc1:
             if st.button("Clear month"):
                 def is_this_month(e):
@@ -801,14 +863,7 @@ def engine_panel():
                     except Exception:
                         return False
                 st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
-                st.toast("Cleared this month.", icon="🧹")
-        with ccc2:
-            safe_events = _serialize_events_for_download(st.session_state.events)
-            st.download_button(
-                "Download JSON",
-                data=json.dumps(safe_events, indent=2),
-                file_name=f"schedule_{st.session_state.month:%Y_%m}.json"
-            )
+                st.toast("Cleared this month.", icon="🧹") )
 
 
 
@@ -866,10 +921,15 @@ def render_calendar():
     )
 
     state = calendar(
-        events=events,
-        options=cal_options,
-        custom_css=".fc {font-family: Inter, system-ui, sans-serif;} .fc-daygrid-event {border-radius: 8px;}",
-        key="calendar",
+        events = events_for_calendar(st.session_state.get("events", []))
+
+# (optionally filter/highlight by the global provider)
+hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+if hi:
+    # If you filter for the calendar view:
+    events = [e for e in events if (e.get("extendedProps", {}).get("provider","") or "").upper() == hi]
+    # Or just pass all events and rely on coloring — your choice.
+
     )
 
     # Handle interactions
@@ -1174,6 +1234,8 @@ def schedule_grid_view():
 
         # Apply back to events
         if st.button("Apply grid to calendar"):
+            st.session_state.events = events_for_calendar(st.session_state.events)
+
             sdefs = {s["key"]: s for s in st.session_state.shift_types}
 
             # keep comments by (date, shift_key, provider)
@@ -1264,6 +1326,8 @@ def schedule_grid_view():
 
 def main():
     init_session_state()
+    st.session_state.events = events_for_calendar(st.session_state.get("events", []))
+
 
     # Three columns across the whole page
     left_col, mid_col, right_col = st.columns([3, 5, 3], gap="large")
@@ -1279,6 +1343,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
