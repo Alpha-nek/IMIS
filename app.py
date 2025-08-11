@@ -48,6 +48,18 @@ DEFAULT_SHIFT_TYPES = [
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+# ----- Default provider roster -----
+PROVIDER_INITIALS_DEFAULT = [
+    "AA","AD","AM","DN","FS","JL","JM","JT","KA","LN","MO","SM","OI","NP","AR","JA","PR","UN",
+    "DP","FY","YL","RR","SD","JK","NS","PD","AB","KF","AL","GB","KD","NG","GI","VT","DI","YD",
+    "HS","YA","NM","EM","SS","YS","HW","AH","RJ","SI","FH","KP","EB","RS","RG","CJ","MS","AT",
+    "YH","XL","NO","MA","LM","MQ","CM","AI"
+]
+
+def _normalize_initials_list(items):
+    return sorted({str(x).strip().upper() for x in items if str(x).strip()})
+
+
 class RuleConfig(BaseModel):
     max_shifts_per_provider: int = Field(12, ge=1, le=31)
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
@@ -86,12 +98,29 @@ class SEvent(BaseModel):
 
 def init_session_state():
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    st.session_state.setdefault("providers_df", pd.DataFrame(columns=["initials"]))
-    st.session_state.setdefault("events", [])  # list of dicts (FullCalendar JSON)
-    st.session_state.setdefault("comments", {})  # event_id -> list[str]
+    st.session_state.setdefault("events", [])
+    st.session_state.setdefault("comments", {})
     st.session_state.setdefault("month", date.today().replace(day=1))
     st.session_state.setdefault("rules", RuleConfig().dict())
     st.session_state.setdefault("highlight_provider", "")
+
+    # Provider roster (preloaded with your list)
+    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
+        st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
+    else:
+        # Ensure normalization if present
+        df = st.session_state["providers_df"]
+        if df.empty:
+            st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
+        else:
+            st.session_state["providers_df"] = pd.DataFrame({
+                "initials": _normalize_initials_list(df["initials"].tolist())
+            })
+
+    # Eligibility & capacities defaults
+    st.session_state.setdefault("provider_caps", {})  # initials -> allowed shift keys
+    st.session_state.setdefault("shift_capacity", {"N12": 1, "NB": 1, "R12": 1, "A12": 1, "A10": 2})
+
 
 # -------------------------
 # Scheduling Engine (Greedy Draft)
@@ -316,80 +345,87 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 def sidebar_inputs():
     st.sidebar.header("Providers & Rules")
 
-    # --- Ensure defaults exist ---
-    st.session_state.setdefault("providers_df", pd.DataFrame(columns=["initials"]))
-    st.session_state.setdefault("provider_caps", {})  # initials -> list of allowed shift keys
-    st.session_state.setdefault("shift_capacity", {"N12": 1, "NB": 1, "R12": 1, "A12": 1, "A10": 2})
-    st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    st.session_state.setdefault("rules", RuleConfig().dict())
-
-    # --- Providers ---
+    # -------- Providers (manage in-app) --------
     st.sidebar.subheader("Providers")
-    prov_upload = st.sidebar.file_uploader("Upload CSV with 'initials' column", type=["csv"], key="prov_up")
-    if prov_upload:
-        try:
-            df = pd.read_csv(prov_upload)
-            if "initials" not in df.columns:
-                st.sidebar.error("CSV must include an 'initials' column.")
+
+    # Show current count
+    current_list = st.session_state.providers_df["initials"].astype(str).tolist()
+    st.sidebar.caption(f"{len(current_list)} providers loaded.")
+
+    # Add new provider(s)
+    with st.sidebar.expander("Add providers", expanded=False):
+        new_one = st.text_input("Add single provider (initials)", key="add_single_init")
+        c1, c2 = st.columns([1,1])
+        with c1:
+            if st.button("Add", key="btn_add_single"):
+                cand = _normalize_initials_list([new_one])
+                if not cand:
+                    st.warning("Enter initials to add.")
+                else:
+                    initial = list(cand)[0]
+                    if initial in current_list:
+                        st.info(f"{initial} is already in the list.")
+                    else:
+                        st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(current_list + [initial])})
+                        st.toast(f"Added {initial}", icon="✅")
+
+        st.markdown("---")
+        batch = st.text_area("Add multiple (comma/space/newline separated)", key="add_batch_area")
+        if st.button("Add batch", key="btn_add_batch"):
+            tokens = _normalize_initials_list(batch.replace(",", "\n").split())
+            if not tokens:
+                st.warning("Nothing to add.")
             else:
-                df_proc = pd.DataFrame({
-                    "initials": df["initials"].astype(str).str.upper().str.strip()
-                })
-                st.session_state.providers_df = (
-                    df_proc.drop_duplicates().sort_values("initials").reset_index(drop=True)
-                )
-        except Exception as e:
-            st.sidebar.error(f"Error reading CSV: {e}")
+                merged = _normalize_initials_list(current_list + list(tokens))
+                st.session_state.providers_df = pd.DataFrame({"initials": merged})
+                st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
 
-    # Text area to paste/override initials
-    init_list = (
-        st.session_state.providers_df["initials"].astype(str).tolist()
-        if not st.session_state.providers_df.empty else []
-    )
-    pasted = st.sidebar.text_area(
-        "Initials",
-        value="\n".join(init_list),
-        help="Comma or newline separated (e.g., MS, SI, CM)."
-    )
-    if st.sidebar.button("Use pasted initials"):
-        tokens = [t.strip().upper() for t in pasted.replace(",", "\n").splitlines() if t.strip()]
-        st.session_state.providers_df = pd.DataFrame({"initials": sorted(set(tokens))})
+    # Remove providers
+    with st.sidebar.expander("Remove providers", expanded=False):
+        to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
+        if st.button("Remove selected", key="btn_rm"):
+            if not to_remove:
+                st.info("No providers selected.")
+            else:
+                remaining = [p for p in current_list if p not in set(to_remove)]
+                st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
+                # prune eligibility map
+                st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
+                st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
 
-    if st.session_state.providers_df.empty:
-        st.sidebar.caption("No providers loaded yet.")
-    else:
-        st.sidebar.caption(f"{len(st.session_state.providers_df)} providers loaded.")
+    # Optional: bulk replace entire list
+    with st.sidebar.expander("Replace entire list", expanded=False):
+        repl = st.text_area("Paste full roster (will replace all)", value="\n".join(current_list), key="replace_all_area")
+        if st.button("Replace list", key="btn_replace_all"):
+            new_roster = _normalize_initials_list(repl.replace(",", "\n").split())
+            if not new_roster:
+                st.warning("Replacement list is empty — keeping current roster.")
+            else:
+                st.session_state.providers_df = pd.DataFrame({"initials": new_roster})
+                st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in new_roster}
+                st.toast("Provider roster replaced.", icon="♻️")
 
-    # --- Rules ---
+    # -------- Rules --------
     st.sidebar.subheader("Rules")
     rc = RuleConfig(**st.session_state.rules)
-    rc.max_shifts_per_provider = st.sidebar.number_input(
-        "Max shifts/provider", min_value=1, max_value=31, value=int(rc.max_shifts_per_provider)
-    )
-    rc.min_rest_hours_between_shifts = st.sidebar.number_input(
-        "Min rest hours between shifts", min_value=0, max_value=48, value=int(rc.min_rest_hours_between_shifts)
-    )
-    rc.min_block_size = st.sidebar.number_input(
-        "Preferred block size (days)", min_value=1, max_value=7, value=int(rc.min_block_size)
-    )
-    rc.require_at_least_one_weekend = st.sidebar.checkbox(
-        "Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend)
-    )
-    # Optional max nights
+    rc.max_shifts_per_provider = st.sidebar.number_input("Max shifts/provider", 1, 31, value=int(rc.max_shifts_per_provider))
+    rc.min_rest_hours_between_shifts = st.sidebar.number_input("Min rest hours between shifts", 0, 48, value=int(rc.min_rest_hours_between_shifts))
+    rc.min_block_size = st.sidebar.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
+    rc.require_at_least_one_weekend = st.sidebar.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
+
     limit_nights = st.sidebar.checkbox(
         "Limit 7pm–7am (N12) nights per provider",
         value=st.session_state.rules.get("max_nights_per_provider", 6) is not None
     )
     if limit_nights:
         default_nights = int(st.session_state.rules.get("max_nights_per_provider", 6) or 0)
-        rc.max_nights_per_provider = st.sidebar.number_input(
-            "Max nights/provider", min_value=0, max_value=31, value=default_nights
-        )
+        rc.max_nights_per_provider = st.sidebar.number_input("Max nights/provider", 0, 31, value=default_nights)
     else:
         rc.max_nights_per_provider = None
+
     st.session_state.rules = rc.dict()
 
-    # --- Shift Types editor ---
+    # -------- Shift Types editor --------
     st.sidebar.subheader("Shift Types")
     st.sidebar.caption("Edit labels/times; colors only affect calendar display.")
     for i, s in enumerate(st.session_state.shift_types):
@@ -399,27 +435,27 @@ def sidebar_inputs():
             s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
             s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
 
-    # --- Daily shift capacities (A10=2, NB=1 by default) ---
+    # -------- Daily shift capacities (A10=2, NB=1 by default) --------
     st.sidebar.subheader("Daily shift capacities")
     cap_map = dict(st.session_state.shift_capacity)
     for s in st.session_state.shift_types:
-        key = s["key"]
-        label = s["label"]
+        key = s["key"]; label = s["label"]
         default_cap = int(cap_map.get(key, 2 if key == "A10" else 1))
         cap_map[key] = int(st.sidebar.number_input(
-            f"{label} ({key}) capacity/day", min_value=0, max_value=10, value=default_cap, key=f"cap_{key}"
+            f"{label} ({key}) capacity/day", 0, 10, value=default_cap, key=f"cap_{key}"
         ))
     st.session_state.shift_capacity = cap_map
 
-    # --- Provider shift eligibility ---
+    # -------- Provider shift eligibility --------
     st.sidebar.subheader("Provider shift eligibility")
     with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
-        if st.session_state.providers_df.empty:
-            st.caption("Upload or paste providers to configure eligibility.")
+        label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+        key_for_label = {v: k for k, v in label_for_key.items()}
+        roster = st.session_state.providers_df["initials"].tolist()
+        if not roster:
+            st.caption("Add providers to configure eligibility.")
         else:
-            label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-            key_for_label = {v: k for k, v in label_for_key.items()}
-            for init in st.session_state.providers_df["initials"].tolist():
+            for init in roster:
                 allowed_keys = st.session_state.provider_caps.get(init, [])
                 default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
                 selected = st.multiselect(
@@ -429,6 +465,7 @@ def sidebar_inputs():
                     key=f"elig_{init}"
                 )
                 st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
+
               
 @st.cache_data
 def make_month_days(year: int, month: int) -> List[date]:
@@ -854,5 +891,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
