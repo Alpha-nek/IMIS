@@ -971,12 +971,6 @@ def engine_panel():
     rc = RuleConfig(**st.session_state.rules)
     rc.max_shifts_per_provider = st.number_input("Max shifts/provider", 1, 50, value=int(rc.max_shifts_per_provider))
     # Minimum shifts per provider (default 12)
-    # Minimum shifts (already added earlier)
-    rc.min_shifts_per_provider = st.number_input(
-        "Min shifts/provider", min_value=0, max_value=50,
-        value=int(getattr(rc, "min_shifts_per_provider", 12))
-    )
-    
 
     # Max shifts per block (0 = no max). Default is 7.
     val_mbx = st.session_state.get("rules", {}).get("max_block_size", 7)
@@ -1663,6 +1657,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
