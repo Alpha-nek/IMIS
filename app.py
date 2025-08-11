@@ -64,13 +64,22 @@ def _normalize_initials_list(items):
 
 
 class RuleConfig(BaseModel):
+    
+from typing import Optional
+
+class RuleConfig(BaseModel):   # or dataclass, same idea
+    # ... existing fields ...
+    min_shifts_per_provider: int = 12
+    min_block_size: int = 3
+    max_block_size: Optional[int] = 7   # default cap is 7 shifts per block
     max_shifts_per_provider: int = Field(15, ge=1, le=31)
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
-    min_shifts_per_provider: int = 12
     min_block_size: int = Field(3, ge=1, le=7, description="Minimum consecutive days in a block when possible")
     require_at_least_one_weekend: bool = True
     # Optional caps per shift type
     max_nights_per_provider: Optional[int] = Field(6, ge=0, le=31)
+    # add near your other fields
+
 
 class Provider(BaseModel):
     initials: str
@@ -236,6 +245,10 @@ def init_session_state():
             st.session_state["providers_df"] = pd.DataFrame({
                 "initials": _normalize_initials_list(df["initials"].tolist())
             })
+    st.session_state.setdefault("rules", RuleConfig().dict())
+# migrate if missing/None
+    if st.session_state["rules"].get("max_block_size") is None:
+        st.session_state["rules"]["max_block_size"] = 7
 
     # Eligibility & capacities defaults
     
@@ -473,10 +486,10 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     nights = {p: 0 for p in providers}
     events: List[SEvent] = []
 
-    # Month-aware defaults
     base_max = recommended_max_shifts_for_month()
     min_required = int(getattr(rules, "min_shifts_per_provider", 12))
     mbs = int(getattr(rules, "min_block_size", 1) or 1)
+    mbx = getattr(rules, "max_block_size", None)
 
     def day_shift_count(d: date, skey: str) -> int:
         return sum(1 for e in events if e.extendedProps.get("shift_key") == skey and e.start.date() == d)
@@ -484,27 +497,50 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     def provider_has_shift_on_day(p: str, d: date) -> bool:
         return any(e.extendedProps.get("provider") == p and e.start.date() == d for e in events)
 
-    def provider_days(p: str) -> List[date]:
-        return sorted({e.start.date() for e in events if e.extendedProps.get("provider") == p})
+    def provider_days(p: str) -> Set[date]:
+        return {e.start.date() for e in events if e.extendedProps.get("provider") == p}
 
-    def trailing_block_len(p: str, d: date) -> int:
-        # length of the block that ends at d-1 (how many consecutive days up to yesterday)
-        days_p = provider_days(p)
-        if not days_p: return 0
-        run = 0
-        cur = d - timedelta(days=1)
-        while cur in days_p:
-            run += 1
-            cur -= timedelta(days=1)
+    def left_run_len(days_set: Set[date], d: date) -> int:
+        run = 0; cur = d - timedelta(days=1)
+        while cur in days_set:
+            run += 1; cur -= timedelta(days=1)
         return run
 
+    def right_run_len(days_set: Set[date], d: date) -> int:
+        run = 0; cur = d + timedelta(days=1)
+        while cur in days_set:
+            run += 1; cur += timedelta(days=1)
+        return run
+
+    def total_block_len_if_assigned(p: str, d: date) -> int:
+        ds = provider_days(p)
+        L = left_run_len(ds, d)
+        R = right_run_len(ds, d)
+        return L + 1 + R
+
+    def _provider_has_vacation_in_month(pr: dict) -> bool:
+        vac = (pr or {}).get("vacations", [])
+        if not vac: return False
+        ym = (st.session_state.month.year, st.session_state.month.month)
+        for rng in vac:
+            try:
+                s = pd.to_datetime(rng.get("start")).date()
+                e = pd.to_datetime(rng.get("end")).date()
+            except Exception:
+                continue
+            if e < s: s, e = e, s
+            cur = s
+            while cur <= e:
+                if (cur.year, cur.month) == ym: return True
+                cur += timedelta(days=1)
+        return False
+
     def ok(p: str, d: date, skey: str) -> bool:
-        # Eligibility
+        # eligibility
         allowed = prov_caps.get(p, [])
         if allowed and skey not in allowed:
             return False
 
-        # Provider-specific overrides
         pr = prov_rules.get(p, {})
         eff_max = pr.get("max_shifts", base_max)
         if _provider_has_vacation_in_month(pr):
@@ -512,7 +548,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
 
-        # Unavailability (specific + vacations)
+        # unavailability
         unavail_set = set()
         for tok in pr.get("unavailable_dates", []):
             try: unavail_set.add(pd.to_datetime(tok).date())
@@ -526,19 +562,24 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             except Exception:
                 pass
 
-        # Per-day/per-shift caps
+        # per-day caps
         if day_shift_count(d, skey) >= cap_map.get(skey, 1):
             return False
         if provider_has_shift_on_day(p, d):
             return False
 
-        # Max counts
+        # max shifts
         if eff_max is not None and counts[p] + 1 > eff_max:
             return False
         if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
             return False
 
-        # Rest with existing assignments
+        # max block size (NEW): ensure we won't create a block longer than mbx
+        if mbx and mbx > 0:
+            if total_block_len_if_assigned(p, d) > mbx:
+                return False
+
+        # rest windows
         sdef = sdefs[skey]
         start_dt = datetime.combine(d, parse_time(sdef["start"]))
         end_dt   = datetime.combine(d, parse_time(sdef["end"]))
@@ -553,36 +594,29 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
     def score(p: str, d: date, skey: str) -> float:
         sc = 0.0
-        # Prioritize pulling people up to the minimum
-        if counts[p] < min_required:
-            sc += 4.0
-
-        # Prefer extending blocks; strongly prefer if current run < preferred block size
-        tlen = trailing_block_len(p, d)
-        if tlen > 0:
-            sc += 2.0
-            if tlen < mbs:
-                sc += 4.0  # push to complete preferred block
-        else:
-            # discourage starting 1-day islands when a preferred block is requested
-            if mbs > 1:
-                sc -= 0.5
-
-        # Lightly balance total load (fewer shifts → slightly higher score)
+        # push toward minimum shifts
+        if counts[p] < min_required: sc += 4.0
+        # prefer extending blocks; especially up to preferred min block size
+        ds = provider_days(p)
+        tlen = left_run_len(ds, d)
+        if tlen > 0: sc += 2.0
+        if tlen < mbs: sc += 4.0
+        # slight load balancing
         sc += max(0, 20 - counts[p]) * 0.01
+        # soft penalty if we’re about to hit the max block (still allowed)
+        if mbx and mbx > 0 and total_block_len_if_assigned(p, d) == mbx:
+            sc -= 0.2
         return sc
 
     for d in days:
         for skey in stypes:
             capacity = cap_map.get(skey, 1)
             for _ in range(capacity):
-                # Evaluate all providers; pick the best scorer that passes constraints
                 cands = [p for p in providers if ok(p, d, skey)]
                 if not cands:
                     continue
                 best = max(cands, key=lambda p: score(p, d, skey))
 
-                # Assign
                 sdef = sdefs[skey]
                 start_dt = datetime.combine(d, parse_time(sdef["start"]))
                 end_dt   = datetime.combine(d, parse_time(sdef["end"]))
@@ -597,10 +631,10 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 )
                 events.append(ev)
                 counts[best] += 1
-                if skey == "N12":
-                    nights[best] += 1
+                if skey == "N12": nights[best] += 1
 
     return events
+
 
 
 
@@ -940,6 +974,20 @@ def engine_panel():
     rc = RuleConfig(**st.session_state.rules)
     rc.max_shifts_per_provider = st.number_input("Max shifts/provider", 1, 50, value=int(rc.max_shifts_per_provider))
     # Minimum shifts per provider (default 12)
+    # Minimum shifts (already added earlier)
+    rc.min_shifts_per_provider = st.number_input(
+        "Min shifts/provider", min_value=0, max_value=50,
+        value=int(getattr(rc, "min_shifts_per_provider", 12))
+    )
+    
+
+    # Max shifts per block (0 = no max). Default is 7.
+    val_mbx = st.session_state.get("rules", {}).get("max_block_size", 7)
+    val_mbx = 0 if val_mbx is None else int(val_mbx)
+    val_mbx = st.number_input("Max shifts per block (0 = no max)", 0, 31, value=val_mbx)
+    rc.max_block_size = None if val_mbx == 0 else val_mbx
+
+
     rc.min_shifts_per_provider = st.number_input(
         "Min shifts/provider", min_value=0, max_value=50,
         value=int(getattr(rc, "min_shifts_per_provider", 12)))
@@ -1618,6 +1666,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
