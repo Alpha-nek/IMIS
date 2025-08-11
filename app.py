@@ -162,13 +162,15 @@ def _month_days_count() -> int:
     return calendar.monthrange(m.year, m.month)[1]
 
 def recommended_max_shifts_for_month() -> int:
-    days = _month_days_count()
+    import calendar
+    m = st.session_state.month
+    days = calendar.monthrange(m.year, m.month)[1]
     if days == 31:
         return 16
     if days == 30:
         return 15
-    # For 28/29 days, keep the global value as-is
-    return RuleConfig(**st.session_state.rules).max_shifts_per_provider
+    return get_global_rules().max_shifts_per_provider
+
 
 # --- Vacation helpers ---
 def _expand_vacation_dates(vacations: list) -> set:
@@ -200,6 +202,10 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
             return True
     return False
 
+def get_global_rules():
+    return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
+
+
 
 # -------------------------
 # State helpers
@@ -212,10 +218,11 @@ def init_session_state():
     st.session_state.setdefault("events", [])
     st.session_state.setdefault("comments", {})
     st.session_state.setdefault("month", date.today().replace(day=1))
-    st.session_state.setdefault("rules", RuleConfig().dict())
     st.session_state.setdefault("highlight_provider", "")
-    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
     st.session_state.setdefault("provider_rules", {})  # { "AB": {max_shifts, max_nights, min_rest_hours, unavailable_dates, notes} }
+    st.session_state.setdefault("rules", RuleConfig().dict())
+    st.session_state.setdefault("provider_caps", {})
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
 
 
 
@@ -824,7 +831,7 @@ def engine_panel():
         rc.max_nights_per_provider = st.number_input("Max nights/provider", 0, 50, value=default_nights)
     else:
         rc.max_nights_per_provider = None
-    st.session_state.rules = rc.dict()
+    st.session_state["rules"] = rc.dict()
 
     # ===== Shift Types =====
     st.subheader("Shift Types")
@@ -1107,7 +1114,10 @@ def provider_rules_panel():
     # ... (keep your header and early `sel` checks)
 
 rules_map = st.session_state.setdefault("provider_rules", {})
-global_rules = RuleConfig(**st.session_state.rules)
+global_rules = get_global_rules()
+
+
+
 
 # Allowed shifts (unchanged)
 label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
@@ -1471,6 +1481,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
