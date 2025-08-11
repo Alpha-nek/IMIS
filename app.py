@@ -67,7 +67,6 @@ def _normalize_initials_list(items):
 class RuleConfig(BaseModel):   # or dataclass, same idea
     # ... existing fields ...
     min_shifts_per_provider: int = 12
-    min_block_size: int = 3
     max_block_size: Optional[int] = 7   # default cap is 7 shifts per block
     max_shifts_per_provider: int = Field(15, ge=1, le=31)
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
@@ -113,47 +112,6 @@ def _ensure_iso(v):
     if hasattr(v, "to_pydatetime"):
         return v.to_pydatetime().isoformat()
     return str(v) if v is not None else None
-
-def _event_to_dict(e):
-    # Normalize any event-like object to a plain dict with ISO datetimes
-    if isinstance(e, dict):
-        d = dict(e)
-    elif hasattr(e, "to_json_event"):
-        d = dict(e.to_json_event())
-    else:
-        d = {
-            "id": getattr(e, "id", None),
-            "title": getattr(e, "title", ""),
-            "start": getattr(getattr(e, "start", None), "isoformat", lambda: None)(),
-            "end": getattr(getattr(e, "end", None), "isoformat", lambda: None)(),
-            "backgroundColor": getattr(e, "backgroundColor", None),
-            "extendedProps": getattr(e, "extendedProps", {}) or {},
-        }
-
-    d["title"] = str(d.get("title", ""))
-    d["start"] = _ensure_iso(d.get("start"))
-    d["end"]   = _ensure_iso(d.get("end"))
-    d["allDay"] = bool(d.get("allDay", False))
-    if d.get("backgroundColor") is not None:
-        d["backgroundColor"] = str(d["backgroundColor"])
-
-    # extendedProps must be a JSON-safe dict
-    ext = d.get("extendedProps") or {}
-    if not isinstance(ext, dict):
-        ext = {}
-    ext2 = {}
-    for k, v in ext.items():
-        try:
-            json.dumps(v)
-            ext2[str(k)] = v
-        except Exception:
-            ext2[str(k)] = str(v)
-    d["extendedProps"] = ext2
-
-    # Drop events missing required fields
-    if not d.get("start") or not d.get("end"):
-        return None
-    return d
 
 def events_for_calendar(raw_events):
     out = []
@@ -254,7 +212,6 @@ def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
 # --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
-    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
      # Provider roster (preloaded with your list)
     if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
         st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
@@ -271,11 +228,6 @@ def init_session_state():
 # migrate if missing/None
     if st.session_state["rules"].get("max_block_size") is None:
         st.session_state["rules"]["max_block_size"] = 7
-
-    # Eligibility & capacities defaults
-    
-def _bootstrap_session_state():
-    from datetime import date
 
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
@@ -542,7 +494,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
     base_max = recommended_max_shifts_for_month()
     min_required = int(getattr(rules, "min_shifts_per_provider", 12))
-    mbs = int(getattr(rules, "min_block_size", 1) or 1)
+    mbs = getattr(rules, "min_block_size", 1)
     mbx = getattr(rules, "max_block_size", None)
 
     def day_shift_count(d: date, skey: str) -> int:
@@ -571,11 +523,6 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         L = left_run_len(ds, d)
         R = right_run_len(ds, d)
         return L + 1 + R
-
-    def _provider_has_vacation_in_month(pr: dict) -> bool:
-        # Unavailability (specific + vacations
-        if is_provider_unavailable_on_date(p, d):
-            return False
             
     def ok(p: str, d: date, skey: str) -> bool:
         """Return True if provider p can take shift skey on date d."""
@@ -1863,6 +1810,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
