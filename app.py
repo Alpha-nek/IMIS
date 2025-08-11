@@ -74,17 +74,17 @@ def _normalize_initials_list(items):
 
 
 
-class RuleConfig(BaseModel):   # or dataclass, same idea
-    # ... existing fields ...
-    min_shifts_per_provider: int = 15
-    max_block_size: Optional[int] = 7   # default cap is 7 shifts per block
+class RuleConfig(BaseModel):
+    # GLOBAL defaults
+    min_shifts_per_provider: int = 15                  # ← default now 15
     max_shifts_per_provider: int = Field(15, ge=1, le=31)
+
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
     min_block_size: int = Field(3, ge=1, le=7, description="Minimum consecutive days in a block when possible")
+    max_block_size: Optional[int] = 7                  # 0/None => no cap; we default to 7
+
     require_at_least_one_weekend: bool = True
-    # Optional caps per shift type
     max_nights_per_provider: Optional[int] = Field(6, ge=0, le=31)
-    # add near your other fields
 
 
 class Provider(BaseModel):
@@ -495,7 +495,7 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
     # month-aware defaults
     base_default = recommended_max_shifts_for_month()
-    min_required = int(getattr(rules, "min_shifts_per_provider", 12))
+    min_required = int(getattr(rules, "min_shifts_per_provider", 15))
     mbs = int(getattr(rules, "min_block_size", 1) or 1)
     mbx = getattr(rules, "max_block_size", None)
 
@@ -593,7 +593,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     events: List[SEvent] = []
 
     base_max = recommended_max_shifts_for_month()
-    min_required = int(getattr(rules, "min_shifts_per_provider", 12))
+    min_required = int(getattr(rules, "min_shifts_per_provider", 15))
     mbs = getattr(rules, "min_block_size", 1)
     mbx = getattr(rules, "max_block_size", None)
 
@@ -1035,7 +1035,7 @@ def engine_panel():
         rc.min_shifts_per_provider = st.number_input(
             "Min shifts/provider",
             min_value=0, max_value=50,
-            value=int(getattr(rc, "min_shifts_per_provider", 12)),
+            value=int(getattr(rc, "min_shifts_per_provider", 15)),
             key="rule_min_shifts",
         )
     
@@ -1977,6 +1977,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
