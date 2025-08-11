@@ -183,7 +183,7 @@ def shifts_to_events(roster: Dict[date, Dict[str, Optional[str]]], shift_types: 
 def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[str]]:
     """Return {provider: [violation, ...]} and a GLOBAL bucket for day-level issues."""
     violations: Dict[str, List[str]] = {}
-    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", {}) or {}
+    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
     prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
 
     # Build per-provider schedules
@@ -254,7 +254,8 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     """Round-robin with constraints, capacity per shift/day, eligibility, and one-shift-per-day."""
     sdefs = {s["key"]: s for s in shift_types}
     stypes = [s["key"] for s in shift_types]
-    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", {}) or {}
+    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+
     prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
 
     # Track counters
@@ -450,7 +451,9 @@ if st.sidebar.button("Reset to default capacities"):
     st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
     st.toast("Capacities reset to defaults.", icon="♻️")
 
-cap_map = dict(st.session_state.shift_capacity)
+
+cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+
 for s in st.session_state.shift_types:
     key = s["key"]; label = s["label"]
     default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
@@ -751,7 +754,8 @@ def schedule_grid_view():
 
     # --- rows: one row per slot of each shift (capacity)
     stypes  = st.session_state.shift_types
-    cap_map = st.session_state.get("shift_capacity", {}) or {}
+    cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+
 
     row_meta = []  # each item: {"row_label","skey","sdef","slot","group","gorder"}
     for s in stypes:
@@ -941,6 +945,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
