@@ -60,10 +60,10 @@ WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 # ----- Default provider roster -----
 PROVIDER_INITIALS_DEFAULT = [
-    "AA","AD","AM","DN","FS","JL","JM","JT","KA","LN","MO","SM","OI","NP","AR","JA","PR","UN",
+    "AA","AD","AM","FS","JM","JT","KA","LN","MO","SM","OI","NP","PR","UN",
     "DP","FY","YL","RR","SD","JK","NS","PD","AB","KF","AL","GB","KD","NG","GI","VT","DI","YD",
-    "HS","YA","NM","EM","SS","YS","HW","AH","RJ","SI","FH","KP","EB","RS","RG","CJ","MS","AT",
-    "YH","XL","NO","MA","LM","MQ","CM","AI"
+    "HS","YA","NM","EM","SS","YS","HW","AH","RJ","SI","FH","EB","RS","RG","CJ","MS","AT",
+    "YH","XL","MA","LM","MQ","CM","AI"
 ]
 
 DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
@@ -1977,6 +1977,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
