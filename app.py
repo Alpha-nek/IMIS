@@ -19,6 +19,7 @@
 #   streamlit run app.py
 
 import uuid
+import json
 from datetime import datetime, date, timedelta, time
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Any, Optional
@@ -106,6 +107,8 @@ def init_session_state():
     st.session_state.setdefault("rules", RuleConfig().dict())
     st.session_state.setdefault("highlight_provider", "")
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+    st.session_state.setdefault("provider_rules", {})  # { "AB": {max_shifts, max_nights, min_rest_hours, unavailable_dates, notes} }
+
 
 
     # Provider roster (preloaded with your list)
@@ -180,60 +183,59 @@ def shifts_to_events(roster: Dict[date, Dict[str, Optional[str]]], shift_types: 
 
 
 def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[str]]:
-    """Return {provider: [violation, ...]} and a GLOBAL bucket for day-level issues."""
     violations: Dict[str, List[str]] = {}
     cap_map: Dict[str, int] = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
-    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
+    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {})
+    prov_rules: Dict[str, Dict[str, Any]] = st.session_state.get("provider_rules", {})
 
-    # Build per-provider schedules
     per_p: Dict[str, List[SEvent]] = {}
     for ev in events:
         p = ev.extendedProps.get("provider")
-        if not p:
-            continue
-        per_p.setdefault(p, []).append(ev)
+        if p: per_p.setdefault(p, []).append(ev)
 
-    # Per-day counts
     day_prov_counts: Dict[tuple, int] = {}
     day_shift_counts: Dict[tuple, int] = {}
     for ev in events:
         p = ev.extendedProps.get("provider")
         skey = ev.extendedProps.get("shift_key")
         day = ev.start.date()
-        if p:
-            day_prov_counts[(day, p)] = day_prov_counts.get((day, p), 0) + 1
-        if skey:
-            day_shift_counts[(day, skey)] = day_shift_counts.get((day, skey), 0) + 1
+        if p:    day_prov_counts[(day, p)] = day_prov_counts.get((day, p), 0) + 1
+        if skey: day_shift_counts[(day, skey)] = day_shift_counts.get((day, skey), 0) + 1
 
-    # Provider-level checks
     for p, evs in per_p.items():
         evs.sort(key=lambda e: e.start)
-        # 1) Max shifts
-        if len(evs) > rules.max_shifts_per_provider:
-            violations.setdefault(p, []).append(
-                f"Has {len(evs)} shifts > max {rules.max_shifts_per_provider}")
-        # 2) Rest hours between consecutive shifts
+        pr = prov_rules.get(p, {})
+        max_shifts = pr.get("max_shifts", rules.max_shifts_per_provider)
+        max_nights = pr.get("max_nights", rules.max_nights_per_provider)
+        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+        unavail_set = set()
+        for tok in pr.get("unavailable_dates", []):
+            try: unavail_set.add(pd.to_datetime(tok).date())
+            except Exception: pass
+
+        if len(evs) > (max_shifts or 1_000_000):
+            violations.setdefault(p, []).append(f"Has {len(evs)} shifts > max {max_shifts}")
+
         for a, b in zip(evs, evs[1:]):
-            rest = (b.start - a.end).total_seconds() / 3600
-            if rest < rules.min_rest_hours_between_shifts:
+            rest = (b.start - a.end).total_seconds()/3600
+            if rest < (min_rest or 0):
                 violations.setdefault(p, []).append(
-                    f"Rest {rest:.1f}h < min {rules.min_rest_hours_between_shifts}h between {a.start:%m-%d} and {b.start:%m-%d}")
-        # 3) Max nights
-        if rules.max_nights_per_provider is not None:
+                    f"Rest {rest:.1f}h < min {min_rest}h between {a.start:%m-%d} and {b.start:%m-%d}"
+                )
+
+        if max_nights is not None:
             nights = sum(1 for ev in evs if ev.extendedProps.get("shift_key") == "N12")
-            if nights > rules.max_nights_per_provider:
-                violations.setdefault(p, []).append(
-                    f"Nights {nights} > max {rules.max_nights_per_provider}")
-        # 4) At least one weekend
+            if nights > max_nights:
+                violations.setdefault(p, []).append(f"Nights {nights} > max {max_nights}")
+
         if rules.require_at_least_one_weekend:
-            worked_weekend = any(ev.start.weekday() >= 5 for ev in evs)
-            if not worked_weekend:
+            if not any(ev.start.weekday() >= 5 for ev in evs):
                 violations.setdefault(p, []).append("No weekend shifts")
-        # 5) One shift per day per provider
+
         for (d, pp), cnt in day_prov_counts.items():
             if pp == p and cnt > 1:
                 violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: {cnt} shifts in one day (limit 1)")
-        # 6) Eligibility
+
         allowed = prov_caps.get(p, [])
         if allowed:
             bad = [ev for ev in evs if ev.extendedProps.get("shift_key") not in allowed]
@@ -241,7 +243,11 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
                 bad_keys = sorted(set(ev.extendedProps.get("shift_key") for ev in bad))
                 violations.setdefault(p, []).append(f"Not eligible for: {', '.join(bad_keys)}")
 
-    # Day/shift capacity checks (GLOBAL)
+        if unavail_set:
+            bad_dates = sorted({ev.start.date() for ev in evs if ev.start.date() in unavail_set})
+            for d in bad_dates:
+                violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: provider marked unavailable")
+
     for (d, skey), cnt in day_shift_counts.items():
         cap = cap_map.get(skey, 1)
         if cnt > cap:
@@ -249,18 +255,16 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
 
     return violations
 
+
 def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict[str, Any]], rules: RuleConfig) -> List[SEvent]:
-    """Round-robin with constraints, capacity per shift/day, eligibility, and one-shift-per-day."""
     sdefs = {s["key"]: s for s in shift_types}
     stypes = [s["key"] for s in shift_types]
     cap_map: Dict[str, int] = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {})
+    prov_rules: Dict[str, Dict[str, Any]] = st.session_state.get("provider_rules", {})
 
-    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
-
-    # Track counters
     counts = {p: 0 for p in providers}
     nights = {p: 0 for p in providers}
-
     events: List[SEvent] = []
 
     def day_shift_count(d: date, skey: str) -> int:
@@ -270,78 +274,69 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         return any(e.extendedProps.get("provider") == p and e.start.date() == d for e in events)
 
     def ok(p: str, d: date, skey: str) -> bool:
-        # Eligibility
         allowed = prov_caps.get(p, [])
         if allowed and skey not in allowed:
             return False
-        # Capacity for this day/shift
+
+        pr = prov_rules.get(p, {})
+        max_shifts = pr.get("max_shifts", rules.max_shifts_per_provider)
+        max_nights = pr.get("max_nights", rules.max_nights_per_provider)
+        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+        unavail_set = set()
+        for tok in pr.get("unavailable_dates", []):
+            try: unavail_set.add(pd.to_datetime(tok).date())
+            except Exception: pass
+        if d in unavail_set:
+            return False
+
         if day_shift_count(d, skey) >= cap_map.get(skey, 1):
             return False
-        # One shift per day per provider
         if provider_has_shift_on_day(p, d):
             return False
-        # Count caps
-        if counts[p] + 1 > rules.max_shifts_per_provider:
+        if max_shifts is not None and counts[p] + 1 > max_shifts:
             return False
-        if skey == "N12" and rules.max_nights_per_provider is not None:
-            if nights[p] + 1 > rules.max_nights_per_provider:
-                return False
-        # Rest constraint (against existing events)
+        if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
+            return False
+
         sdef = sdefs[skey]
         start_dt = datetime.combine(d, parse_time(sdef["start"]))
-        end_dt = datetime.combine(d, parse_time(sdef["end"]))
-        if end_dt <= start_dt:
-            end_dt += timedelta(days=1)
+        end_dt   = datetime.combine(d, parse_time(sdef["end"]))
+        if end_dt <= start_dt: end_dt += timedelta(days=1)
         for e in [e for e in events if e.extendedProps.get("provider") == p]:
-            rest1 = (start_dt - e.end).total_seconds() / 3600
-            rest2 = (e.start - end_dt).total_seconds() / 3600
-            if -rules.min_rest_hours_between_shifts < rest1 < rules.min_rest_hours_between_shifts:
-                return False
-            if -rules.min_rest_hours_between_shifts < rest2 < rules.min_rest_hours_between_shifts:
-                return False
+            rest1 = (start_dt - e.end).total_seconds()/3600
+            rest2 = (e.start - end_dt).total_seconds()/3600
+            if - (min_rest or 0) < rest1 < (min_rest or 0): return False
+            if - (min_rest or 0) < rest2 < (min_rest or 0): return False
         return True
 
-    # Assignment with preferred block size
     p_idx = 0
     for d in days:
         for skey in stypes:
             capacity = cap_map.get(skey, 1)
-            for _slot in range(capacity):
-                assigned = False
-                tries = 0
+            for _ in range(capacity):
+                assigned = False; tries = 0
                 while not assigned and tries < len(providers):
                     p = providers[p_idx % len(providers)]
                     if ok(p, d, skey):
-                        # Assign block across consecutive days
-                        for bday_i in range(rules.min_block_size):
-                            bday = d + timedelta(days=bday_i)
-                            if bday not in days:
-                                break
-                            if not ok(p, bday, skey):
-                                break
-                            sdef = sdefs[skey]
-                            start_dt = datetime.combine(bday, parse_time(sdef["start"]))
-                            end_dt = datetime.combine(bday, parse_time(sdef["end"]))
-                            if end_dt <= start_dt:
-                                end_dt += timedelta(days=1)
-                            ev = SEvent(
-                                id=str(uuid.uuid4()),
-                                title=f"{sdef['label']} — {p}",
-                                start=start_dt,
-                                end=end_dt,
-                                backgroundColor=sdef.get("color"),
-                                extendedProps={"provider": p, "shift_key": skey, "label": sdef["label"]},
-                            )
-                            events.append(ev)
-                            counts[p] += 1
-                            if skey == "N12":
-                                nights[p] += 1
+                        sdef = sdefs[skey]
+                        start_dt = datetime.combine(d, parse_time(sdef["start"]))
+                        end_dt   = datetime.combine(d, parse_time(sdef["end"]))
+                        if end_dt <= start_dt: end_dt += timedelta(days=1)
+                        ev = SEvent(
+                            id=str(uuid.uuid4()),
+                            title=f"{sdef['label']} — {p}",
+                            start=start_dt,
+                            end=end_dt,
+                            backgroundColor=sdef.get("color"),
+                            extendedProps={"provider": p, "shift_key": skey, "label": sdef["label"]},
+                        )
+                        events.append(ev)
+                        counts[p] += 1
+                        if skey == "N12": nights[p] += 1
                         assigned = True
                     else:
-                        p_idx += 1
-                        tries += 1
+                        p_idx += 1; tries += 1
                 p_idx += 1
-
     return events
 
 # -------------------------
@@ -675,6 +670,92 @@ def render_calendar():
         st.toast("Calendar updated", icon="✅")
 
 
+# provider rules section
+def provider_rules_panel():
+    st.header("Provider-specific rules")
+
+    roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
+    if not roster:
+        st.info("Add providers first.")
+        return
+
+    sel = st.selectbox("Choose provider", options=roster, key="pr_sel")
+
+    # Existing values (overrides are optional)
+    rules_map = st.session_state.provider_rules
+    curr = rules_map.get(sel, {})
+    global_rules = RuleConfig(**st.session_state.rules)
+
+    # Allowed shift types (kept in provider_caps to stay consistent)
+    label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+    key_for_label = {v: k for k, v in label_for_key.items()}
+    current_allowed = st.session_state.provider_caps.get(sel, [])
+    default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
+
+    st.subheader("Allowed shift types")
+    picked_labels = st.multiselect(
+        "Assign only these shift types (leave empty to allow ALL)",
+        options=list(label_for_key.values()),
+        default=default_labels,
+        key=f"pr_allowed_{sel}"
+    )
+    if len(picked_labels) == 0:
+        st.session_state.provider_caps.pop(sel, None)  # no restriction
+    else:
+        st.session_state.provider_caps[sel] = [key_for_label[lbl] for lbl in picked_labels]
+
+    st.markdown("---")
+    st.subheader("Overrides (optional)")
+    c1, c2 = st.columns(2)
+    with c1:
+        use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
+        max_sh = st.number_input("Max shifts (this month)", 1, 50, value=int(curr.get("max_shifts", global_rules.max_shifts_per_provider)))
+    with c2:
+        use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
+        default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
+        max_n  = st.number_input("Max nights (this month)", 0, 50, value=int(curr.get("max_nights", default_max_n)))
+
+    use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
+    min_rest = st.number_input("Min rest hours between shifts", 0, 48, value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
+
+    st.markdown("---")
+    st.subheader("Unavailable dates")
+    dates_txt = st.text_input(
+        "YYYY-MM-DD, comma-separated (e.g., 2025-09-03, 2025-09-12)",
+        value=",".join(curr.get("unavailable_dates", [])),
+        key=f"pr_unavail_{sel}"
+    )
+
+    st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
+
+    if st.button("Save provider rules", key=f"pr_save_{sel}"):
+        new_entry = {}
+        if use_max:   new_entry["max_shifts"] = int(max_sh)
+        if use_nights: new_entry["max_nights"] = int(max_n)
+        if use_rest:  new_entry["min_rest_hours"] = int(min_rest)
+
+        # normalize dates
+        unavail = []
+        for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
+            try:
+                unavail.append(str(pd.to_datetime(tok).date()))
+            except Exception:
+                pass
+        if unavail:
+            new_entry["unavailable_dates"] = unavail
+
+        notes_val = st.session_state.get(f"pr_notes_{sel}", "")
+        if notes_val:
+            new_entry["notes"] = notes_val
+
+        if new_entry:
+            rules_map[sel] = new_entry
+        else:
+            rules_map.pop(sel, None)  # remove if everything cleared
+        st.success("Saved.")
+
+
+
 def schedule_grid_view():
     st.subheader("Monthly Grid — Shifts × Days (one provider per cell)")
 
@@ -682,7 +763,6 @@ def schedule_grid_view():
         st.info("No shift types configured.")
         return
 
-    # ---------- helpers ----------
     def tod_group_and_order(skey: str, sdef: Dict[str, Any]):
         start = parse_time(sdef["start"])
         if skey in ("R12", "A12"): return "Day (07:00–19:00)", 1
@@ -699,21 +779,17 @@ def schedule_grid_view():
 
     def _hex_to_rgb(h):
         h = (h or "").lstrip("#")
-        if len(h) == 3:
-            h = "".join([c*2 for c in h])
-        try:
-            return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-        except Exception:
-            return (102, 102, 102)
+        if len(h) == 3: h = "".join([c*2 for c in h])
+        try: return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+        except Exception: return (102,102,102)
 
-    def _rgb_to_hue(r, g, b):
+    def _rgb_to_hue(r,g,b):
         import colorsys
-        h, s, v = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
-        return int(h * 360)
+        h,s,v = colorsys.rgb_to_hsv(r/255.0,g/255.0,b/255.0)
+        return int(h*360)
 
     def emoji_for_hex(hex_color: str) -> str:
-        r, g, b = _hex_to_rgb(hex_color)
-        hue = _rgb_to_hue(r, g, b)
+        r,g,b = _hex_to_rgb(hex_color); hue = _rgb_to_hue(r,g,b)
         if hue < 15 or hue >= 345: return "🔴"
         if 15 <= hue < 40:         return "🟠"
         if 40 <= hue < 70:         return "🟡"
@@ -722,20 +798,19 @@ def schedule_grid_view():
         if 250 <= hue < 320:       return "🟣"
         return "🟤"
 
-    # ---------- month context ----------
+    # month context
     year  = st.session_state.month.year
     month = st.session_state.month.month
     days  = make_month_days(year, month)
     day_cols = [str(d.day) for d in days]
 
-    # ---------- one row per capacity slot, grouped & sorted ----------
     stypes  = st.session_state.shift_types
     cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
 
+    # build row meta (one row per capacity slot)
     row_meta = []
     for s in stypes:
-        skey = s["key"]
-        cap  = int(cap_map.get(skey, 1))
+        skey = s["key"]; cap = int(cap_map.get(skey, 1))
         group_label, gorder = tod_group_and_order(skey, s)
         for slot in range(1, cap + 1):
             row_label = f"{skey} — {s['label']} (slot {slot})"
@@ -745,23 +820,20 @@ def schedule_grid_view():
             })
     row_meta.sort(key=lambda r: (r["gorder"], start_minutes(r["sdef"]), r["skey"], r["slot"]))
 
-    # ---------- build RAW grid (Color + day columns) ----------
     import pandas as pd
     row_labels = [rm["row_label"] for rm in row_meta]
     grid_raw = pd.DataFrame("", index=row_labels, columns=day_cols, dtype="object")
     color_tags = [emoji_for_hex(rm["sdef"].get("color")) for rm in row_meta]
-    grid_raw.insert(0, "Color", color_tags)  # keep color tag only
+    grid_raw.insert(0, "Color", color_tags)  # first column
 
-    # fill from existing events into first empty slot
+    # fill from events (first empty slot per shift/day)
     rows_for_key = {}
     for rm in row_meta:
         rows_for_key.setdefault(rm["skey"], []).append(rm["row_label"])
 
     for e in st.session_state.events:
-        ext  = (e.get("extendedProps") or {})
-        skey = ext.get("shift_key")
-        if not skey:
-            continue
+        ext = (e.get("extendedProps") or {}); skey = ext.get("shift_key")
+        if not skey: continue
         try:
             d = pd.to_datetime(e["start"]).date()
         except Exception:
@@ -769,155 +841,142 @@ def schedule_grid_view():
         if d.year != year or d.month != month:
             continue
         prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
-        col  = str(d.day)
+        col = str(d.day)
         for row_label in rows_for_key.get(skey, []):
             if grid_raw.at[row_label, col] == "":
                 grid_raw.at[row_label, col] = prov
                 break
 
-    # ---------- highlight inside the ORIGINAL editor ----------
-    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
-    grid_display = grid_raw.copy()
+    # height to avoid vertical scroll
+    height_px = min(2200, 110 + len(row_meta) * 38)
 
-    # prefix matches with a star so they pop visually in the editor
-    if hi:
-        for c in day_cols:
-            # Only alter display; underlying provider is restored on Apply
-            grid_display[c] = [
-                (f"★ {v}" if str(v).strip().upper() == hi else v)
-                for v in grid_display[c].tolist()
-            ]
+    # layout: left grid, right provider rules
+    left, right = st.columns([4, 2], gap="large")
 
-    # editor config
-    valid_provs = sorted(
-        st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
-    ) if not st.session_state.providers_df.empty else []
+    with left:
+        hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+        enable_highlight = hi != ""
+        edit_mode = st.toggle("Edit grid (disables highlighting)", value=False, disabled=not enable_highlight)
 
-    col_config = {
-        "Color": st.column_config.TextColumn(disabled=True, help="Shift color tag"),
-    }
-    try:
-        for c in day_cols:
-            col_config[c] = st.column_config.SelectboxColumn(options=[""] + valid_provs,
-                                                             help=f"Assignments for day {c}")
-    except Exception:
-        pass  # fallback for older Streamlit
+        if enable_highlight and not edit_mode:
+            # Styled, read-only grid with light background highlight
+            day_only_cols = [c for c in grid_raw.columns if c.isdigit()]
 
-    # tall enough to avoid vertical scrolling
-    height_px = min(2000, 110 + len(row_meta) * 38)
-
-    # render ONE editor (highlight applied in-place)
-    edited_grid = st.data_editor(
-        grid_display,
-        num_rows="fixed",
-        use_container_width=True,
-        height=height_px,
-        column_config=col_config,
-        key="grid_editor",
-    )
-
-    # ---------- map back to events ----------
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Apply grid to calendar"):
-            sdefs = {s["key"]: s for s in st.session_state.shift_types}
-
-            # keep comments by (date, shift_key, provider)
-            comments_by_key = {}
-            for e in st.session_state.events:
-                ext  = (e.get("extendedProps") or {})
-                skey = ext.get("shift_key")
-                if not skey or skey not in sdefs:
-                    continue
+            def _style_fn(val):
                 try:
-                    d = pd.to_datetime(e["start"]).date()
+                    return "background-color: #fff3bf;" if str(val).strip().upper() == hi else ""
                 except Exception:
-                    continue
-                if d.year == year and d.month == month:
-                    prov0 = (ext.get("provider") or "").strip().upper()
-                    comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
+                    return ""
 
-            # keep non-grid events
-            def is_grid_event(E: Dict[str, Any]) -> bool:
-                ext  = (E.get("extendedProps") or {})
-                skey = ext.get("shift_key")
-                if not skey or skey not in sdefs:
-                    return False
-                try:
-                    d = pd.to_datetime(E["start"]).date()
-                except Exception:
-                    return False
-                return d.year == year and d.month == month
+            styled = grid_raw.style.applymap(_style_fn, subset=day_only_cols)
+            st.dataframe(styled, use_container_width=True, height=height_px)
+            st.caption(f"Highlighting cells for **{hi}**. Toggle *Edit grid* to make changes.")
+        else:
+            # Editable grid
+            valid_provs = sorted(
+                st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
+            ) if not st.session_state.providers_df.empty else []
+            col_config = {"Color": st.column_config.TextColumn(disabled=True, help="Shift color tag")}
+            try:
+                for c in day_cols:
+                    col_config[c] = st.column_config.SelectboxColumn(options=[""] + valid_provs,
+                                                                     help=f"Assignments for day {c}")
+            except Exception:
+                pass
 
-            preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+            edited_grid = st.data_editor(
+                grid_raw,
+                num_rows="fixed",
+                use_container_width=True,
+                height=height_px,
+                column_config=col_config,
+                key="grid_editor",
+            )
 
-            # rebuild from edited grid, enforcing one shift/provider/day
-            new_events = []
-            seen_day_provider = set()
-            conflicts = []
+            # Apply back to events
+            if st.button("Apply grid to calendar"):
+                sdefs = {s["key"]: s for s in st.session_state.shift_types}
 
-            row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
-            day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
-
-            for row_label in edited_grid.index:
-                skey = row_to_key.get(row_label)
-                if not skey:
-                    continue
-                sdef = sdefs.get(skey)
-                if not sdef:
-                    continue
-                for col in day_only_cols:
-                    prov = edited_grid.at[row_label, col]
-                    if prov is None:
-                        prov = ""
-                    prov = str(prov).strip().upper()
-                    if prov.startswith("★ "):  # strip highlight marker before saving
-                        prov = prov[2:].strip()
-                    if not prov:
+                # keep comments by (date, shift_key, provider)
+                comments_by_key = {}
+                for e in st.session_state.events:
+                    ext = (e.get("extendedProps") or {}); skey = ext.get("shift_key")
+                    if not skey or skey not in sdefs: continue
+                    try:
+                        d = pd.to_datetime(e["start"]).date()
+                    except Exception:
                         continue
+                    if d.year == year and d.month == month:
+                        prov0 = (ext.get("provider") or "").strip().upper()
+                        comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
 
-                    day_date = date(year, month, int(col))
-                    key_dp = (day_date, prov)
-                    if key_dp in seen_day_provider:
-                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
-                        continue
-                    seen_day_provider.add(key_dp)
+                def is_grid_event(E: Dict[str, Any]) -> bool:
+                    ext = (E.get("extendedProps") or {}); skey = ext.get("shift_key")
+                    if not skey or skey not in sdefs: return False
+                    try:
+                        d = pd.to_datetime(E["start"]).date()
+                    except Exception:
+                        return False
+                    return d.year == year and d.month == month
 
-                    def _parse(hhmm: str):
-                        hh, mm = hhmm.split(":")
-                        return time(int(hh), int(mm))
-                    start_dt = datetime.combine(day_date, _parse(sdef["start"]))
-                    end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
-                    if end_dt <= start_dt:
-                        end_dt += timedelta(days=1)
+                preserved = [E for E in st.session_state.events if not is_grid_event(E)]
 
-                    eid = str(uuid.uuid4())
-                    ev = {
-                        "id": eid,
-                        "title": f"{sdef['label']} — {prov}",
-                        "start": start_dt.isoformat(),
-                        "end":   end_dt.isoformat(),
-                        "allDay": False,
-                        "backgroundColor": sdef.get("color"),
-                        "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
-                    }
-                    new_events.append(ev)
+                new_events = []
+                seen_day_provider = set()
+                conflicts = []
 
-                    k = (day_date, skey, prov)
-                    if k in st.session_state.comments:
-                        st.session_state.comments[eid] = st.session_state.comments[k]
-                    elif k in comments_by_key:
-                        st.session_state.comments[eid] = comments_by_key[k]
+                row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
+                day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
 
-            st.session_state.events = preserved + new_events
-            if conflicts:
-                st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
-            else:
-                st.success("Applied grid to calendar.")
+                for row_label in edited_grid.index:
+                    skey = row_to_key.get(row_label)
+                    if not skey: continue
+                    sdef = sdefs.get(skey)
+                    if not sdef: continue
+                    for col in day_only_cols:
+                        prov = edited_grid.at[row_label, col]
+                        prov = ("" if prov is None else str(prov)).strip().upper()
+                        if not prov: continue
 
-    with c2:
-        if st.button("Reload grid from calendar"):
-            st.experimental_rerun()
+                        day_date = date(year, month, int(col))
+                        key_dp = (day_date, prov)
+                        if key_dp in seen_day_provider:
+                            conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
+                            continue
+                        seen_day_provider.add(key_dp)
+
+                        def _parse(hhmm: str):
+                            hh, mm = hhmm.split(":"); return time(int(hh), int(mm))
+                        start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+                        end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
+                        if end_dt <= start_dt: end_dt += timedelta(days=1)
+
+                        eid = str(uuid.uuid4())
+                        ev = {
+                            "id": eid,
+                            "title": f"{sdef['label']} — {prov}",
+                            "start": start_dt.isoformat(),
+                            "end":   end_dt.isoformat(),
+                            "allDay": False,
+                            "backgroundColor": sdef.get("color"),
+                            "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+                        }
+                        new_events.append(ev)
+                        k = (day_date, skey, prov)
+                        if k in st.session_state.comments:
+                            st.session_state.comments[eid] = st.session_state.comments[k]
+                        elif k in comments_by_key:
+                            st.session_state.comments[eid] = comments_by_key[k]
+
+                st.session_state.events = preserved + new_events
+                if conflicts:
+                    st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
+                else:
+                    st.success("Applied grid to calendar.")
+
+    with right:
+        provider_rules_panel()
+
 
 
 
@@ -937,6 +996,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
