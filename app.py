@@ -569,10 +569,8 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 return False
     
         return True
-
-
-
-   def score(provider_id: str, day: date, shift_key: str) -> float:
+    
+    def score(provider_id: str, day: date, shift_key: str) -> float:
         """
         Compute a score to choose among eligible providers for a given shift.
         Higher scores favor assignment.  The scoring logic pushes providers
@@ -601,7 +599,6 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             sc -= 0.2
     
         return sc
-
 
     for current_day in days:
         for shift_key in stypes:
@@ -1819,6 +1816,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
