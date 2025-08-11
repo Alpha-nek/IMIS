@@ -967,30 +967,83 @@ def engine_panel():
                 st.warning("Replacement list is empty — keeping current roster.")
 
     # ===== Global rules =====
+   # ===== Global rules =====
     st.subheader("Rules (global)")
-    rc = RuleConfig(**st.session_state.rules)
-    rc.max_shifts_per_provider = st.number_input("Max shifts/provider", 1, 50, value=int(rc.max_shifts_per_provider))
-    # Minimum shifts per provider (default 12)
-
-    # Max shifts per block (0 = no max). Default is 7.
-    val_mbx = st.session_state.get("rules", {}).get("max_block_size", 7)
-    val_mbx = 0 if val_mbx is None else int(val_mbx)
-    val_mbx = st.number_input("Max shifts per block (0 = no max)", 0, 31, value=val_mbx)
-    rc.max_block_size = None if val_mbx == 0 else val_mbx
-
-
-    rc.min_shifts_per_provider = st.number_input(
-        "Min shifts/provider", min_value=0, max_value=50,
-        value=int(getattr(rc, "min_shifts_per_provider", 12)))
-    rc.min_rest_hours_between_shifts = st.number_input("Min rest hours between shifts", 0, 48, value=int(rc.min_rest_hours_between_shifts))
-    rc.min_block_size = st.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
-    rc.require_at_least_one_weekend = st.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
-    limit_nights = st.checkbox("Limit 7pm–7am (N12) nights per provider", value=st.session_state.rules.get("max_nights_per_provider", 6) is not None)
+    
+    # Load current rules safely
+    rc_data = st.session_state.get("rules", RuleConfig().dict())
+    rc = RuleConfig(**rc_data)
+    
+    # Month-aware recommendation (31-day→16, 30-day→15)
+    rec_max = recommended_max_shifts_for_month()
+    
+    col1, col2 = st.columns(2, gap="medium")
+    
+    with col1:
+        rc.max_shifts_per_provider = st.number_input(
+            "Max shifts/provider",
+            min_value=1, max_value=50,
+            value=int(rc.max_shifts_per_provider or rec_max),
+            key="rule_max_shifts",
+            help=f"Recommended this month: {rec_max}",
+        )
+    
+        rc.min_shifts_per_provider = st.number_input(
+            "Min shifts/provider",
+            min_value=0, max_value=50,
+            value=int(getattr(rc, "min_shifts_per_provider", 12)),
+            key="rule_min_shifts",
+        )
+    
+        rc.min_block_size = st.number_input(
+            "Preferred block size (days)",
+            min_value=1, max_value=7,
+            value=int(getattr(rc, "min_block_size", 1)),
+            key="rule_min_block",
+        )
+    
+    with col2:
+        # Max shifts per block (0 = no max). Default to 7 when unset/None.
+        mbx_init = rc.max_block_size if rc.max_block_size is not None else 7
+        mbx_val = st.number_input(
+            "Max shifts per block (0 = no max)",
+            min_value=0, max_value=31,
+            value=int(mbx_init),
+            key="rule_max_block",
+        )
+        rc.max_block_size = None if mbx_val == 0 else int(mbx_val)
+    
+        rc.min_rest_hours_between_shifts = st.number_input(
+            "Min rest hours between shifts",
+            min_value=0, max_value=48,
+            value=int(getattr(rc, "min_rest_hours_between_shifts", 0)),
+            key="rule_min_rest",
+        )
+    
+        rc.require_at_least_one_weekend = st.checkbox(
+            "Require at least one weekend shift",
+            value=bool(getattr(rc, "require_at_least_one_weekend", False)),
+            key="rule_req_weekend",
+        )
+    
+    # Nights limit toggle + value
+    limit_nights = st.checkbox(
+        "Limit 7pm–7am (N12) nights per provider",
+        value=(getattr(rc, "max_nights_per_provider", None) is not None),
+        key="rule_limit_nights",
+    )
     if limit_nights:
-        default_nights = int(st.session_state.rules.get("max_nights_per_provider", 6) or 0)
-        rc.max_nights_per_provider = st.number_input("Max nights/provider", 0, 50, value=default_nights)
+        default_nights = int(getattr(rc, "max_nights_per_provider", 6) or 6)
+        rc.max_nights_per_provider = st.number_input(
+            "Max nights/provider",
+            min_value=0, max_value=50,
+            value=default_nights,
+            key="rule_max_nights",
+        )
     else:
         rc.max_nights_per_provider = None
+    
+    # Persist back to session
     st.session_state["rules"] = rc.dict()
 
     # ===== Shift Types =====
@@ -1657,6 +1710,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
