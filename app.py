@@ -578,62 +578,61 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             return False
 
 
-    def ok(p: str, d: date, skey: str) -> bool:
-        # eligibility
-        allowed = prov_caps.get(p, [])
-        if allowed and skey not in allowed:
+   def ok(p: str, d: date, skey: str) -> bool:
+    """Return True if provider p can take shift skey on date d."""
+    p_upper = (p or "").strip().upper()
+
+    # 1) Eligibility (allowed shift keys)
+    allowed = st.session_state.get("provider_caps", {}).get(p_upper, [])
+    if allowed and skey not in allowed:
+        return False
+
+    # 2) Provider-specific overrides + month-aware effective max
+    pr = st.session_state.get("provider_rules", {}).get(p_upper, {}) or {}
+    eff_max = pr.get("max_shifts", base_max)
+    if _provider_has_vacation_in_month(pr):
+        eff_max = max(0, (eff_max or 0) - 3)
+    max_nights = pr.get("max_nights", rules.max_nights_per_provider)
+    min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+
+    # 3) Hard block: unavailable (specific date or vacation range)
+    if is_provider_unavailable_on_date(p_upper, d):
+        return False
+
+    # 4) Per-day caps and single-shift-per-day
+    if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+        return False
+    if provider_has_shift_on_day(p, d):
+        return False
+
+    # 5) Max totals (per-provider)
+    if eff_max is not None and counts[p] + 1 > eff_max:
+        return False
+    if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
+        return False
+
+    # 6) Max block size (don’t create a block longer than mbx)
+    if mbx and mbx > 0:
+        if total_block_len_if_assigned(p, d) > mbx:
             return False
 
-        pr = prov_rules.get(p, {})
-        eff_max = pr.get("max_shifts", base_max)
-        if _provider_has_vacation_in_month(pr):
-            eff_max = max(0, (eff_max or 0) - 3)
-        max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+    # 7) Rest windows with existing assignments for this provider
+    sdef = sdefs[skey]
+    start_dt = datetime.combine(d, parse_time(sdef["start"]))
+    end_dt   = datetime.combine(d, parse_time(sdef["end"]))
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
 
-        # unavailability
-        unavail_set = set()
-        for tok in pr.get("unavailable_dates", []):
-            try: unavail_set.add(pd.to_datetime(tok).date())
-            except Exception: pass
-        for rng in pr.get("vacations", []) or []:
-            try:
-                s = pd.to_datetime(rng.get("start")).date()
-                e = pd.to_datetime(rng.get("end")).date()
-                if e < s: s, e = e, s
-                if s <= d <= e: return False
-            except Exception:
-                pass
-
-        # per-day caps
-        if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+    for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper):
+        rest_after_prev = (start_dt - e.end).total_seconds() / 3600
+        rest_before_next = (e.start - end_dt).total_seconds() / 3600
+        if -(min_rest or 0) < rest_after_prev < (min_rest or 0):
             return False
-        if provider_has_shift_on_day(p, d):
+        if -(min_rest or 0) < rest_before_next < (min_rest or 0):
             return False
 
-        # max shifts
-        if eff_max is not None and counts[p] + 1 > eff_max:
-            return False
-        if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
-            return False
+    return True
 
-        # max block size (NEW): ensure we won't create a block longer than mbx
-        if mbx and mbx > 0:
-            if total_block_len_if_assigned(p, d) > mbx:
-                return False
-
-        # rest windows
-        sdef = sdefs[skey]
-        start_dt = datetime.combine(d, parse_time(sdef["start"]))
-        end_dt   = datetime.combine(d, parse_time(sdef["end"]))
-        if end_dt <= start_dt: end_dt += timedelta(days=1)
-        for e in [e for e in events if e.extendedProps.get("provider") == p]:
-            rest1 = (start_dt - e.end).total_seconds()/3600
-            rest2 = (e.start - end_dt).total_seconds()/3600
-            if - (min_rest or 0) < rest1 < (min_rest or 0): return False
-            if - (min_rest or 0) < rest2 < (min_rest or 0): return False
-
-        return True
 
     def score(p: str, d: date, skey: str) -> float:
         sc = 0.0
@@ -1656,90 +1655,198 @@ def schedule_grid_view():
             key="grid_editor",
         )
 
-        # Apply back to events
-        if st.button("Apply grid to calendar"):
-            st.session_state.events = events_for_calendar(st.session_state.events)
+       # Apply back to events
+if st.button("Apply grid to calendar"):
+    # Always normalize existing events before processing
+    st.session_state.events = events_for_calendar(st.session_state.get("events", []))
 
-            sdefs = {s["key"]: s for s in st.session_state.shift_types}
+    sdefs = {s["key"]: s for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())}
+    cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+    prov_caps = st.session_state.get("provider_caps", {})
+    prov_rules = st.session_state.get("provider_rules", {})
+    global_rules = get_global_rules()
+    base_max = recommended_max_shifts_for_month()
+    mbx = getattr(global_rules, "max_block_size", None)
 
-            # keep comments by (date, shift_key, provider)
-            comments_by_key = {}
-            for e in st.session_state.events:
-                ext = (e.get("extendedProps") or {}); skey = ext.get("shift_key")
-                if not skey or skey not in sdefs: continue
-                try:
-                    d = pd.to_datetime(e["start"]).date()
-                except Exception:
-                    continue
-                if d.year == year and d.month == month:
-                    prov0 = (ext.get("provider") or "").strip().upper()
-                    comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
+    # keep comments by (date, shift_key, provider)
+    comments_by_key = {}
+    for e in st.session_state.events:
+        ext = (e.get("extendedProps") or {})
+        skey = ext.get("shift_key")
+        if not skey or skey not in sdefs:
+            continue
+        try:
+            d0 = pd.to_datetime(e["start"]).date()
+        except Exception:
+            continue
+        if d0.year == year and d0.month == month:
+            prov0 = (ext.get("provider") or "").strip().upper()
+            comments_by_key[(d0, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
 
-            def is_grid_event(E: Dict[str, Any]) -> bool:
-                ext = (E.get("extendedProps") or {}); skey = ext.get("shift_key")
-                if not skey or skey not in sdefs: return False
-                try:
-                    d = pd.to_datetime(E["start"]).date()
-                except Exception:
-                    return False
-                return d.year == year and d.month == month
+    # identify grid-controlled events for this month
+    def is_grid_event(E: dict) -> bool:
+        ext = (E.get("extendedProps") or {})
+        skey = ext.get("shift_key")
+        if not skey or skey not in sdefs:
+            return False
+        try:
+            d0 = pd.to_datetime(E["start"]).date()
+        except Exception:
+            return False
+        return d0.year == year and d0.month == month
 
-            preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+    preserved = [E for E in st.session_state.events if not is_grid_event(E)]
 
-            new_events = []
-            seen_day_provider = set()
-            conflicts = []
+    new_events = []
+    seen_day_provider = set()  # {(date, provider)}
+    conflicts = []
 
-            row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
-            day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
+    # helpers that look at what's been added so far (new_events)
+    def day_shift_count(dy, key):
+        return sum(1 for E in new_events
+                   if pd.to_datetime(E["start"]).date() == dy and
+                      (E.get("extendedProps") or {}).get("shift_key") == key)
 
-            for row_label in edited_grid.index:
-                skey = row_to_key.get(row_label)
-                if not skey: continue
-                sdef = sdefs.get(skey)
-                if not sdef: continue
-                for col in day_only_cols:
-                    prov = edited_grid.at[row_label, col]
-                    prov = ("" if prov is None else str(prov)).strip().upper()
-                    if not prov: continue
+    def provider_has_shift_on_day(provider, dy):
+        return any(
+            (E.get("extendedProps") or {}).get("provider", "").upper() == provider and
+            pd.to_datetime(E["start"]).date() == dy
+            for E in new_events
+        )
 
-                    day_date = date(year, month, int(col))
-                    key_dp = (day_date, prov)
-                    if key_dp in seen_day_provider:
-                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
-                        continue
-                    seen_day_provider.add(key_dp)
+    def provider_days(provider):
+        return {pd.to_datetime(E["start"]).date()
+                for E in new_events
+                if (E.get("extendedProps") or {}).get("provider", "").upper() == provider}
 
-                    def _parse(hhmm: str):
-                        hh, mm = hhmm.split(":"); return time(int(hh), int(mm))
-                    start_dt = datetime.combine(day_date, _parse(sdef["start"]))
-                    end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
-                    if end_dt <= start_dt: end_dt += timedelta(days=1)
+    def left_run_len(days_set, d0):
+        run = 0; cur = d0 - timedelta(days=1)
+        while cur in days_set:
+            run += 1; cur -= timedelta(days=1)
+        return run
 
-                    eid = str(uuid.uuid4())
-                    ev = {
-                        "id": eid,
-                        "title": f"{sdef['label']} — {prov}",
-                        "start": start_dt.isoformat(),
-                        "end":   end_dt.isoformat(),
-                        "allDay": False,
-                        "backgroundColor": sdef.get("color"),
-                        "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
-                    }
-                    new_events.append(ev)
-                    k = (day_date, skey, prov)
-                    if k in st.session_state.comments:
-                        st.session_state.comments[eid] = st.session_state.comments[k]
-                    elif k in comments_by_key:
-                        st.session_state.comments[eid] = comments_by_key[k]
+    def right_run_len(days_set, d0):
+        run = 0; cur = d0 + timedelta(days=1)
+        while cur in days_set:
+            run += 1; cur += timedelta(days=1)
+        return run
 
-            st.session_state.events = preserved + new_events
-            st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
+    def total_block_len_if_assigned(provider, d0):
+        ds = provider_days(provider)
+        L = left_run_len(ds, d0)
+        R = right_run_len(ds, d0)
+        return L + 1 + R
 
-            if conflicts:
-                st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
-            else:
-                st.success("Applied grid to calendar.")
+    # live counters for per-provider totals/nights in this month build
+    counts = {}
+    nights = {}
+
+    row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
+    day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
+
+    for row_label in edited_grid.index:
+        skey = row_to_key.get(row_label)
+        if not skey:
+            continue
+        sdef = sdefs.get(skey)
+        if not sdef:
+            continue
+
+        for col in day_only_cols:
+            prov = edited_grid.at[row_label, col]
+            prov = ("" if prov is None else str(prov)).strip().upper()
+            if not prov:
+                continue
+
+            day_date = date(year, month, int(col))
+
+            # one shift per provider per day
+            key_dp = (day_date, prov)
+            if key_dp in seen_day_provider or provider_has_shift_on_day(prov, day_date):
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate same-day assignment; skipped)")
+                continue
+
+            # per-shift daily capacity (in case capacity < number of rows filled)
+            if day_shift_count(day_date, skey) >= int(cap_map.get(skey, 1)):
+                conflicts.append(f"{day_date:%Y-%m-%d} {skey} over capacity; skipped")
+                continue
+
+            # hard block: unavailable (vacation or specific date)
+            if is_provider_unavailable_on_date(prov, day_date):
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (on vacation/unavailable; skipped)")
+                continue
+
+            # eligibility (allowed shift types)
+            allowed = prov_caps.get(prov, [])
+            if allowed and skey not in allowed:
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} not eligible for {skey}; skipped")
+                continue
+
+            # effective max shifts (month default, minus 3 if any vacation in month)
+            pr = prov_rules.get(prov, {}) or {}
+            eff_max = pr.get("max_shifts", base_max)
+            if _provider_has_vacation_in_month(pr):
+                eff_max = max(0, (eff_max or 0) - 3)
+
+            counts.setdefault(prov, 0)
+            nights.setdefault(prov, 0)
+
+            if eff_max is not None and counts[prov] + 1 > eff_max:
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max shifts {eff_max}; skipped")
+                continue
+
+            # max nights
+            max_nights = pr.get("max_nights", global_rules.max_nights_per_provider)
+            if skey == "N12" and max_nights is not None and nights[prov] + 1 > max_nights:
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max nights {max_nights}; skipped")
+                continue
+
+            # max block size (if set)
+            if mbx and mbx > 0 and total_block_len_if_assigned(prov, day_date) > mbx:
+                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} would exceed max block {mbx}; skipped")
+                continue
+
+            # build event
+            def _parse(hhmm: str):
+                hh, mm = hhmm.split(":")
+                return time(int(hh), int(mm))
+            start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+            end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
+
+            eid = str(uuid.uuid4())
+            ev = {
+                "id": eid,
+                "title": f"{sdef['label']} — {prov}",
+                "start": start_dt.isoformat(),
+                "end":   end_dt.isoformat(),
+                "allDay": False,
+                "backgroundColor": sdef.get("color"),
+                "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+            }
+            new_events.append(ev)
+            seen_day_provider.add(key_dp)
+
+            # carry comments forward if any mapping existed
+            k = (day_date, skey, prov)
+            if k in st.session_state.comments:
+                st.session_state.comments[eid] = st.session_state.comments[k]
+            elif k in comments_by_key:
+                st.session_state.comments[eid] = comments_by_key[k]
+
+            # update counters
+            counts[prov] += 1
+            if skey == "N12":
+                nights[prov] += 1
+
+    st.session_state.events = events_for_calendar(preserved + new_events)
+
+    if conflicts:
+        st.warning("Some cells were skipped:\n- " + "\n- ".join(conflicts))
+    else:
+        st.success("Applied grid to calendar.")
+
 
 
 
@@ -1756,6 +1863,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
