@@ -56,6 +56,9 @@ PROVIDER_INITIALS_DEFAULT = [
     "YH","XL","NO","MA","LM","MQ","CM","AI"
 ]
 
+DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
+
+
 def _normalize_initials_list(items):
     return sorted({str(x).strip().upper() for x in items if str(x).strip()})
 
@@ -119,7 +122,8 @@ def init_session_state():
 
     # Eligibility & capacities defaults
     st.session_state.setdefault("provider_caps", {})  # initials -> allowed shift keys
-    st.session_state.setdefault("shift_capacity", {"N12": 1, "NB": 1, "R12": 1, "A12": 1, "A10": 2})
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+
 
 
 # -------------------------
@@ -436,15 +440,26 @@ def sidebar_inputs():
             s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
 
     # -------- Daily shift capacities (A10=2, NB=1 by default) --------
-    st.sidebar.subheader("Daily shift capacities")
-    cap_map = dict(st.session_state.shift_capacity)
-    for s in st.session_state.shift_types:
-        key = s["key"]; label = s["label"]
-        default_cap = int(cap_map.get(key, 2 if key == "A10" else 1))
-        cap_map[key] = int(st.sidebar.number_input(
-            f"{label} ({key}) capacity/day", 0, 10, value=default_cap, key=f"cap_{key}"
-        ))
-    st.session_state.shift_capacity = cap_map
+    # -------- Daily shift capacities --------
+st.sidebar.subheader("Daily shift capacities")
+
+# Optional: reset button
+if st.sidebar.button("Reset to default capacities"):
+    st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
+    st.toast("Capacities reset to defaults.", icon="♻️")
+
+cap_map = dict(st.session_state.shift_capacity)
+for s in st.session_state.shift_types:
+    key = s["key"]; label = s["label"]
+    default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
+    cap_map[key] = int(
+        st.sidebar.number_input(
+            f"{label} ({key}) capacity/day",
+            min_value=0, max_value=50, value=default_cap, key=f"cap_{key}"
+        )
+    )
+st.session_state.shift_capacity = cap_map
+
 
     # -------- Provider shift eligibility --------
     st.sidebar.subheader("Provider shift eligibility")
@@ -891,6 +906,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
