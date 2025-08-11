@@ -1115,26 +1115,7 @@ def engine_panel():
         )
     st.session_state["shift_capacity"] = cap_map
 
-    # ===== Provider eligibility (bulk) =====
-    st.subheader("Provider shift eligibility (bulk)")
-    with st.expander("Assign allowed shift types per provider", expanded=False):
-        label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-        key_for_label = {v: k for k, v in label_for_key.items()}
-        roster = st.session_state.providers_df["initials"].astype(str).tolist()
-        if not roster:
-            st.caption("Add providers to configure eligibility.")
-        else:
-            filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
-            view_roster = [p for p in roster if filt in p] if filt else roster
-            st.caption("Tip: leave empty or select all to allow ALL shifts.")
-            for init in view_roster:
-                allowed_keys = st.session_state.provider_caps.get(init, [])
-                default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
-                selected = st.multiselect(init, options=list(label_for_key.values()), default=default_labels, key=f"elig_{init}")
-                if len(selected) == 0 or len(selected) == len(label_for_key):
-                    st.session_state.provider_caps.pop(init, None)
-                else:
-                    st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
+
 
 def google_calendar_panel():
     st.subheader("Google Calendar Sync")
@@ -1977,6 +1958,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
