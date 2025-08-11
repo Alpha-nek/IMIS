@@ -1112,6 +1112,7 @@ def render_calendar():
 def provider_rules_panel():
     st.header("Provider-specific rules")
 
+    # Roster
     roster = (
         st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
         if not st.session_state.providers_df.empty else []
@@ -1120,6 +1121,7 @@ def provider_rules_panel():
         st.info("Add providers first.")
         return
 
+    # Global selected provider (set by the Engine panel)
     sel = (st.session_state.get("highlight_provider", "") or "").strip().upper()
     if not sel:
         st.info("Select a provider in the Engine to edit rules.")
@@ -1128,131 +1130,131 @@ def provider_rules_panel():
         st.warning(f"{sel} not in current roster.")
         return
 
-    # ... (rest of the rules editor as previously provided)
+    # Backing stores (created if missing)
+    rules_map = st.session_state.setdefault("provider_rules", {})
+    st.session_state.setdefault("provider_caps", {})
 
-    # Backing stores
-    # ... (keep your header and early `sel` checks)
+    # Shift label maps
+    stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
+    label_for_key = {s["key"]: s["label"] for s in stypes}
+    key_for_label = {v: k for k, v in label_for_key.items()}
 
-rules_map = st.session_state.setdefault("provider_rules", {})
-global_rules = get_global_rules()
+    # Allowed shift types
+    current_allowed = st.session_state["provider_caps"].get(sel, [])
+    default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
+    st.subheader(f"Allowed shift types — {sel}")
+    picked_labels = st.multiselect(
+        "Assign only these shift types (leave empty to allow ALL)",
+        options=list(label_for_key.values()),
+        default=default_labels,
+        key=f"pr_allowed_{sel}"
+    )
+    if len(picked_labels) == 0:
+        st.session_state["provider_caps"].pop(sel, None)
+    else:
+        st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
 
+    # Overrides & availability
+    st.markdown("---")
+    st.subheader("Overrides (optional)")
 
+    # Month-aware recommended default
+    base_default = recommended_max_shifts_for_month()
 
-# Allowed shifts (unchanged)
-label_for_key, key_for_label = get_shift_label_maps()
+    curr = rules_map.get(sel, {})
+    c1, c2 = st.columns(2)
+    with c1:
+        use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
+        st.caption(f"Recommended default this month: **{base_default}**")
+        max_sh = st.number_input("Max shifts (this month)", 1, 50,
+                                 value=int(curr.get("max_shifts", base_default)))
+    with c2:
+        global_rules = get_global_rules()
+        use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
+        default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
+        max_n = st.number_input("Max nights (this month)", 0, 50,
+                                value=int(curr.get("max_nights", default_max_n)))
 
-current_allowed = st.session_state.get("provider_caps", {}).get(sel, [])
-default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
+    use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
+    min_rest = st.number_input("Min rest hours between shifts", 0, 48,
+                               value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
 
-st.subheader(f"Allowed shift types — {sel}")
-picked_labels = st.multiselect(
-    "Assign only these shift types (leave empty to allow ALL)",
-    options=list(label_for_key.values()),
-    default=default_labels,
-    key=f"pr_allowed_{sel}"
-)
-if len(picked_labels) == 0:
-    st.session_state["provider_caps"].pop(sel, None)
-else:
-    st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
+    st.markdown("---")
+    st.subheader("Unavailable specific dates")
+    dates_txt = st.text_input(
+        "YYYY-MM-DD, comma-separated",
+        value=",".join(curr.get("unavailable_dates", [])),
+        key=f"pr_unavail_{sel}"
+    )
 
-st.markdown("---")
-st.subheader("Overrides (optional)")
-curr = rules_map.get(sel, {})
-c1, c2 = st.columns(2)
-with c1:
-    use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
-    # Show month-aware recommended default for context
-    st.caption(f"Recommended default this month: **{recommended_max_shifts_for_month()}**")
-    max_sh = st.number_input("Max shifts (this month)", 1, 50,
-                             value=int(curr.get("max_shifts", recommended_max_shifts_for_month())))
-with c2:
-    use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
-    default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
-    max_n  = st.number_input("Max nights (this month)", 0, 50,
-                             value=int(curr.get("max_nights", default_max_n)))
+    # Vacations (date ranges)
+    st.markdown("---")
+    st.subheader("Vacations (date ranges)")
+    vac_list = curr.get("vacations", [])
+    if not isinstance(vac_list, list):
+        vac_list = []
 
-use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
-min_rest = st.number_input("Min rest hours between shifts", 0, 48,
-                           value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
-
-st.markdown("---")
-st.subheader("Unavailable specific dates")
-dates_txt = st.text_input(
-    "YYYY-MM-DD, comma-separated",
-    value=",".join(curr.get("unavailable_dates", [])),
-    key=f"pr_unavail_{sel}"
-)
-
-# >>> NEW: Vacations (date ranges) <<<
-st.markdown("---")
-st.subheader("Vacations (date ranges)")
-vac_list = curr.get("vacations", [])
-if not isinstance(vac_list, list):
-    vac_list = []
-
-# add input row
-vc1, vc2, vc3 = st.columns([1, 1, 1])
-with vc1:
-    v_start = st.date_input("Start", key=f"pr_vac_start_{sel}")
-with vc2:
-    v_end = st.date_input("End", key=f"pr_vac_end_{sel}")
-with vc3:
-    if st.button("Add vacation", key=f"pr_vac_add_{sel}"):
-        if v_start and v_end:
-            s = min(v_start, v_end)
-            e = max(v_start, v_end)
-            vac_list.append({"start": str(s), "end": str(e)})
-            curr["vacations"] = vac_list
-            rules_map[sel] = curr
-            st.success(f"Added vacation {s} → {e}")
-        else:
-            st.warning("Pick both start and end.")
-
-# show existing vacations with remove buttons
-if vac_list:
-    for i, rng in enumerate(vac_list):
-        rr1, rr2, rr3 = st.columns([2, 2, 1])
-        rr1.markdown(f"**Start:** {rng.get('start','')}")
-        rr2.markdown(f"**End:** {rng.get('end','')}")
-        if rr3.button("Remove", key=f"pr_vac_del_{sel}_{i}"):
-            vac_list.pop(i)
-            curr["vacations"] = vac_list
-            rules_map[sel] = curr
-            st.experimental_rerun()
-
-st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
-
-if st.button("Save provider rules", key=f"pr_save_{sel}"):
-    new_entry = {}
-    if use_max:    new_entry["max_shifts"] = int(max_sh)
-    if use_nights: new_entry["max_nights"] = int(max_n)
-    if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
-
-    # normalize dates
-    import pandas as pd
-    unavail = []
-    for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
-        try:
-            unavail.append(str(pd.to_datetime(tok).date()))
-        except Exception:
-            pass
-    if unavail:
-        new_entry["unavailable_dates"] = unavail
+    vc1, vc2, vc3 = st.columns([1, 1, 1])
+    with vc1:
+        v_start = st.date_input("Start", key=f"pr_vac_start_{sel}")
+    with vc2:
+        v_end = st.date_input("End", key=f"pr_vac_end_{sel}")
+    with vc3:
+        if st.button("Add vacation", key=f"pr_vac_add_{sel}"):
+            if v_start and v_end:
+                s = min(v_start, v_end)
+                e = max(v_start, v_end)
+                vac_list.append({"start": str(s), "end": str(e)})
+                curr["vacations"] = vac_list
+                rules_map[sel] = curr
+                st.success(f"Added vacation {s} → {e}")
+            else:
+                st.warning("Pick both start and end.")
 
     if vac_list:
-        new_entry["vacations"] = vac_list
+        for i, rng in enumerate(list(vac_list)):
+            rr1, rr2, rr3 = st.columns([2, 2, 1])
+            rr1.markdown(f"**Start:** {rng.get('start','')}")
+            rr2.markdown(f"**End:** {rng.get('end','')}")
+            if rr3.button("Remove", key=f"pr_vac_del_{sel}_{i}"):
+                vac_list.pop(i)
+                curr["vacations"] = vac_list
+                rules_map[sel] = curr
+                st.experimental_rerun()
 
-    notes_val = st.session_state.get(f"pr_notes_{sel}", "")
-    if notes_val:
-        new_entry["notes"] = notes_val
+    st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
 
-    if new_entry:
-        rules_map[sel] = new_entry
-    else:
-        rules_map.pop(sel, None)
-    st.success("Saved.")
+    if st.button("Save provider rules", key=f"pr_save_{sel}"):
+        new_entry = {}
+        if use_max:    new_entry["max_shifts"] = int(max_sh)
+        if use_nights: new_entry["max_nights"] = int(max_n)
+        if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
+
+        # normalize dates
+        import pandas as pd
+        unavail = []
+        for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
+            try:
+                unavail.append(str(pd.to_datetime(tok).date()))
+            except Exception:
+                pass
+        if unavail:
+            new_entry["unavailable_dates"] = unavail
+
+        if vac_list:
+            new_entry["vacations"] = vac_list
+
+        notes_val = st.session_state.get(f"pr_notes_{sel}", "")
+        if notes_val:
+            new_entry["notes"] = notes_val
+
+        if new_entry:
+            rules_map[sel] = new_entry
+        else:
+            rules_map.pop(sel, None)
+        st.success("Saved.")
+
 
 
 
@@ -1490,6 +1492,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
