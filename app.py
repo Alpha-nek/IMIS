@@ -439,8 +439,8 @@ def sidebar_inputs():
             s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
             s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
 
-    # -------- Daily shift capacities (A10=2, NB=1 by default) --------
-    # -------- Daily shift capacities --------
+    # -------- Daily shift capacities (A10=2, NB=1 by default) -------
+# -------- Daily shift capacities --------
 st.sidebar.subheader("Daily shift capacities")
 
 # Optional: reset button
@@ -459,6 +459,7 @@ for s in st.session_state.shift_types:
         )
     )
 st.session_state.shift_capacity = cap_map
+
 
 
     # -------- Provider shift eligibility --------
