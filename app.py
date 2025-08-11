@@ -509,26 +509,27 @@ def render_calendar():
 
 
 def schedule_grid_view():
-    st.subheader("Monthly Grid — Shifts × Days")
+    st.subheader("Monthly Grid — Shifts × Days (Editable)")
     if not st.session_state.shift_types:
         st.info("No shift types configured.")
         return
-    # Determine days for the selected month
+
+    import re
+
+    # Month context
     year = st.session_state.month.year
     month = st.session_state.month.month
     days = make_month_days(year, month)
     day_nums = [d.day for d in days]
 
-    # Build row labels and mapping
+    # Shift rows
     stypes = st.session_state.shift_types
-    row_labels = [f"{s['key']} — {s['label']}" for s in stypes]
     key_to_label = {s["key"]: f"{s['key']} — {s['label']}" for s in stypes}
+    label_to_key = {v: k for k, v in key_to_label.items()}
+    row_labels = [key_to_label[s["key"]] for s in stypes]
 
-    # Initialize empty grid
-    import pandas as pd
+    # Build grid from existing events
     grid = pd.DataFrame("", index=row_labels, columns=day_nums)
-
-    # Fill from events (ignore custom events without a shift_key)
     for e in st.session_state.events:
         ext = (e.get("extendedProps") or {})
         skey = ext.get("shift_key")
@@ -540,18 +541,120 @@ def schedule_grid_view():
             continue
         if d.year != year or d.month != month:
             continue
-        col = d.day
-        row = key_to_label[skey]
         prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
-        prev = grid.at[row, col]
-        grid.at[row, col] = (prev + ", " + prov) if isinstance(prev, str) and prev else prov
+        r = key_to_label[skey]
+        c = d.day
+        prev = grid.at[r, c]
+        grid.at[r, c] = (prev + ", " + prov) if prev else prov
 
-    # Show grid
-    st.dataframe(grid, use_container_width=True, height=400)
+    # Helper: show valid providers
+    valid_provs = sorted(
+        st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
+    ) if not st.session_state.providers_df.empty else []
+    st.caption("Edit cells with provider initials (comma-separated for multiple).")
+    if valid_provs:
+        st.write("**Valid provider initials:**", ", ".join(valid_provs))
 
-    # Optional: download grid as CSV
-    csv = grid.to_csv().encode("utf-8")
-    st.download_button("Download Grid CSV", data=csv, file_name=f"shift_grid_{st.session_state.month:%Y_%m}.csv", mime="text/csv")
+    # Make it editable
+    edited_grid = st.data_editor(
+        grid,
+        num_rows="fixed",
+        use_container_width=True,
+        height=480,
+        key="grid_editor",
+    )
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Apply grid to calendar"):
+            # Lookups
+            sdefs = {s["key"]: s for s in st.session_state.shift_types}
+
+            # Map old comments by (date, shift_key, provider) so we can reattach after rebuild
+            comments_by_key = {}
+            for e in st.session_state.events:
+                ext = (e.get("extendedProps") or {})
+                skey = ext.get("shift_key")
+                if not skey or skey not in sdefs:
+                    continue
+                try:
+                    d = pd.to_datetime(e["start"]).date()
+                except Exception:
+                    continue
+                if d.year == year and d.month == month:
+                    prov = (ext.get("provider") or "").strip().upper()
+                    k = (d, skey, prov)
+                    if e["id"] in st.session_state.comments:
+                        comments_by_key[k] = list(st.session_state.comments.get(e["id"], []))
+
+            # Keep events that are NOT part of this month's shift grid
+            def is_grid_event(E: Dict[str, Any]) -> bool:
+                ext = (E.get("extendedProps") or {})
+                skey = ext.get("shift_key")
+                if not skey or skey not in sdefs:
+                    return False
+                try:
+                    d = pd.to_datetime(E["start"]).date()
+                except Exception:
+                    return False
+                return d.year == year and d.month == month
+
+            preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+
+            # Rebuild month events from edited grid
+            new_events = []
+            for row_label in edited_grid.index:
+                skey = label_to_key.get(row_label)
+                if not skey:
+                    continue
+                sdef = sdefs[skey]
+                for col in edited_grid.columns:
+                    cell = edited_grid.at[row_label, col]
+                    if cell is None:
+                        cell = ""
+                    if not isinstance(cell, str):
+                        cell = str(cell)
+
+                    # Split tokens (commas, semicolons, or multiple spaces)
+                    tokens = [t.strip().upper() for t in re.split(r"[,;/]+|\s{2,}", cell) if t.strip()]
+                    if len(tokens) == 0 and cell.strip():
+                        tokens = [cell.strip().upper()]  # single value without commas
+
+                    day_date = date(year, month, int(col))
+
+                    for prov in tokens:
+                        # Build event datetimes (handle overnight)
+                        def _parse(hhmm: str):
+                            hh, mm = hhmm.split(":")
+                            return time(int(hh), int(mm))
+                        start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+                        end_dt = datetime.combine(day_date, _parse(sdef["end"]))
+                        if end_dt <= start_dt:
+                            end_dt += timedelta(days=1)
+
+                        eid = str(uuid.uuid4())
+                        ev = {
+                            "id": eid,
+                            "title": f"{sdef['label']} — {prov if prov else 'UNASSIGNED'}",
+                            "start": start_dt.isoformat(),
+                            "end": end_dt.isoformat(),
+                            "allDay": False,
+                            "backgroundColor": sdef.get("color"),
+                            "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+                        }
+                        new_events.append(ev)
+
+                        # Reattach comments if we had any for this (date, shift, provider)
+                        k = (day_date, skey, prov)
+                        if k in comments_by_key:
+                            st.session_state.comments[eid] = comments_by_key[k]
+
+            st.session_state.events = preserved + new_events
+            st.success("Applied grid to calendar.")
+
+    with c2:
+        if st.button("Reload grid from calendar"):
+            st.experimental_rerun()
 
 
 # -------------------------
