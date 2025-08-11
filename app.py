@@ -205,6 +205,11 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
 def get_global_rules():
     return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
 
+def get_shift_label_maps():
+    stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
+    label_for_key, key_for_label = get_shift_label_maps()
+
+    return label_for_key, key_for_label
 
 
 # -------------------------
@@ -1120,8 +1125,8 @@ global_rules = get_global_rules()
 
 
 # Allowed shifts (unchanged)
-label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-key_for_label = {v: k for k, v in label_for_key.items()}
+label_for_key, key_for_label = get_shift_label_maps()
+
 current_allowed = st.session_state.get("provider_caps", {}).get(sel, [])
 default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
@@ -1464,21 +1469,10 @@ def schedule_grid_view():
 
 def main():
     init_session_state()
-    st.session_state.events = events_for_calendar(st.session_state.get("events", []))
-
-
-    # Three columns across the whole page
-    left_col, mid_col, right_col = st.columns([3, 5, 3], gap="large")
-
-    with left_col:
-        engine_panel()          # includes the ONE provider dropdown
-
-    with mid_col:
-        render_calendar()       # uses st.session_state.highlight_provider
-        schedule_grid_view()    # uses st.session_state.highlight_provider
-
-    with right_col:
-        provider_rules_panel()  # uses st.session_state.highlight_provider
+    left_col, mid_col, right_col = st.columns([3,5,3], gap="large")
+    with left_col:  engine_panel()
+    with mid_col:   render_calendar(); schedule_grid_view()
+    with right_col: provider_rules_panel()
 
 main()
 
