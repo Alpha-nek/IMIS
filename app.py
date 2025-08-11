@@ -328,8 +328,7 @@ def sidebar_inputs():
     st.sidebar.caption("Or paste initials below (comma/space/newline separated)")
     pasted = st.sidebar.text_area("Initials", value=" ".join(st.session_state.providers_df["initials"].tolist()))
     if st.sidebar.button("Use pasted initials"):
-        toks = [t.strip().upper() for t in pasted.replace(",", "
-").splitlines() if t.strip()]
+        toks = [t.strip().upper() for t in pasted.replace(",", " ").splitlines() if t.strip()]
         st.session_state.providers_df = pd.DataFrame({"initials": sorted(set(toks))})
 
     # Rules
@@ -741,4 +740,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
