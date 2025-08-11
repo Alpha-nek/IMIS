@@ -531,7 +531,7 @@ def top_controls():
         idx = options.index(default) if default in options else 0
         sel = st.selectbox("Highlight provider (initials)", options=options, index=idx)
         st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
-        st.experimental_rerun()
+    
 
 
     # Generate & Validate buttons
@@ -575,6 +575,7 @@ def provider_selector():
     idx = options.index(cur) if cur and cur in options else 0
 
     sel = st.selectbox("Provider", options=options, index=idx, key="provider_selector")
+    st.experimental_rerun()
     st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
 
 
@@ -1039,6 +1040,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
