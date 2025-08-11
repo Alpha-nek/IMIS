@@ -326,12 +326,10 @@ def sidebar_inputs():
         else:
             st.session_state.providers_df = pd.DataFrame({"initials": df["initials"].astype(str).str.upper().str.strip()}).drop_duplicates()
     st.sidebar.caption("Or paste initials below (comma/space/newline separated)")
-    pasted = st.sidebar.text_area(
-    "Initials",
-    value="\n".join(st.session_state.providers_df["initials"].tolist())
-)
+    init_list = st.session_state.providers_df['initials'].astype(str).tolist() if not st.session_state.providers_df.empty else []
+pasted = st.sidebar.text_area("Initials", value="\n".join(init_list))
 
-".join(st.session_state.providers_df["initials"].tolist()))
+
     if st.sidebar.button("Use pasted initials"):
         toks = [t.strip().upper() for t in pasted.replace(",", "
 ").splitlines() if t.strip()]
