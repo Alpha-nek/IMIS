@@ -223,6 +223,22 @@ def get_global_rules():
 def init_session_state():
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+     # Provider roster (preloaded with your list)
+    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
+        st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
+    else:
+        # Ensure normalization if present
+        df = st.session_state["providers_df"]
+        if df.empty:
+            st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
+        else:
+            st.session_state["providers_df"] = pd.DataFrame({
+                "initials": _normalize_initials_list(df["initials"].tolist())
+            })
+
+    # Eligibility & capacities defaults
+    st.session_state.setdefault("provider_caps", {})  # initials -> allowed shift keys
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
     
 def _bootstrap_session_state():
     from datetime import date
@@ -247,22 +263,7 @@ _bootstrap_session_state()
 
 
 
-    # Provider roster (preloaded with your list)
-    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
-        st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
-    else:
-        # Ensure normalization if present
-        df = st.session_state["providers_df"]
-        if df.empty:
-            st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
-        else:
-            st.session_state["providers_df"] = pd.DataFrame({
-                "initials": _normalize_initials_list(df["initials"].tolist())
-            })
-
-    # Eligibility & capacities defaults
-    st.session_state.setdefault("provider_caps", {})  # initials -> allowed shift keys
-    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+   
 
 
 
