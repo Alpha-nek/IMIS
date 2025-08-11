@@ -921,22 +921,22 @@ def render_calendar():
     )
 
     # Prepare JSON-safe events
-events = events_for_calendar(st.session_state.get("events", []))
-
-# (Optional) filter calendar by the global provider selection
-hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
-if hi:
-    events = [
-        e for e in events
-        if (e.get("extendedProps", {}).get("provider", "") or "").upper() == hi
-    ]
-
-# Render the calendar
-state = calendar(
-    events=events,
-    # add your existing options/custom_css/etc. here if needed
-    key="calendar",
-)
+    events = events_for_calendar(st.session_state.get("events", []))
+    
+    # (Optional) filter calendar by the global provider selection
+    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+    if hi:
+        events = [
+            e for e in events
+            if (e.get("extendedProps", {}).get("provider", "") or "").upper() == hi
+        ]
+    
+    # Render the calendar
+    state = calendar(
+        events=events,
+        # add your existing options/custom_css/etc. here if needed
+        key="calendar",
+    )
 
     # Handle interactions
     if state.get("eventClick"):
@@ -1349,6 +1349,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
