@@ -464,23 +464,23 @@ st.session_state.shift_capacity = cap_map
 
     # -------- Provider shift eligibility --------
 st.sidebar.subheader("Provider shift eligibility")
-    with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
-        label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-        key_for_label = {v: k for k, v in label_for_key.items()}
-        roster = st.session_state.providers_df["initials"].tolist()
-        if not roster:
-            st.caption("Add providers to configure eligibility.")
-        else:
-            for init in roster:
-                allowed_keys = st.session_state.provider_caps.get(init, [])
-                default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
-                selected = st.multiselect(
-                    init,
-                    options=list(label_for_key.values()),
-                    default=default_labels,
-                    key=f"elig_{init}"
-                )
-                st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
+with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
+    label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+    key_for_label = {v: k for k, v in label_for_key.items()}
+    roster = st.session_state.providers_df["initials"].tolist()
+    if not roster:
+        st.caption("Add providers to configure eligibility.")
+    else:
+        for init in roster:
+            allowed_keys = st.session_state.provider_caps.get(init, [])
+            default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
+            selected = st.multiselect(
+                init,
+                options=list(label_for_key.values()),
+                default=default_labels,
+                key=f"elig_{init}"
+            )
+            st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
 
               
 @st.cache_data
@@ -907,6 +907,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
