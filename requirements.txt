@@ -4,3 +4,8 @@ numpy
 pydantic
 streamlit-calendar
 python-dateutil
+google-auth>=2.29
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.131.0
+httplib2>=0.22.0
