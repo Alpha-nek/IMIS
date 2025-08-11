@@ -603,39 +603,39 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         return sc
 
 
-for current_day in days:
-    for shift_key in stypes:
-        capacity = cap_map.get(shift_key, 1)
-        for _ in range(capacity):
-            # Find eligible providers using ok()
-            candidates = [prov for prov in providers if ok(prov, current_day, shift_key)]
-            if not candidates:
-                continue
-
-            # Pick the candidate with the best score
-            best_provider = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
-            sdef = sdefs[shift_key]
-
-            # Build the event for best_provider on current_day
-            start_dt = datetime.combine(current_day, parse_time(sdef["start"]))
-            end_dt = datetime.combine(current_day, parse_time(sdef["end"]))
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
-
-            event = SEvent(
-                id=str(uuid.uuid4()),
-                title=f"{sdef['label']} — {best_provider}",
-                start=start_dt,
-                end=end_dt,
-                backgroundColor=sdef.get("color"),
-                extendedProps={"provider": best_provider, "shift_key": shift_key, "label": sdef["label"]},
-            )
-            events.append(event)
-            counts[best_provider] += 1
-            if shift_key == "N12":
-                nights[best_provider] += 1
-
-return events
+    for current_day in days:
+        for shift_key in stypes:
+            capacity = cap_map.get(shift_key, 1)
+            for _ in range(capacity):
+                # Find eligible providers using ok()
+                candidates = [prov for prov in providers if ok(prov, current_day, shift_key)]
+                if not candidates:
+                    continue
+    
+                # Pick the candidate with the best score
+                best_provider = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
+                sdef = sdefs[shift_key]
+    
+                # Build the event for best_provider on current_day
+                start_dt = datetime.combine(current_day, parse_time(sdef["start"]))
+                end_dt = datetime.combine(current_day, parse_time(sdef["end"]))
+                if end_dt <= start_dt:
+                    end_dt += timedelta(days=1)
+    
+                event = SEvent(
+                    id=str(uuid.uuid4()),
+                    title=f"{sdef['label']} — {best_provider}",
+                    start=start_dt,
+                    end=end_dt,
+                    backgroundColor=sdef.get("color"),
+                    extendedProps={"provider": best_provider, "shift_key": shift_key, "label": sdef["label"]},
+                )
+                events.append(event)
+                counts[best_provider] += 1
+                if shift_key == "N12":
+                    nights[best_provider] += 1
+    
+    return events
 
 # -------------------------
 # UI
@@ -1819,6 +1819,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
