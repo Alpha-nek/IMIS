@@ -538,7 +538,7 @@ def top_controls():
         st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
 
     # Generate & Validate buttons
-    g1, g2, g3, g4 = st.columns(4)
+    g1, g2, g3 = st.columns(4)
     with g1:
         if st.button("Generate Draft from Rules"):
             providers = st.session_state.providers_df["initials"].tolist()
@@ -563,8 +563,6 @@ def top_controls():
         if st.button("Clear Month"):
             st.session_state.events = []
             st.session_state.comments = {}
-    with g4:
-        st.download_button("Download JSON", data=json.dumps(st.session_state.events, indent=2), file_name=f"schedule_{st.session_state.month:%Y_%m}.json")
 
 
 
@@ -939,6 +937,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
