@@ -341,9 +341,53 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 p_idx += 1
     return events
 
+
 # -------------------------
 # UI
 # -------------------------
+
+def _event_to_dict(e):
+    # Convert SEvent -> dict, and coerce datetimes to ISO strings
+    from datetime import datetime
+    import pandas as pd
+
+    if isinstance(e, dict):
+        out = dict(e)
+        # start / end may be datetime or pandas Timestamp
+        for k in ("start", "end"):
+            v = out.get(k)
+            if isinstance(v, datetime):
+                out[k] = v.isoformat()
+            elif hasattr(v, "to_pydatetime"):  # pandas Timestamp
+                out[k] = v.to_pydatetime().isoformat()
+            elif isinstance(v, str):
+                # leave as-is
+                pass
+        # ensure extendedProps exists
+        out.setdefault("extendedProps", {})
+        return out
+
+    # If it's an SEvent-like object
+    if hasattr(e, "to_json_event"):
+        return _event_to_dict(e.to_json_event())
+
+    # Best-effort generic object
+    try:
+        return {
+            "id": getattr(e, "id", None),
+            "title": getattr(e, "title", None),
+            "start": getattr(getattr(e, "start", None), "isoformat", lambda: None)(),
+            "end": getattr(getattr(e, "end", None), "isoformat", lambda: None)(),
+            "backgroundColor": getattr(e, "backgroundColor", None),
+            "extendedProps": getattr(e, "extendedProps", {}) or {},
+        }
+    except Exception:
+        # last resort: string-ify
+        return {"raw": str(e)}
+
+def _serialize_events_for_download(events):
+    return [_event_to_dict(e) for e in (events or [])]
+
 
 def sidebar_inputs():
     st.sidebar.header("Providers & Rules")
@@ -546,6 +590,7 @@ def top_controls():
             else:
                 rules = RuleConfig(**st.session_state.rules)
                 days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+                st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
                 st.session_state.events = [e.to_fc() for e in assign_greedy(providers, days, st.session_state.shift_types, rules)]
                 st.session_state.comments = {}
     with g2:
@@ -565,6 +610,8 @@ def top_controls():
 
 def engine_panel():
     st.header("Engine")
+
+    
 
     # --- Global provider selector here (the only one) ---
     provider_selector()
@@ -756,12 +803,13 @@ def engine_panel():
                 st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
                 st.toast("Cleared this month.", icon="🧹")
         with ccc2:
-            import json
+            safe_events = _serialize_events_for_download(st.session_state.events)
             st.download_button(
                 "Download JSON",
-                data=json.dumps(st.session_state.events, indent=2),
+                data=json.dumps(safe_events, indent=2),
                 file_name=f"schedule_{st.session_state.month:%Y_%m}.json"
             )
+
 
 
 def provider_selector():
@@ -1203,6 +1251,8 @@ def schedule_grid_view():
                             st.session_state.comments[eid] = comments_by_key[k]
 
                 st.session_state.events = preserved + new_events
+                st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
+
                 if conflicts:
                     st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
                 else:
@@ -1237,6 +1287,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
