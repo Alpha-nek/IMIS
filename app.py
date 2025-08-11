@@ -63,9 +63,6 @@ def _normalize_initials_list(items):
     return sorted({str(x).strip().upper() for x in items if str(x).strip()})
 
 
-class RuleConfig(BaseModel):
-    
-from typing import Optional
 
 class RuleConfig(BaseModel):   # or dataclass, same idea
     # ... existing fields ...
@@ -1666,6 +1663,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
