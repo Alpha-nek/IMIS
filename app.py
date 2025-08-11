@@ -863,7 +863,7 @@ def engine_panel():
                     except Exception:
                         return False
                 st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
-                st.toast("Cleared this month.", icon="🧹") )
+                st.toast("Cleared this month.", icon="🧹") 
 
 
 
@@ -1343,6 +1343,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
