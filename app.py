@@ -463,24 +463,56 @@ st.session_state.shift_capacity = cap_map
 
 
     # -------- Provider shift eligibility --------
+
 st.sidebar.subheader("Provider shift eligibility")
 with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
     label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
     key_for_label = {v: k for k, v in label_for_key.items()}
-    roster = st.session_state.providers_df["initials"].tolist()
+    all_shift_labels = list(label_for_key.values())
+
+    roster = st.session_state.providers_df["initials"].astype(str).tolist() if not st.session_state.providers_df.empty else []
     if not roster:
         st.caption("Add providers to configure eligibility.")
     else:
-        for init in roster:
-            allowed_keys = st.session_state.provider_caps.get(init, [])
-            default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
-            selected = st.multiselect(
-                init,
-                options=list(label_for_key.values()),
-                default=default_labels,
-                key=f"elig_{init}"
-            )
-            st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
+        # Quick filter to find a provider fast
+        filt = st.text_input("Filter providers (by initials)", value="", key="elig_filter").strip().upper()
+        view_roster = [p for p in roster if filt in p] if filt else roster
+
+        # Hint
+        st.caption("Tip: leave a provider empty (or select all shifts) to allow ALL shift types for that provider.")
+
+        for init in view_roster:
+            allowed_keys = st.session_state.provider_caps.get(init, None)  # None => no restriction stored
+            # Build current defaults (labels) if we have a restriction list
+            default_labels = [label_for_key[k] for k in (allowed_keys or []) if k in label_for_key]
+
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                selected_labels = st.multiselect(
+                    init,
+                    options=all_shift_labels,
+                    default=default_labels,
+                    key=f"elig_{init}"
+                )
+
+            with c2:
+                if st.button("All shifts", key=f"elig_all_{init}", help="Remove restrictions for this provider"):
+                    # Remove restriction entirely
+                    if "provider_caps" in st.session_state and init in st.session_state.provider_caps:
+                        del st.session_state.provider_caps[init]
+                    # Also update the widget value and rerun to reflect
+                    st.session_state[f"elig_{init}"] = []
+                    st.experimental_rerun()
+
+            # Persist selection:
+            # - If nothing selected OR all selected => treat as NO restriction (remove from map)
+            # - Else store the exact allowed shift keys
+            if len(selected_labels) == 0 or len(selected_labels) == len(all_shift_labels):
+                if init in st.session_state.provider_caps:
+                    del st.session_state.provider_caps[init]
+            else:
+                st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected_labels]
+
 
               
 @st.cache_data
@@ -907,6 +939,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
