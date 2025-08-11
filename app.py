@@ -1009,18 +1009,6 @@ def engine_panel():
             else:
                 st.info("No providers selected.")
 
-    with st.expander("Replace entire list", expanded=False):
-        repl = st.text_area("Paste full roster (will replace all)", value="\n".join(current_list), key="replace_all_area")
-        if st.button("Replace list", key="btn_replace_all"):
-            new_roster = _normalize_initials_list(repl.replace(",", "\n").split())
-            if new_roster:
-                st.session_state.providers_df = pd.DataFrame({"initials": new_roster})
-                st.session_state["provider_caps"] = {
-                    k: v for k, v in st.session_state.provider_caps.items() if k in new_roster
-                }
-                st.toast("Provider roster replaced.", icon="♻️")
-            else:
-                st.warning("Replacement list is empty — keeping current roster.")
 
     # ===== Global rules =====
    # ===== Global rules =====
@@ -1989,6 +1977,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
