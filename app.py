@@ -538,7 +538,7 @@ def top_controls():
         st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
 
     # Generate & Validate buttons
-    g1, g2, g3 = st.columns(4)
+    g1, g2, g3 = st.columns(3)
     with g1:
         if st.button("Generate Draft from Rules"):
             providers = st.session_state.providers_df["initials"].tolist()
@@ -937,6 +937,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
