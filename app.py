@@ -202,32 +202,48 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
             return True
     return False
 
-def get_global_rules():
-    return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
-
 def get_shift_label_maps():
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    label_for_key, key_for_label = get_shift_label_maps()
-
+    label_for_key = {s["key"]: s["label"] for s in stypes}
+    key_for_label = {v: k for k, v in label_for_key.items()}
     return label_for_key, key_for_label
+
+def get_global_rules():
+    return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
 
 
 # -------------------------
 # State helpers
 # -------------------------
 
+
+
+    
+# --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
+    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+    
+def _bootstrap_session_state():
+    from datetime import date
 
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    st.session_state.setdefault("events", [])
-    st.session_state.setdefault("comments", {})
-    st.session_state.setdefault("month", date.today().replace(day=1))
-    st.session_state.setdefault("highlight_provider", "")
-    st.session_state.setdefault("provider_rules", {})  # { "AB": {max_shifts, max_nights, min_rest_hours, unavailable_dates, notes} }
-    st.session_state.setdefault("rules", RuleConfig().dict())
-    st.session_state.setdefault("provider_caps", {})
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
+    st.session_state.setdefault(
+        "providers_df",
+        pd.DataFrame({"initials": sorted(set(PROVIDER_INITIALS_DEFAULT))})
+    )
+    st.session_state.setdefault("rules", RuleConfig().dict())
+    st.session_state.setdefault("provider_rules", {})     # per-provider overrides & vacations
+    st.session_state.setdefault("provider_caps", {})      # per-provider allowed shift keys
+    st.session_state.setdefault("events", [])             # calendar events (JSON-safe dicts)
+    st.session_state.setdefault("comments", {})           # id -> list[str]
+    st.session_state.setdefault("month", date.today().replace(day=1))
+    st.session_state.setdefault("highlight_provider", "") # global selected provider
+
+_bootstrap_session_state()
+
+
 
 
 
@@ -1475,6 +1491,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
