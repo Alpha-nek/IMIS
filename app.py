@@ -60,7 +60,7 @@ WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 # ----- Default provider roster -----
 PROVIDER_INITIALS_DEFAULT = [
-    "AA","AD","AM","FS","JM","JT","KA","LN","MO","SM","OI","NP","PR","UN",
+    "AA","AD","AM","FS","JM","JT","KA","LN","SM","OI","NP","PR","UN",
     "DP","FY","YL","RR","SD","JK","NS","PD","AB","KF","AL","GB","KD","NG","GI","VT","DI","YD",
     "HS","YA","NM","EM","SS","YS","HW","AH","RJ","SI","FH","EB","RS","RG","CJ","MS","AT",
     "YH","XL","MA","LM","MQ","CM","AI"
@@ -1958,6 +1958,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
