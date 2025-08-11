@@ -146,8 +146,10 @@ def shifts_to_events(roster: Dict[date, Dict[str, Optional[str]]], shift_types: 
 
 
 def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[str]]:
-    """Return {provider: [violation, ...]}"""
+    """Return {provider: [violation, ...]} and a GLOBAL bucket for day-level issues."""
     violations: Dict[str, List[str]] = {}
+    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", {}) or {}
+    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
 
     # Build per-provider schedules
     per_p: Dict[str, List[SEvent]] = {}
@@ -157,6 +159,19 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
             continue
         per_p.setdefault(p, []).append(ev)
 
+    # Per-day counts
+    day_prov_counts: Dict[tuple, int] = {}
+    day_shift_counts: Dict[tuple, int] = {}
+    for ev in events:
+        p = ev.extendedProps.get("provider")
+        skey = ev.extendedProps.get("shift_key")
+        day = ev.start.date()
+        if p:
+            day_prov_counts[(day, p)] = day_prov_counts.get((day, p), 0) + 1
+        if skey:
+            day_shift_counts[(day, skey)] = day_shift_counts.get((day, skey), 0) + 1
+
+    # Provider-level checks
     for p, evs in per_p.items():
         evs.sort(key=lambda e: e.start)
         # 1) Max shifts
@@ -180,65 +195,96 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
             worked_weekend = any(ev.start.weekday() >= 5 for ev in evs)
             if not worked_weekend:
                 violations.setdefault(p, []).append("No weekend shifts")
+        # 5) One shift per day per provider
+        for (d, pp), cnt in day_prov_counts.items():
+            if pp == p and cnt > 1:
+                violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: {cnt} shifts in one day (limit 1)")
+        # 6) Eligibility
+        allowed = prov_caps.get(p, [])
+        if allowed:
+            bad = [ev for ev in evs if ev.extendedProps.get("shift_key") not in allowed]
+            if bad:
+                bad_keys = sorted(set(ev.extendedProps.get("shift_key") for ev in bad))
+                violations.setdefault(p, []).append(f"Not eligible for: {', '.join(bad_keys)}")
+
+    # Day/shift capacity checks (GLOBAL)
+    for (d, skey), cnt in day_shift_counts.items():
+        cap = cap_map.get(skey, 1)
+        if cnt > cap:
+            violations.setdefault("GLOBAL", []).append(f"{d:%Y-%m-%d} {skey}: {cnt} assigned > capacity {cap}")
 
     return violations
 
-
 def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict[str, Any]], rules: RuleConfig) -> List[SEvent]:
-    # Simple round-robin with constraints. Tries to keep blocks of min_block_size.
-    roster = build_empty_roster(days, shift_types)
+    """Round-robin with constraints, capacity per shift/day, eligibility, and one-shift-per-day."""
+    sdefs = {s["key"]: s for s in shift_types}
     stypes = [s["key"] for s in shift_types]
+    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", {}) or {}
+    prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {}) or {}
 
     # Track counters
     counts = {p: 0 for p in providers}
     nights = {p: 0 for p in providers}
 
-    # helper to check if assigning p to (d, skey) is okay
-    def ok(p: str, d: date, skey: str, current_events: List[SEvent]) -> bool:
-        # Build a hypothetical event and test rules locally
-        sdef = next(s for s in shift_types if s["key"] == skey)
-        start_dt = datetime.combine(d, parse_time(sdef["start"]))
-        end_dt = datetime.combine(d, parse_time(sdef["end"]))
-        if end_dt <= start_dt:
-            end_dt += timedelta(days=1)
-        cand = SEvent(id="tmp", title="", start=start_dt, end=end_dt,
-                      extendedProps={"provider": p, "shift_key": skey})
+    events: List[SEvent] = []
+
+    def day_shift_count(d: date, skey: str) -> int:
+        return sum(1 for e in events if e.extendedProps.get("shift_key") == skey and e.start.date() == d)
+
+    def provider_has_shift_on_day(p: str, d: date) -> bool:
+        return any(e.extendedProps.get("provider") == p and e.start.date() == d for e in events)
+
+    def ok(p: str, d: date, skey: str) -> bool:
+        # Eligibility
+        allowed = prov_caps.get(p, [])
+        if allowed and skey not in allowed:
+            return False
+        # Capacity for this day/shift
+        if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+            return False
+        # One shift per day per provider
+        if provider_has_shift_on_day(p, d):
+            return False
         # Count caps
         if counts[p] + 1 > rules.max_shifts_per_provider:
             return False
         if skey == "N12" and rules.max_nights_per_provider is not None:
             if nights[p] + 1 > rules.max_nights_per_provider:
                 return False
-        # Rest constraint
-        evs = [e for e in current_events if e.extendedProps.get("provider") == p]
-        for e in evs:
-            rest1 = (cand.start - e.end).total_seconds() / 3600
-            rest2 = (e.start - cand.end).total_seconds() / 3600
+        # Rest constraint (against existing events)
+        sdef = sdefs[skey]
+        start_dt = datetime.combine(d, parse_time(sdef["start"]))
+        end_dt = datetime.combine(d, parse_time(sdef["end"]))
+        if end_dt <= start_dt:
+            end_dt += timedelta(days=1)
+        for e in [e for e in events if e.extendedProps.get("provider") == p]:
+            rest1 = (start_dt - e.end).total_seconds() / 3600
+            rest2 = (e.start - end_dt).total_seconds() / 3600
             if -rules.min_rest_hours_between_shifts < rest1 < rules.min_rest_hours_between_shifts:
                 return False
             if -rules.min_rest_hours_between_shifts < rest2 < rules.min_rest_hours_between_shifts:
                 return False
         return True
 
-    events: List[SEvent] = []
-    # Attempt block-wise assignment
+    # Assignment with preferred block size
     p_idx = 0
     for d in days:
-        # try to create blocks of min_block_size days per provider before switching
         for skey in stypes:
-            assigned = False
-            tries = 0
-            while not assigned and tries < len(providers):
-                p = providers[p_idx % len(providers)]
-                if ok(p, d, skey, events):
-                    # assign across a block if possible
-                    for bday in [d + timedelta(days=i) for i in range(rules.min_block_size)]:
-                        if bday not in days:
-                            break
-                        # Avoid double assign same day/shift
-                        # and check ok again
-                        if ok(p, bday, skey, events):
-                            sdef = next(s for s in shift_types if s["key"] == skey)
+            capacity = cap_map.get(skey, 1)
+            for _slot in range(capacity):
+                assigned = False
+                tries = 0
+                while not assigned and tries < len(providers):
+                    p = providers[p_idx % len(providers)]
+                    if ok(p, d, skey):
+                        # Assign block across consecutive days
+                        for bday_i in range(rules.min_block_size):
+                            bday = d + timedelta(days=bday_i)
+                            if bday not in days:
+                                break
+                            if not ok(p, bday, skey):
+                                break
+                            sdef = sdefs[skey]
                             start_dt = datetime.combine(bday, parse_time(sdef["start"]))
                             end_dt = datetime.combine(bday, parse_time(sdef["end"]))
                             if end_dt <= start_dt:
@@ -255,11 +301,11 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                             counts[p] += 1
                             if skey == "N12":
                                 nights[p] += 1
-                    assigned = True
-                else:
-                    p_idx += 1
-                    tries += 1
-            p_idx += 1
+                        assigned = True
+                    else:
+                        p_idx += 1
+                        tries += 1
+                p_idx += 1
 
     return events
 
@@ -280,9 +326,11 @@ def sidebar_inputs():
         else:
             st.session_state.providers_df = pd.DataFrame({"initials": df["initials"].astype(str).str.upper().str.strip()}).drop_duplicates()
     st.sidebar.caption("Or paste initials below (comma/space/newline separated)")
-    pasted = st.sidebar.text_area("Initials", value="\n".join(st.session_state.providers_df["initials"].tolist()))
+    pasted = st.sidebar.text_area("Initials", value="
+".join(st.session_state.providers_df["initials"].tolist()))
     if st.sidebar.button("Use pasted initials"):
-        toks = [t.strip().upper() for t in pasted.replace(",", "\n").splitlines() if t.strip()]
+        toks = [t.strip().upper() for t in pasted.replace(",", "
+").splitlines() if t.strip()]
         st.session_state.providers_df = pd.DataFrame({"initials": sorted(set(toks))})
 
     # Rules
@@ -299,6 +347,7 @@ def sidebar_inputs():
         rc.max_nights_per_provider = None
     st.session_state.rules = rc.dict()
 
+    # Shift Types
     st.sidebar.subheader("Shift Types")
     st.caption("Edit labels or times as needed. Colors are for on-screen clarity.")
     for i, s in enumerate(st.session_state.shift_types):
@@ -307,6 +356,29 @@ def sidebar_inputs():
             s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
             s["end"] = st.text_input("End (HH:MM)", value=s["end"], key=f"s_en_{i}")
             s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
+
+    # Daily shift capacities (e.g., A10 has capacity 2, NB has 1)
+    st.sidebar.subheader("Daily shift capacities")
+    cap_map = st.session_state.get("shift_capacity", {})
+    for s in st.session_state.shift_types:
+        key = s["key"]
+        default_cap = cap_map.get(key, 1)
+        cap_map[key] = st.sidebar.number_input(f"{s['label']} ({key}) capacity per day", 0, 10, value=int(default_cap))
+    st.session_state.shift_capacity = cap_map
+
+    # Provider shift eligibility
+    st.sidebar.subheader("Provider shift eligibility")
+    with st.sidebar.expander("Assign allowed shift types per provider"):
+        if st.session_state.providers_df.empty:
+            st.caption("Upload providers to configure eligibility.")
+        else:
+            label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+            key_for_label = {v: k for k, v in label_for_key.items()}
+            for init in st.session_state.providers_df["initials"].tolist():
+                allowed_keys = st.session_state.provider_caps.get(init, [])
+                default_labels = [label_for_key[k] for k in allowed_keys if k in label_for_key]
+                chosen = st.multiselect(init, options=list(key_for_label.keys()), default=default_labels, key=f"cap_{init}")
+                st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in chosen]
 
 
 @st.cache_data
