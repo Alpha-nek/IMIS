@@ -671,11 +671,10 @@ def top_controls():
             st.session_state.comments = {}
 
 def engine_panel():
+    import pandas as pd
     st.header("Engine")
 
-    
-
-    # --- Global provider selector here (the only one) ---
+    # --- ONE global provider selector ---
     provider_selector()
 
     # ===== Providers (manage roster) =====
@@ -685,8 +684,8 @@ def engine_panel():
 
     with st.expander("Add providers", expanded=False):
         new_one = st.text_input("Add single provider (initials)", key="add_single_init")
-        c1, c2 = st.columns([1,1])
-        with c1:
+        col_a1, col_a2 = st.columns([1, 1])
+        with col_a1:
             if st.button("Add", key="btn_add_single"):
                 cand = _normalize_initials_list([new_one])
                 if cand:
@@ -796,53 +795,57 @@ def engine_panel():
                 else:
                     st.session_state.provider_caps[init] = [key_for_label[lbl] for lbl in selected]
 
-    # ===== Actions (navigation / draft / validate / export) =====
+    # ===== Actions =====
     st.subheader("Actions")
-    c1, c2, c3 = st.columns(3)
-    with c1:
+
+    # Month nav row
+    nav_prev, nav_label, nav_next = st.columns([1, 2, 1])
+    with nav_prev:
         if st.button("◀ Prev month"):
             m = st.session_state.month
             y = m.year - (1 if m.month == 1 else 0)
             mm = 12 if m.month == 1 else m.month - 1
             st.session_state.month = date(y, mm, 1)
-    with c2:
-        st.write(f"{st.session_state.month:%B %Y}")
-    with c3:
+    with nav_label:
+        st.markdown(f"<div style='text-align:center;font-weight:600'>{st.session_state.month:%B %Y}</div>", unsafe_allow_html=True)
+    with nav_next:
         if st.button("Next month ▶"):
             m = st.session_state.month
             y = m.year + (1 if m.month == 12 else 0)
             mm = 1 if m.month == 12 else m.month + 1
             st.session_state.month = date(y, mm, 1)
 
-    cc1, cc2, cc3 = st.columns(3)
-    with cc1:
+    # Action buttons row (no JSON download)
+    act1, act2, act3 = st.columns(3)
+    with act1:
         if st.button("Generate Draft from Rules"):
             providers = st.session_state.providers_df["initials"].astype(str).tolist()
             days = make_month_days(st.session_state.month.year, st.session_state.month.month)
             evs = assign_greedy(providers, days, st.session_state.shift_types, RuleConfig(**st.session_state.rules))
-            # preserve outside-month events
+            # preserve events outside this month
             def is_this_month(e):
                 try:
                     d = pd.to_datetime(e["start"]).date()
                     return d.year == st.session_state.month.year and d.month == st.session_state.month.month
                 except Exception:
                     return False
-            others = [E for E in st.session_state.events if not is_this_month(E)]
-            st.session_state.events = others + [e.to_json_event() if hasattr(e, "to_json_event") else e for e in evs]
+            keep_others = [E for E in st.session_state.events if not is_this_month(E)]
+            new_json = [e.to_json_event() if hasattr(e, "to_json_event") else e for e in evs]
+            st.session_state.events = events_for_calendar(keep_others + new_json)
             st.success("Draft generated.")
-    with cc2:
+    with act2:
         if st.button("Validate schedule"):
             # Convert JSON events to SEvent if needed
             def _to_sevent(E):
                 if isinstance(E, dict):
                     ext = E.get("extendedProps") or {}
                     return SEvent(
-                        id=E.get("id",""),
-                        title=E.get("title",""),
+                        id=E.get("id", ""),
+                        title=E.get("title", ""),
                         start=pd.to_datetime(E["start"]).to_pydatetime(),
                         end=pd.to_datetime(E["end"]).to_pydatetime(),
                         backgroundColor=E.get("backgroundColor"),
-                        extendedProps={"provider": ext.get("provider"), "shift_key": ext.get("shift_key"), "label": ext.get("label")}
+                        extendedProps={"provider": ext.get("provider"), "shift_key": ext.get("shift_key"), "label": ext.get("label")},
                     )
                 return E
             events_obj = [_to_sevent(E) for E in st.session_state.events]
@@ -852,18 +855,16 @@ def engine_panel():
             else:
                 for who, msgs in viol.items():
                     st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
-    with cc3:
-        ccc1 = st.columns(1)
-        with ccc1:
-            if st.button("Clear month"):
-                def is_this_month(e):
-                    try:
-                        d = pd.to_datetime(e["start"]).date()
-                        return d.year == st.session_state.month.year and d.month == st.session_state.month.month
-                    except Exception:
-                        return False
-                st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
-                st.toast("Cleared this month.", icon="🧹") 
+    with act3:
+        if st.button("Clear month"):
+            def is_this_month(e):
+                try:
+                    d = pd.to_datetime(e["start"]).date()
+                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
+                except Exception:
+                    return False
+            st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
+            st.toast("Cleared this month.", icon="🧹")
 
 
 
@@ -1349,6 +1350,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
