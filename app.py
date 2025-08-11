@@ -1132,136 +1132,128 @@ def schedule_grid_view():
     # height to avoid vertical scroll
     height_px = min(2200, 110 + len(row_meta) * 38)
 
-    # layout: left grid, right provider rules
-    left, right = st.columns([4, 2], gap="large")
 
-    with left:
-        hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
-        enable_highlight = hi != ""
-        edit_mode = st.toggle("Edit grid (disables highlighting)", value=False, disabled=not enable_highlight)
+    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+    enable_highlight = hi != ""
+    edit_mode = st.toggle("Edit grid (disables highlighting)", value=False, disabled=not enable_highlight)
 
-        if enable_highlight and not edit_mode:
-            # Styled, read-only grid with light background highlight
-            day_only_cols = [c for c in grid_raw.columns if c.isdigit()]
+    if enable_highlight and not edit_mode:
+        # Styled, read-only grid with light background highlight
+        day_only_cols = [c for c in grid_raw.columns if c.isdigit()]
 
-            def _style_fn(val):
-                try:
-                    return "background-color: #fff3bf;" if str(val).strip().upper() == hi else ""
-                except Exception:
-                    return ""
-
-            styled = grid_raw.style.applymap(_style_fn, subset=day_only_cols)
-            st.dataframe(styled, use_container_width=True, height=height_px)
-            st.caption(f"Highlighting cells for **{hi}**. Toggle *Edit grid* to make changes.")
-        else:
-            # Editable grid
-            valid_provs = sorted(
-                st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
-            ) if not st.session_state.providers_df.empty else []
-            col_config = {"Color": st.column_config.TextColumn(disabled=True, help="Shift color tag")}
+        def _style_fn(val):
             try:
-                for c in day_cols:
-                    col_config[c] = st.column_config.SelectboxColumn(options=[""] + valid_provs,
-                                                                     help=f"Assignments for day {c}")
+                return "background-color: #fff3bf;" if str(val).strip().upper() == hi else ""
             except Exception:
-                pass
+                return ""
 
-            edited_grid = st.data_editor(
-                grid_raw,
-                num_rows="fixed",
-                use_container_width=True,
-                height=height_px,
-                column_config=col_config,
-                key="grid_editor",
-            )
+        styled = grid_raw.style.applymap(_style_fn, subset=day_only_cols)
+        st.dataframe(styled, use_container_width=True, height=height_px)
+        st.caption(f"Highlighting cells for **{hi}**. Toggle *Edit grid* to make changes.")
+    else:
+        # Editable grid
+        valid_provs = sorted(
+            st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
+        ) if not st.session_state.providers_df.empty else []
+        col_config = {"Color": st.column_config.TextColumn(disabled=True, help="Shift color tag")}
+        try:
+            for c in day_cols:
+                col_config[c] = st.column_config.SelectboxColumn(options=[""] + valid_provs,
+                                                                 help=f"Assignments for day {c}")
+        except Exception:
+            pass
 
-            # Apply back to events
-            if st.button("Apply grid to calendar"):
-                sdefs = {s["key"]: s for s in st.session_state.shift_types}
+        edited_grid = st.data_editor(
+            grid_raw,
+            num_rows="fixed",
+            use_container_width=True,
+            height=height_px,
+            column_config=col_config,
+            key="grid_editor",
+        )
 
-                # keep comments by (date, shift_key, provider)
-                comments_by_key = {}
-                for e in st.session_state.events:
-                    ext = (e.get("extendedProps") or {}); skey = ext.get("shift_key")
-                    if not skey or skey not in sdefs: continue
-                    try:
-                        d = pd.to_datetime(e["start"]).date()
-                    except Exception:
+        # Apply back to events
+        if st.button("Apply grid to calendar"):
+            sdefs = {s["key"]: s for s in st.session_state.shift_types}
+
+            # keep comments by (date, shift_key, provider)
+            comments_by_key = {}
+            for e in st.session_state.events:
+                ext = (e.get("extendedProps") or {}); skey = ext.get("shift_key")
+                if not skey or skey not in sdefs: continue
+                try:
+                    d = pd.to_datetime(e["start"]).date()
+                except Exception:
+                    continue
+                if d.year == year and d.month == month:
+                    prov0 = (ext.get("provider") or "").strip().upper()
+                    comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
+
+            def is_grid_event(E: Dict[str, Any]) -> bool:
+                ext = (E.get("extendedProps") or {}); skey = ext.get("shift_key")
+                if not skey or skey not in sdefs: return False
+                try:
+                    d = pd.to_datetime(E["start"]).date()
+                except Exception:
+                    return False
+                return d.year == year and d.month == month
+
+            preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+
+            new_events = []
+            seen_day_provider = set()
+            conflicts = []
+
+            row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
+            day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
+
+            for row_label in edited_grid.index:
+                skey = row_to_key.get(row_label)
+                if not skey: continue
+                sdef = sdefs.get(skey)
+                if not sdef: continue
+                for col in day_only_cols:
+                    prov = edited_grid.at[row_label, col]
+                    prov = ("" if prov is None else str(prov)).strip().upper()
+                    if not prov: continue
+
+                    day_date = date(year, month, int(col))
+                    key_dp = (day_date, prov)
+                    if key_dp in seen_day_provider:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
                         continue
-                    if d.year == year and d.month == month:
-                        prov0 = (ext.get("provider") or "").strip().upper()
-                        comments_by_key[(d, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
+                    seen_day_provider.add(key_dp)
 
-                def is_grid_event(E: Dict[str, Any]) -> bool:
-                    ext = (E.get("extendedProps") or {}); skey = ext.get("shift_key")
-                    if not skey or skey not in sdefs: return False
-                    try:
-                        d = pd.to_datetime(E["start"]).date()
-                    except Exception:
-                        return False
-                    return d.year == year and d.month == month
+                    def _parse(hhmm: str):
+                        hh, mm = hhmm.split(":"); return time(int(hh), int(mm))
+                    start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+                    end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
+                    if end_dt <= start_dt: end_dt += timedelta(days=1)
 
-                preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+                    eid = str(uuid.uuid4())
+                    ev = {
+                        "id": eid,
+                        "title": f"{sdef['label']} — {prov}",
+                        "start": start_dt.isoformat(),
+                        "end":   end_dt.isoformat(),
+                        "allDay": False,
+                        "backgroundColor": sdef.get("color"),
+                        "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+                    }
+                    new_events.append(ev)
+                    k = (day_date, skey, prov)
+                    if k in st.session_state.comments:
+                        st.session_state.comments[eid] = st.session_state.comments[k]
+                    elif k in comments_by_key:
+                        st.session_state.comments[eid] = comments_by_key[k]
 
-                new_events = []
-                seen_day_provider = set()
-                conflicts = []
+            st.session_state.events = preserved + new_events
+            st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
 
-                row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
-                day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
-
-                for row_label in edited_grid.index:
-                    skey = row_to_key.get(row_label)
-                    if not skey: continue
-                    sdef = sdefs.get(skey)
-                    if not sdef: continue
-                    for col in day_only_cols:
-                        prov = edited_grid.at[row_label, col]
-                        prov = ("" if prov is None else str(prov)).strip().upper()
-                        if not prov: continue
-
-                        day_date = date(year, month, int(col))
-                        key_dp = (day_date, prov)
-                        if key_dp in seen_day_provider:
-                            conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate; skipped)")
-                            continue
-                        seen_day_provider.add(key_dp)
-
-                        def _parse(hhmm: str):
-                            hh, mm = hhmm.split(":"); return time(int(hh), int(mm))
-                        start_dt = datetime.combine(day_date, _parse(sdef["start"]))
-                        end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
-                        if end_dt <= start_dt: end_dt += timedelta(days=1)
-
-                        eid = str(uuid.uuid4())
-                        ev = {
-                            "id": eid,
-                            "title": f"{sdef['label']} — {prov}",
-                            "start": start_dt.isoformat(),
-                            "end":   end_dt.isoformat(),
-                            "allDay": False,
-                            "backgroundColor": sdef.get("color"),
-                            "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
-                        }
-                        new_events.append(ev)
-                        k = (day_date, skey, prov)
-                        if k in st.session_state.comments:
-                            st.session_state.comments[eid] = st.session_state.comments[k]
-                        elif k in comments_by_key:
-                            st.session_state.comments[eid] = comments_by_key[k]
-
-                st.session_state.events = preserved + new_events
-                st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
-
-                if conflicts:
-                    st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
-                else:
-                    st.success("Applied grid to calendar.")
-
-    with right:
-        provider_rules_panel()
-
-
+            if conflicts:
+                st.warning("Some duplicates were skipped:\n- " + "\n- ".join(conflicts))
+            else:
+                st.success("Applied grid to calendar.")
 
 
 
@@ -1287,6 +1279,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
