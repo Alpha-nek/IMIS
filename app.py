@@ -243,15 +243,6 @@ def init_session_state():
     st.session_state.setdefault("month", date.today().replace(day=1))
     st.session_state.setdefault("highlight_provider", "") # global selected provider
 
-_bootstrap_session_state()
-
-
-
-
-
-   
-
-
 
 # -------------------------
 # Scheduling Engine (Greedy Draft)
@@ -1810,6 +1801,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
