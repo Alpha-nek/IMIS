@@ -155,6 +155,50 @@ def events_for_calendar(raw_events):
         if d is not None:
             out.append(d)
     return out
+# --- Month-aware defaults ---
+def _month_days_count() -> int:
+    m = st.session_state.month
+    import calendar
+    return calendar.monthrange(m.year, m.month)[1]
+
+def recommended_max_shifts_for_month() -> int:
+    days = _month_days_count()
+    if days == 31:
+        return 16
+    if days == 30:
+        return 15
+    # For 28/29 days, keep the global value as-is
+    return RuleConfig(**st.session_state.rules).max_shifts_per_provider
+
+# --- Vacation helpers ---
+def _expand_vacation_dates(vacations: list) -> set:
+    """Expand [{'start':'YYYY-MM-DD','end':'YYYY-MM-DD'}, ...] to a set of date objects."""
+    import pandas as pd
+    out = set()
+    for rng in vacations or []:
+        try:
+            s = pd.to_datetime(rng.get("start")).date()
+            e = pd.to_datetime(rng.get("end")).date()
+        except Exception:
+            continue
+        if e < s:
+            s, e = e, s
+        for d in pd.date_range(s, e):
+            out.add(d.date())
+    return out
+
+def _provider_has_vacation_in_month(pr: dict) -> bool:
+    """True if any vacation day falls in the currently selected month."""
+    if not pr:
+        return False
+    vac = pr.get("vacations", [])
+    if not vac:
+        return False
+    ym = (st.session_state.month.year, st.session_state.month.month)
+    for d in _expand_vacation_dates(vac):
+        if (d.year, d.month) == ym:
+            return True
+    return False
 
 
 # -------------------------
@@ -266,20 +310,35 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
         if p:    day_prov_counts[(day, p)] = day_prov_counts.get((day, p), 0) + 1
         if skey: day_shift_counts[(day, skey)] = day_shift_counts.get((day, skey), 0) + 1
 
+    # Month-aware base default
+    base_default = recommended_max_shifts_for_month()
+
     for p, evs in per_p.items():
         evs.sort(key=lambda e: e.start)
         pr = prov_rules.get(p, {})
-        max_shifts = pr.get("max_shifts", rules.max_shifts_per_provider)
+        # Effective max shifts = provider override OR month default
+        eff_max = pr.get("max_shifts", base_default)
+
+        # If provider has any vacation in this month → auto reduce by 3
+        if _provider_has_vacation_in_month(pr):
+            eff_max = max(0, (eff_max or 0) - 3)
+
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+
+        # Unavailable = specific dates + expanded vacation days
+        import pandas as pd
         unavail_set = set()
         for tok in pr.get("unavailable_dates", []):
             try: unavail_set.add(pd.to_datetime(tok).date())
             except Exception: pass
+        unavail_set |= _expand_vacation_dates(pr.get("vacations", []))
 
-        if len(evs) > (max_shifts or 1_000_000):
-            violations.setdefault(p, []).append(f"Has {len(evs)} shifts > max {max_shifts}")
+        # 1) Max shifts
+        if eff_max is not None and len(evs) > eff_max:
+            violations.setdefault(p, []).append(f"Has {len(evs)} shifts > max {eff_max}")
 
+        # 2) Rest hours
         for a, b in zip(evs, evs[1:]):
             rest = (b.start - a.end).total_seconds()/3600
             if rest < (min_rest or 0):
@@ -287,19 +346,23 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
                     f"Rest {rest:.1f}h < min {min_rest}h between {a.start:%m-%d} and {b.start:%m-%d}"
                 )
 
+        # 3) Max nights
         if max_nights is not None:
             nights = sum(1 for ev in evs if ev.extendedProps.get("shift_key") == "N12")
             if nights > max_nights:
                 violations.setdefault(p, []).append(f"Nights {nights} > max {max_nights}")
 
+        # 4) Weekend requirement
         if rules.require_at_least_one_weekend:
             if not any(ev.start.weekday() >= 5 for ev in evs):
                 violations.setdefault(p, []).append("No weekend shifts")
 
+        # 5) One shift per day
         for (d, pp), cnt in day_prov_counts.items():
             if pp == p and cnt > 1:
                 violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: {cnt} shifts in one day (limit 1)")
 
+        # 6) Eligibility
         allowed = prov_caps.get(p, [])
         if allowed:
             bad = [ev for ev in evs if ev.extendedProps.get("shift_key") not in allowed]
@@ -307,17 +370,20 @@ def validate_rules(events: List[SEvent], rules: RuleConfig) -> Dict[str, List[st
                 bad_keys = sorted(set(ev.extendedProps.get("shift_key") for ev in bad))
                 violations.setdefault(p, []).append(f"Not eligible for: {', '.join(bad_keys)}")
 
+        # 7) Unavailability (dates + vacations)
         if unavail_set:
             bad_dates = sorted({ev.start.date() for ev in evs if ev.start.date() in unavail_set})
             for d in bad_dates:
-                violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: provider marked unavailable")
+                violations.setdefault(p, []).append(f"{d:%Y-%m-%d}: provider unavailable")
 
+    # Day/shift capacity checks (GLOBAL)
     for (d, skey), cnt in day_shift_counts.items():
         cap = cap_map.get(skey, 1)
         if cnt > cap:
             violations.setdefault("GLOBAL", []).append(f"{d:%Y-%m-%d} {skey}: {cnt} assigned > capacity {cap}")
 
     return violations
+
 
 
 def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict[str, Any]], rules: RuleConfig) -> List[SEvent]:
@@ -331,6 +397,9 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     nights = {p: 0 for p in providers}
     events: List[SEvent] = []
 
+    # Month-aware base default
+    base_default = recommended_max_shifts_for_month()
+
     def day_shift_count(d: date, skey: str) -> int:
         return sum(1 for e in events if e.extendedProps.get("shift_key") == skey and e.start.date() == d)
 
@@ -343,10 +412,17 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             return False
 
         pr = prov_rules.get(p, {})
-        max_shifts = pr.get("max_shifts", rules.max_shifts_per_provider)
+        eff_max = pr.get("max_shifts", base_default)
+        if _provider_has_vacation_in_month(pr):
+            eff_max = max(0, (eff_max or 0) - 3)
+
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
-        unavail_set = set()
+
+        # Unavailability set (dates + vacations)
+        unavail_set = _expand_vacation_dates(pr.get("vacations", []))
+        # also add specific dates
+        import pandas as pd
         for tok in pr.get("unavailable_dates", []):
             try: unavail_set.add(pd.to_datetime(tok).date())
             except Exception: pass
@@ -357,7 +433,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             return False
         if provider_has_shift_on_day(p, d):
             return False
-        if max_shifts is not None and counts[p] + 1 > max_shifts:
+        if eff_max is not None and counts[p] + 1 > eff_max:
             return False
         if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
             return False
@@ -402,6 +478,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                         p_idx += 1; tries += 1
                 p_idx += 1
     return events
+
 
 
 # -------------------------
@@ -1027,81 +1104,125 @@ def provider_rules_panel():
     # ... (rest of the rules editor as previously provided)
 
     # Backing stores
-    rules_map = st.session_state.setdefault("provider_rules", {})
-    global_rules = RuleConfig(**st.session_state.rules)
+    # ... (keep your header and early `sel` checks)
 
-    # Allowed shifts (kept in provider_caps, consistent with scheduler)
-    label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
-    key_for_label = {v: k for k, v in label_for_key.items()}
-    current_allowed = st.session_state.get("provider_caps", {}).get(sel, [])
-    default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
+rules_map = st.session_state.setdefault("provider_rules", {})
+global_rules = RuleConfig(**st.session_state.rules)
 
-    st.subheader(f"Allowed shift types — {sel}")
-    picked_labels = st.multiselect(
-        "Assign only these shift types (leave empty to allow ALL)",
-        options=list(label_for_key.values()),
-        default=default_labels,
-        key=f"pr_allowed_{sel}"
-    )
-    if len(picked_labels) == 0:
-        st.session_state["provider_caps"].pop(sel, None)
-    else:
-        st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
+# Allowed shifts (unchanged)
+label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
+key_for_label = {v: k for k, v in label_for_key.items()}
+current_allowed = st.session_state.get("provider_caps", {}).get(sel, [])
+default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
-    st.markdown("---")
-    st.subheader("Overrides (optional)")
-    curr = rules_map.get(sel, {})
-    c1, c2 = st.columns(2)
-    with c1:
-        use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
-        max_sh = st.number_input("Max shifts (this month)", 1, 50,
-                                 value=int(curr.get("max_shifts", global_rules.max_shifts_per_provider)))
-    with c2:
-        use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
-        default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
-        max_n  = st.number_input("Max nights (this month)", 0, 50,
-                                 value=int(curr.get("max_nights", default_max_n)))
+st.subheader(f"Allowed shift types — {sel}")
+picked_labels = st.multiselect(
+    "Assign only these shift types (leave empty to allow ALL)",
+    options=list(label_for_key.values()),
+    default=default_labels,
+    key=f"pr_allowed_{sel}"
+)
+if len(picked_labels) == 0:
+    st.session_state["provider_caps"].pop(sel, None)
+else:
+    st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
 
-    use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
-    min_rest = st.number_input("Min rest hours between shifts", 0, 48,
-                               value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
+st.markdown("---")
+st.subheader("Overrides (optional)")
+curr = rules_map.get(sel, {})
+c1, c2 = st.columns(2)
+with c1:
+    use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
+    # Show month-aware recommended default for context
+    st.caption(f"Recommended default this month: **{recommended_max_shifts_for_month()}**")
+    max_sh = st.number_input("Max shifts (this month)", 1, 50,
+                             value=int(curr.get("max_shifts", recommended_max_shifts_for_month())))
+with c2:
+    use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
+    default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
+    max_n  = st.number_input("Max nights (this month)", 0, 50,
+                             value=int(curr.get("max_nights", default_max_n)))
 
-    st.markdown("---")
-    st.subheader("Unavailable dates")
-    dates_txt = st.text_input(
-        "YYYY-MM-DD, comma-separated (e.g., 2025-09-03, 2025-09-12)",
-        value=",".join(curr.get("unavailable_dates", [])),
-        key=f"pr_unavail_{sel}"
-    )
+use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
+min_rest = st.number_input("Min rest hours between shifts", 0, 48,
+                           value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
 
-    st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
+st.markdown("---")
+st.subheader("Unavailable specific dates")
+dates_txt = st.text_input(
+    "YYYY-MM-DD, comma-separated",
+    value=",".join(curr.get("unavailable_dates", [])),
+    key=f"pr_unavail_{sel}"
+)
 
-    if st.button("Save provider rules", key=f"pr_save_{sel}"):
-        new_entry = {}
-        if use_max:    new_entry["max_shifts"] = int(max_sh)
-        if use_nights: new_entry["max_nights"] = int(max_n)
-        if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
+# >>> NEW: Vacations (date ranges) <<<
+st.markdown("---")
+st.subheader("Vacations (date ranges)")
+vac_list = curr.get("vacations", [])
+if not isinstance(vac_list, list):
+    vac_list = []
 
-        # normalize dates
-        unavail = []
-        for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
-            try:
-                unavail.append(str(pd.to_datetime(tok).date()))
-            except Exception:
-                pass
-        if unavail:
-            new_entry["unavailable_dates"] = unavail
-
-        notes_val = st.session_state.get(f"pr_notes_{sel}", "")
-        if notes_val:
-            new_entry["notes"] = notes_val
-
-        if new_entry:
-            rules_map[sel] = new_entry
+# add input row
+vc1, vc2, vc3 = st.columns([1, 1, 1])
+with vc1:
+    v_start = st.date_input("Start", key=f"pr_vac_start_{sel}")
+with vc2:
+    v_end = st.date_input("End", key=f"pr_vac_end_{sel}")
+with vc3:
+    if st.button("Add vacation", key=f"pr_vac_add_{sel}"):
+        if v_start and v_end:
+            s = min(v_start, v_end)
+            e = max(v_start, v_end)
+            vac_list.append({"start": str(s), "end": str(e)})
+            curr["vacations"] = vac_list
+            rules_map[sel] = curr
+            st.success(f"Added vacation {s} → {e}")
         else:
-            rules_map.pop(sel, None)
-        st.success("Saved.")
+            st.warning("Pick both start and end.")
 
+# show existing vacations with remove buttons
+if vac_list:
+    for i, rng in enumerate(vac_list):
+        rr1, rr2, rr3 = st.columns([2, 2, 1])
+        rr1.markdown(f"**Start:** {rng.get('start','')}")
+        rr2.markdown(f"**End:** {rng.get('end','')}")
+        if rr3.button("Remove", key=f"pr_vac_del_{sel}_{i}"):
+            vac_list.pop(i)
+            curr["vacations"] = vac_list
+            rules_map[sel] = curr
+            st.experimental_rerun()
+
+st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
+
+if st.button("Save provider rules", key=f"pr_save_{sel}"):
+    new_entry = {}
+    if use_max:    new_entry["max_shifts"] = int(max_sh)
+    if use_nights: new_entry["max_nights"] = int(max_n)
+    if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
+
+    # normalize dates
+    import pandas as pd
+    unavail = []
+    for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
+        try:
+            unavail.append(str(pd.to_datetime(tok).date()))
+        except Exception:
+            pass
+    if unavail:
+        new_entry["unavailable_dates"] = unavail
+
+    if vac_list:
+        new_entry["vacations"] = vac_list
+
+    notes_val = st.session_state.get(f"pr_notes_{sel}", "")
+    if notes_val:
+        new_entry["notes"] = notes_val
+
+    if new_entry:
+        rules_map[sel] = new_entry
+    else:
+        rules_map.pop(sel, None)
+    st.success("Saved.")
 
 
 
@@ -1350,6 +1471,7 @@ def main():
         provider_rules_panel()  # uses st.session_state.highlight_provider
 
 main()
+
 
 
 
