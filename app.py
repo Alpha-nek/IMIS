@@ -66,7 +66,7 @@ def _normalize_initials_list(items):
 
 class RuleConfig(BaseModel):   # or dataclass, same idea
     # ... existing fields ...
-    min_shifts_per_provider: int = 12
+    min_shifts_per_provider: int = 15
     max_block_size: Optional[int] = 7   # default cap is 7 shifts per block
     max_shifts_per_provider: int = Field(15, ge=1, le=31)
     min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
@@ -1816,6 +1816,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
