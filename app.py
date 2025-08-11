@@ -463,7 +463,7 @@ st.session_state.shift_capacity = cap_map
 
 
     # -------- Provider shift eligibility --------
-    st.sidebar.subheader("Provider shift eligibility")
+st.sidebar.subheader("Provider shift eligibility")
     with st.sidebar.expander("Assign allowed shift types per provider", expanded=False):
         label_for_key = {s["key"]: s["label"] for s in st.session_state.shift_types}
         key_for_label = {v: k for k, v in label_for_key.items()}
@@ -907,6 +907,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
