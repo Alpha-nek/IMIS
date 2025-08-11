@@ -1121,7 +1121,7 @@ def provider_rules_panel():
         st.info("Add providers first.")
         return
 
-    # Global selected provider (set by the Engine panel)
+    # Global selected provider (from Engine panel)
     sel = (st.session_state.get("highlight_provider", "") or "").strip().upper()
     if not sel:
         st.info("Select a provider in the Engine to edit rules.")
@@ -1130,7 +1130,7 @@ def provider_rules_panel():
         st.warning(f"{sel} not in current roster.")
         return
 
-    # Backing stores (created if missing)
+    # Stores
     rules_map = st.session_state.setdefault("provider_rules", {})
     st.session_state.setdefault("provider_caps", {})
 
@@ -1139,7 +1139,7 @@ def provider_rules_panel():
     label_for_key = {s["key"]: s["label"] for s in stypes}
     key_for_label = {v: k for k, v in label_for_key.items()}
 
-    # Allowed shift types
+    # ----- Allowed shift types
     current_allowed = st.session_state["provider_caps"].get(sel, [])
     default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
@@ -1148,47 +1148,70 @@ def provider_rules_panel():
         "Assign only these shift types (leave empty to allow ALL)",
         options=list(label_for_key.values()),
         default=default_labels,
-        key=f"pr_allowed_{sel}"
+        key=f"pr_allowed_{sel}",
     )
     if len(picked_labels) == 0:
         st.session_state["provider_caps"].pop(sel, None)
     else:
         st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
 
-    # Overrides & availability
+    # ----- Overrides & availability
     st.markdown("---")
     st.subheader("Overrides (optional)")
 
-    # Month-aware recommended default
     base_default = recommended_max_shifts_for_month()
-
     curr = rules_map.get(sel, {})
+    global_rules = get_global_rules()
+
     c1, c2 = st.columns(2)
     with c1:
-        use_max = st.checkbox("Override max shifts / month", value=("max_shifts" in curr))
+        use_max = st.checkbox(
+            "Override max shifts / month",
+            value=("max_shifts" in curr),
+            key=f"pr_use_max_{sel}",
+        )
         st.caption(f"Recommended default this month: **{base_default}**")
-        max_sh = st.number_input("Max shifts (this month)", 1, 50,
-                                 value=int(curr.get("max_shifts", base_default)))
+        max_sh = st.number_input(
+            "Max shifts (this month)",
+            1, 50,
+            value=int(curr.get("max_shifts", base_default)),
+            key=f"pr_max_{sel}",
+        )
     with c2:
-        global_rules = get_global_rules()
-        use_nights = st.checkbox("Override max nights / month", value=("max_nights" in curr))
+        use_nights = st.checkbox(
+            "Override max nights / month",
+            value=("max_nights" in curr),
+            key=f"pr_use_nights_{sel}",
+        )
         default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
-        max_n = st.number_input("Max nights (this month)", 0, 50,
-                                value=int(curr.get("max_nights", default_max_n)))
+        max_n = st.number_input(
+            "Max nights (this month)",
+            0, 50,
+            value=int(curr.get("max_nights", default_max_n)),
+            key=f"pr_max_n_{sel}",
+        )
 
-    use_rest = st.checkbox("Override min rest hours", value=("min_rest_hours" in curr))
-    min_rest = st.number_input("Min rest hours between shifts", 0, 48,
-                               value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)))
+    use_rest = st.checkbox(
+        "Override min rest hours",
+        value=("min_rest_hours" in curr),
+        key=f"pr_use_rest_{sel}",
+    )
+    min_rest = st.number_input(
+        "Min rest hours between shifts",
+        0, 48,
+        value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)),
+        key=f"pr_min_rest_{sel}",
+    )
 
     st.markdown("---")
     st.subheader("Unavailable specific dates")
     dates_txt = st.text_input(
         "YYYY-MM-DD, comma-separated",
         value=",".join(curr.get("unavailable_dates", [])),
-        key=f"pr_unavail_{sel}"
+        key=f"pr_unavail_{sel}",
     )
 
-    # Vacations (date ranges)
+    # ----- Vacations (date ranges)
     st.markdown("---")
     st.subheader("Vacations (date ranges)")
     vac_list = curr.get("vacations", [])
@@ -1203,8 +1226,7 @@ def provider_rules_panel():
     with vc3:
         if st.button("Add vacation", key=f"pr_vac_add_{sel}"):
             if v_start and v_end:
-                s = min(v_start, v_end)
-                e = max(v_start, v_end)
+                s = min(v_start, v_end); e = max(v_start, v_end)
                 vac_list.append({"start": str(s), "end": str(e)})
                 curr["vacations"] = vac_list
                 rules_map[sel] = curr
@@ -1492,6 +1514,7 @@ def main():
     with right_col: provider_rules_panel()
 
 main()
+
 
 
 
