@@ -23,7 +23,12 @@ import json
 from datetime import datetime, date, timedelta, time
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
-
+import os
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -37,6 +42,11 @@ except Exception:
 # -------------------------
 # Utilities & Data Models
 # -------------------------
+
+GCAL_SCOPES = ['https://www.googleapis.com/auth/calendar']
+GCAL_TOKEN_FILE = 'token.json'          # created on first successful auth
+GCAL_CREDENTIALS_FILE = 'credentials.json'  # download from Google Cloud
+APP_TIMEZONE = 'America/New_York'       # your timezone
 
 DEFAULT_SHIFT_TYPES = [
     {"key": "N12", "label": "7pm–7am (Night)", "start": "19:00", "end": "07:00", "color": "#7c3aed"},
@@ -242,6 +252,105 @@ def init_session_state():
     st.session_state.setdefault("comments", {})           # id -> list[str]
     st.session_state.setdefault("month", date.today().replace(day=1))
     st.session_state.setdefault("highlight_provider", "") # global selected provider
+
+def get_gcal_service():
+    """Return an authenticated Google Calendar API service."""
+    creds = None
+    if os.path.exists(GCAL_TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(GCAL_TOKEN_FILE, GCAL_SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists(GCAL_CREDENTIALS_FILE):
+                st.error("Missing credentials.json. Create an OAuth Client (Desktop) in Google Cloud and download it next to app.py.")
+                return None
+            flow = InstalledAppFlow.from_client_secrets_file(GCAL_CREDENTIALS_FILE, GCAL_SCOPES)
+            # Local server flow (best for local testing)
+            creds = flow.run_local_server(port=0)
+        with open(GCAL_TOKEN_FILE, 'w') as token:
+            token.write(creds.to_json())
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        return service
+    except Exception as e:
+        st.error(f"Google API init failed: {e}")
+        return None
+
+
+def gcal_list_calendars(service):
+    """Return list of (id, summary) tuples for available calendars."""
+    items = []
+    page_token = None
+    while True:
+        feed = service.calendarList().list(pageToken=page_token).execute()
+        for c in feed.get('items', []):
+            items.append((c['id'], c.get('summary', c['id'])))
+        page_token = feed.get('nextPageToken')
+        if not page_token:
+            break
+    return items
+
+
+def local_event_to_gcal_body(E: dict) -> dict:
+    """Map a local event dict to a Google Calendar event body."""
+    ext = E.get("extendedProps") or {}
+    prov = (ext.get("provider") or "").strip().upper()
+    skey = ext.get("shift_key") or ""
+    label = ext.get("label") or ""
+    title = E.get("title") or f"{label} — {prov}" if prov else label or "Shift"
+    return {
+        "summary": title,
+        "description": f"Provider: {prov}\nShift: {label} ({skey})\nSource: Streamlit Scheduler",
+        "start": {"dateTime": E["start"], "timeZone": APP_TIMEZONE},
+        "end":   {"dateTime": E["end"],   "timeZone": APP_TIMEZONE},
+        "extendedProperties": {
+            "private": {
+                "app_event_id": E.get("id",""),
+                "shift_key": skey,
+                "provider": prov,
+            }
+        },
+    }
+
+
+def gcal_find_by_app_id(service, calendar_id: str, app_event_id: str):
+    """Find a GCal event that matches our local app_event_id (using private extendedProperties)."""
+    try:
+        resp = service.events().list(
+            calendarId=calendar_id,
+            privateExtendedProperty=f"app_event_id={app_event_id}",
+            maxResults=1,
+            singleEvents=True,
+        ).execute()
+        items = resp.get('items', [])
+        return items[0] if items else None
+    except HttpError as e:
+        # Some accounts may not permit this filter; in that case we skip matching.
+        return None
+
+
+def _is_same_event_times(g_ev: dict, local: dict) -> bool:
+    """Shallow compare start/end; assumes timeZone handling via body."""
+    g_start = (g_ev.get("start") or {}).get("dateTime") or (g_ev.get("start") or {}).get("date")
+    g_end   = (g_ev.get("end")   or {}).get("dateTime") or (g_ev.get("end")   or {}).get("date")
+    return (str(g_start) == str(local["start"]["dateTime"])) and (str(g_end) == str(local["end"]["dateTime"]))
+
+
+def filter_events_for_current_month():
+    """Return JSON-safe events only for the month in st.session_state.month."""
+    year = st.session_state.month.year
+    month = st.session_state.month.month
+    evs = events_for_calendar(st.session_state.get("events", []))
+    out = []
+    for e in evs:
+        try:
+            d = pd.to_datetime(e["start"]).date()
+        except Exception:
+            continue
+        if d.year == year and d.month == month:
+            out.append(e)
+    return out
 
 
 # -------------------------
@@ -1161,7 +1270,100 @@ def engine_panel():
             st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
             st.toast("Cleared this month.", icon="🧹")
 
+def google_calendar_panel():
+    st.subheader("Google Calendar Sync")
 
+    # Connect / Authenticate
+    svc = None
+    if st.button("Connect Google Calendar"):
+        svc = get_gcal_service()
+        st.session_state["gcal_connected"] = bool(svc)
+        if svc:
+            st.success("Connected to Google Calendar.")
+    else:
+        # Try to reuse previous session silently
+        if st.session_state.get("gcal_connected"):
+            svc = get_gcal_service()
+
+    if not svc:
+        st.caption("Click **Connect Google Calendar** to authenticate.")
+        return
+
+    # Choose calendar
+    calendars = gcal_list_calendars(svc)
+    if not calendars:
+        st.warning("No calendars available for this account.")
+        return
+    cal_ids = [c[0] for c in calendars]
+    cal_labels = [c[1] for c in calendars]
+
+    default_cal = st.session_state.get("gcal_calendar_id", "primary")
+    if default_cal not in cal_ids:
+        default_cal = cal_ids[0]
+
+    sel_idx = cal_ids.index(default_cal)
+    sel_label = st.selectbox("Calendar", options=cal_labels, index=sel_idx)
+    sel_id = cal_ids[cal_labels.index(sel_label)]
+    st.session_state["gcal_calendar_id"] = sel_id
+
+    st.caption(f"Target: **{sel_label}**")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Push current month → Google"):
+            to_push = filter_events_for_current_month()
+            created, updated = 0, 0
+            for E in to_push:
+                body = local_event_to_gcal_body(E)
+                # Try to find existing GCal event by our app_event_id
+                g_ev = gcal_find_by_app_id(svc, sel_id, E.get("id",""))
+                if g_ev is None:
+                    # Create
+                    svc.events().insert(calendarId=sel_id, body=body).execute()
+                    created += 1
+                else:
+                    # Update if changed
+                    if (g_ev.get("summary") != body["summary"]) or (not _is_same_event_times(g_ev, body)):
+                        g_ev["summary"] = body["summary"]
+                        g_ev["start"]   = body["start"]
+                        g_ev["end"]     = body["end"]
+                        g_ev["description"] = body["description"]
+                        g_ev.setdefault("extendedProperties", {}).setdefault("private", {}).update(
+                            body["extendedProperties"]["private"]
+                        )
+                        svc.events().update(calendarId=sel_id, eventId=g_ev["id"], body=g_ev).execute()
+                        updated += 1
+            st.success(f"Pushed month: created {created}, updated {updated}")
+
+    with c2:
+        if st.button("Remove this month’s pushed events from Google"):
+            # We’ll look for events in this month that have our app_event_id private property and delete them
+            year = st.session_state.month.year
+            month = st.session_state.month.month
+            start = datetime(year, month, 1)
+            end = (start + relativedelta(months=1))
+            time_min = start.isoformat() + "Z"
+            time_max = end.isoformat() + "Z"
+
+            removed = 0
+            # Fetch all events in window and filter by privateExtendedProperty via app_event_id of local events
+            local_ids = {e["id"] for e in filter_events_for_current_month()}
+            page_token = None
+            while True:
+                resp = svc.events().list(
+                    calendarId=sel_id, timeMin=time_min, timeMax=time_max,
+                    singleEvents=True, showDeleted=False, pageToken=page_token
+                ).execute()
+                for g_ev in resp.get("items", []):
+                    priv = (g_ev.get("extendedProperties") or {}).get("private", {}) or {}
+                    app_id = priv.get("app_event_id")
+                    if app_id and app_id in local_ids:
+                        svc.events().delete(calendarId=sel_id, eventId=g_ev["id"]).execute()
+                        removed += 1
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+            st.success(f"Removed {removed} events from Google for this month.")
 
 def provider_selector():
     """One provider dropdown that updates global selection."""
@@ -1807,15 +2009,21 @@ if st.button("Apply grid to calendar"):
 # -------------------------
 # App entry
 # -------------------------
-
 def main():
     init_session_state()
     left_col, mid_col, right_col = st.columns([3,5,3], gap="large")
-    with left_col:  engine_panel()
-    with mid_col:   render_calendar(); schedule_grid_view()
-    with right_col: provider_rules_panel()
+    with left_col:
+        engine_panel()          # your existing engine UI
+        st.markdown("---")
+        google_calendar_panel() # ← add this line
+    with mid_col:
+        render_calendar()
+        schedule_grid_view()
+    with right_col:
+        provider_rules_panel()
 
 main()
+
 
 
 
