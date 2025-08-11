@@ -40,7 +40,7 @@ except Exception:
 
 DEFAULT_SHIFT_TYPES = [
     {"key": "N12", "label": "7pm–7am (Night)", "start": "19:00", "end": "07:00", "color": "#7c3aed"},
-    {"key": "NB",  "label": "Night Bridge",     "start": "23:00", "end": "03:00", "color": "#06b6d4"},
+    {"key": "NB",  "label": "Night Bridge",     "start": "23:00", "end": "07:00", "color": "#06b6d4"},
     {"key": "R12", "label": "7am–7pm Rounder",   "start": "07:00", "end": "19:00", "color": "#16a34a"},
     {"key": "A12", "label": "7am–7pm Admitter",  "start": "07:00", "end": "19:00", "color": "#f59e0b"},
     {"key": "A10", "label": "10am–10pm Admitter", "start": "10:00", "end": "22:00", "color": "#ef4444"},
@@ -742,18 +742,16 @@ def schedule_grid_view():
         try:
             return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
         except Exception:
-            return (102, 102, 102)  # gray fallback
+            return (102, 102, 102)
 
     def _rgb_to_hue(r, g, b):
         import colorsys
-        # colorsys uses 0..1
         h, s, v = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
         return int(h * 360)
 
     def emoji_for_hex(hex_color: str) -> str:
         r, g, b = _hex_to_rgb(hex_color)
         hue = _rgb_to_hue(r, g, b)
-        # map hue to an emoji-ish color tag
         if hue < 15 or hue >= 345: return "🔴"
         if 15 <= hue < 40:         return "🟠"
         if 40 <= hue < 70:         return "🟡"
@@ -768,11 +766,11 @@ def schedule_grid_view():
     days  = make_month_days(year, month)
     day_cols = [str(d.day) for d in days]
 
-    # ---------- rows: one row per capacity slot, grouped & sorted by time-of-day ----------
+    # ---------- one row per capacity slot, grouped & sorted ----------
     stypes  = st.session_state.shift_types
     cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
 
-    row_meta = []  # each: {"row_label","skey","sdef","slot","group","gorder"}
+    row_meta = []
     for s in stypes:
         skey = s["key"]
         cap  = int(cap_map.get(skey, 1))
@@ -783,26 +781,21 @@ def schedule_grid_view():
                 "row_label": row_label, "skey": skey, "sdef": s,
                 "slot": slot, "group": group_label, "gorder": gorder
             })
-
-    # sort rows: group → start time → key → slot
     row_meta.sort(key=lambda r: (r["gorder"], start_minutes(r["sdef"]), r["skey"], r["slot"]))
 
-    # ---------- build grid (add Color + Shift columns) ----------
+    # ---------- build grid (ONLY Color + day columns; remove 'Shift') ----------
     import pandas as pd
     row_labels = [rm["row_label"] for rm in row_meta]
     grid = pd.DataFrame("", index=row_labels, columns=day_cols, dtype="object")
-
-    # Prepend Color + Shift columns
     color_tags = [emoji_for_hex(rm["sdef"].get("color")) for rm in row_meta]
-    grid.insert(0, "Color", color_tags)
-    grid.insert(1, "Shift", row_labels)
+    grid.insert(0, "Color", color_tags)  # keep color tag only
 
     # quick index for filling
     rows_for_key = {}
     for rm in row_meta:
         rows_for_key.setdefault(rm["skey"], []).append(rm["row_label"])
 
-    # fill from existing events into the first empty slot for that shift/day
+    # fill from existing events into first empty slot
     for e in st.session_state.events:
         ext  = (e.get("extendedProps") or {})
         skey = ext.get("shift_key")
@@ -820,32 +813,25 @@ def schedule_grid_view():
             if grid.at[row_label, col] == "":
                 grid.at[row_label, col] = prov
                 break
-        # if all slots full, ignore (grid mirrors capacity)
 
     # ---------- editor config ----------
     valid_provs = sorted(
         st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()
     ) if not st.session_state.providers_df.empty else []
 
-    st.caption("Each cell holds a single provider (blank = unassigned). "
-               "Rows are grouped Day → Evening → Night → Late Night. "
-               "Use ‘Daily shift capacities’ to change row counts per shift.")
+    st.caption("Each cell holds a single provider (blank = unassigned). Rows grouped Day → Evening → Night → Late Night.")
 
-    # Build column_config: Color/Shift disabled, day columns as selects
     col_config = {
         "Color": st.column_config.TextColumn(disabled=True, help="Shift color tag"),
-        "Shift": st.column_config.TextColumn(disabled=True, help="Shift type & slot"),
     }
     try:
         for c in day_cols:
             col_config[c] = st.column_config.SelectboxColumn(options=[""] + valid_provs,
                                                              help=f"Assignments for day {c}")
     except Exception:
-        # Older Streamlit: just leave defaults (still editable as text)
-        pass
+        pass  # fallback for older Streamlit
 
-    # >>> make it tall enough to avoid vertical scrolling
-    # Approx row height ~ 34–38px; add header/padding. Cap at a generous upper bound.
+    # Tall enough to avoid scrolling
     height_px = min(2000, 110 + len(row_meta) * 38)
 
     edited_grid = st.data_editor(
@@ -856,6 +842,22 @@ def schedule_grid_view():
         column_config=col_config,
         key="grid_editor",
     )
+
+    # ---------- optional highlight view (read-only) ----------
+    hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
+    if hi:
+        st.markdown(f"**Highlighting:** {hi}")
+        # Build a styled copy of the edited grid (Color + days)
+        styled = edited_grid.copy()
+        day_only_cols = [c for c in styled.columns if c.isdigit()]
+
+        def _cell_style(val):
+            try:
+                return "background-color: #fff3bf; font-weight: 700;" if str(val).strip().upper() == hi else ""
+            except Exception:
+                return ""
+
+        st.dataframe(styled.style.applymap(_cell_style, subset=day_only_cols), use_container_width=True, height=height_px)
 
     # ---------- map back to events ----------
     c1, c2 = st.columns(2)
@@ -897,10 +899,7 @@ def schedule_grid_view():
             seen_day_provider = set()
             conflicts = []
 
-            # map row_label → shift_key
             row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
-
-            # Iterate rows; ignore the two metadata cols when reading values
             day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
 
             for row_label in edited_grid.index:
@@ -915,7 +914,6 @@ def schedule_grid_view():
                     prov = ("" if prov is None else str(prov)).strip().upper()
                     if not prov:
                         continue
-
                     day_date = date(year, month, int(col))
                     key_dp = (day_date, prov)
                     if key_dp in seen_day_provider:
@@ -961,6 +959,7 @@ def schedule_grid_view():
 
 
 
+
 # -------------------------
 # App entry
 # -------------------------
@@ -975,6 +974,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
