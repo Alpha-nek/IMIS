@@ -770,21 +770,26 @@ return True
     def score(provider_id: str, day: date, shift_key: str) -> float:
         sc = 0.0
         # toward minimum
-        if counts[provider_id] < min_required: sc += 4.0
-        # contiguous blocks up to preferred min size
-        ds = provider_days(provider_id)
-        L = left_run_len(ds, day)
-        if L > 0: sc += 2.0
-        if L < mbs: sc += 4.0
+        if counts[provider_id] < min_required:
+            sc += 4.0
+            # contiguous blocks up to preferred min size
+            ds = provider_days(provider_id)
+            L = left_run_len(ds, day)
+            if L > 0:
+                sc += 2.0
+            if L < mbs:
+                sc += 4.0
         # gentle load balance
         sc += max(0, 20 - counts[provider_id]) * 0.01
         # soft penalty if this hits the max block size
-        if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx: sc -= 0.2
+        if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
+            sc -= 0.2
         # weekend incentive if required & none yet
         weekend_required = prov_rules.get(provider_id, {}).get("require_weekend", rules.require_at_least_one_weekend)
         if day.weekday() >= 5 and weekend_required and provider_weekend_count(provider_id) == 0:
             sc += 3.0
-        # soft incentive to meet provider-specific day/night ratio if configured
+    
+         # soft incentive to meet provider-specific day/night ratio if configured
         try:
             pr = prov_rules.get(provider_id, {}) or {}
             ratio = pr.get("day_night_ratio", None)  # percent of day shifts
@@ -804,8 +809,8 @@ return True
                         sc += 0.5
         except Exception:
             pass
-
         return sc
+       
 
     # ---------- build schedule ----------
     for current_day in days:
@@ -2142,4 +2147,5 @@ def main():
         provider_rules_panel()
 
 main()
+
 
