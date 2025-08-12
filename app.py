@@ -587,14 +587,14 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         for i in range(len(blocks) - 1):
 
             # Also check 12-hour rest within each block
-            evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == provider]
+            evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == p_upper]
             for block_start, block_end in blocks:
                 block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
                 block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
                 for a, b in zip(block_shifts, block_shifts[1:]):
                     rest_hours = (pd.to_datetime(b["start"]) - pd.to_datetime(a["end"])).total_seconds() / 3600.0
                     if rest_hours < 12:
-                        violations.setdefault(provider, []).append(
+                        violations.setdefault(p_upper, []).append(
                             f"Rest {rest_hours:.1f}h < 12h between {a['start']} and {b['start']}"
                         )
                 end_prev = blocks[i][1]
