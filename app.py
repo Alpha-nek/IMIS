@@ -1167,6 +1167,24 @@ def provider_selector():
 
 def render_calendar():
     st.subheader(f"Calendar — {st.session_state.month:%B %Y}")
+    
+    # Add month navigation controls
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+    with col1:
+        if st.button("← Previous Month"):
+            st.session_state.month = st.session_state.month - relativedelta(months=1)
+            st.rerun()
+    with col2:
+        if st.button("Next Month →"):
+            st.session_state.month = st.session_state.month + relativedelta(months=1)
+            st.rerun()
+    with col3:
+        if st.button("Today"):
+            st.session_state.month = date.today().replace(day=1)
+            st.rerun()
+    with col4:
+        st.caption("💡 Navigate to change which month the Generate button will create schedules for")
+    
     if st_calendar is None:
         st.warning("streamlit-calendar is not installed or failed to import. Please install and restart.")
         return
@@ -1181,7 +1199,6 @@ def render_calendar():
         "initialView": "dayGridMonth",
         "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,timeGridWeek"},
         "eventTimeFormat": {"hour": "2-digit", "minute": "2-digit", "hour12": False},
-        "datesSet": True,  # Enable date change events
     }
 
     # Custom CSS to dim non-highlighted events
@@ -1212,28 +1229,6 @@ def render_calendar():
         options=cal_options,
         key="calendar",
     )
-    
-    # Handle calendar navigation - update the displayed month
-    if state.get("datesSet"):
-        # Extract the new date range from the calendar navigation
-        dates_info = state["datesSet"]
-        start_date_str = dates_info.get("startStr", "")
-        if start_date_str:
-            try:
-                start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
-                # Update to the first day of the month
-                new_month = date(start_date.year, start_date.month, 1)
-                if new_month != st.session_state.month:
-                    st.session_state.month = new_month
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Error parsing date: {e}")
-    
-    # Also handle view changes (month/week view)
-    if state.get("viewChange"):
-        view_info = state["viewChange"]
-        st.session_state.setdefault("calendar_view", "dayGridMonth")
-        st.session_state.calendar_view = view_info.get("viewType", "dayGridMonth")
 
     # Handle interactions
     if state.get("eventClick"):
@@ -2161,7 +2156,7 @@ def main():
                         st.session_state.events = [_event_to_dict(e) for e in new_events]
                         st.session_state.comments = {}
                         st.session_state.generation_count += 1
-                        st.success(f"✅ Draft schedule generated for {st.session_state.month.strftime('%B %Y')} (displayed month) with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
+                        st.success(f"✅ Draft schedule generated for {st.session_state.month.strftime('%B %Y')} (use navigation buttons above calendar to change month) with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
