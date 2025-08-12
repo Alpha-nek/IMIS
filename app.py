@@ -180,6 +180,50 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
             return True
     return False
 
+def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
+    """Count the number of vacation weeks a provider has in a specific month."""
+    if not pr:
+        return 0
+    vac = pr.get("vacations", [])
+    if not vac:
+        return 0
+    
+    # Get all vacation dates for this month
+    month_vacation_dates = set()
+    for d in _expand_vacation_dates(vac):
+        if (d.year, d.month) == (year, month):
+            month_vacation_dates.add(d)
+    
+    if not month_vacation_dates:
+        return 0
+    
+    # Count weeks (7 consecutive days = 1 week)
+    weeks = 0
+    sorted_dates = sorted(month_vacation_dates)
+    
+    i = 0
+    while i < len(sorted_dates):
+        # Count consecutive days starting from this date
+        consecutive_count = 1
+        current_date = sorted_dates[i]
+        
+        # Check for consecutive days
+        for j in range(i + 1, len(sorted_dates)):
+            if (sorted_dates[j] - current_date).days == consecutive_count:
+                consecutive_count += 1
+            else:
+                break
+        
+        # Calculate weeks (7 days = 1 week)
+        weeks += consecutive_count // 7
+        if consecutive_count % 7 > 0:  # Partial week counts as 1 week
+            weeks += 1
+        
+        # Skip the dates we've already counted
+        i += consecutive_count
+    
+    return weeks
+
 def get_shift_label_maps():
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
     label_for_key = {s["key"]: s["label"] for s in stypes}
@@ -496,6 +540,50 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
                 return True
         return False
 
+    def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
+        """Count the number of vacation weeks a provider has in a specific month."""
+        if not pr:
+            return 0
+        vac = pr.get("vacations", [])
+        if not vac:
+            return 0
+        
+        # Get all vacation dates for this month
+        month_vacation_dates = set()
+        for d in _expand_vacation_dates(vac):
+            if (d.year, d.month) == (year, month):
+                month_vacation_dates.add(d)
+        
+        if not month_vacation_dates:
+            return 0
+        
+        # Count weeks (7 consecutive days = 1 week)
+        weeks = 0
+        sorted_dates = sorted(month_vacation_dates)
+        
+        i = 0
+        while i < len(sorted_dates):
+            # Count consecutive days starting from this date
+            consecutive_count = 1
+            current_date = sorted_dates[i]
+            
+            # Check for consecutive days
+            for j in range(i + 1, len(sorted_dates)):
+                if (sorted_dates[j] - current_date).days == consecutive_count:
+                    consecutive_count += 1
+                else:
+                    break
+            
+            # Calculate weeks (7 days = 1 week)
+            weeks += consecutive_count // 7
+            if consecutive_count % 7 > 0:  # Partial week counts as 1 week
+                weeks += 1
+            
+            # Skip the dates we've already counted
+            i += consecutive_count
+        
+        return weeks
+
     def _is_unavailable(p_upper: str, day: date) -> bool:
         """True if provider p_upper is unavailable on 'day' due to specific dates or vacation ranges."""
         pr = prov_rules.get(p_upper, {}) or {}
@@ -560,10 +648,23 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         evs.sort(key=lambda e: e.start)
         pr = prov_rules.get(p_upper, {})
 
-        # effective max shifts (override or month default), minus 3 if any vacation in month
-        eff_max = pr.get("max_shifts", base_default)
-        if _provider_has_vacation_in_month(pr):
-            eff_max = max(0, (eff_max or 0) - 3)
+        # Group provider events by month for per-month validation
+        provider_events_by_month: Dict[tuple[int, int], List[SEvent]] = {}
+        for ev in evs:
+            month_key = (ev.start.year, ev.start.month)
+            provider_events_by_month.setdefault(month_key, []).append(ev)
+
+        # Validate each month separately for vacation adjustments
+        for (year, month), month_events in provider_events_by_month.items():
+            # effective max shifts (override or month default), minus 3 per vacation week in month
+            eff_max = pr.get("max_shifts", base_default)
+            vacation_weeks = _provider_vacation_weeks_in_month(pr, year, month)
+            if vacation_weeks > 0:
+                eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
+
+            # Check max shifts for this month
+            if eff_max is not None and len(month_events) > eff_max:
+                violations.setdefault(p_upper, []).append(f"{year}-{month:02d}: {len(month_events)} shifts > max {eff_max} (adjusted for {vacation_weeks} vacation weeks)")
 
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
@@ -572,13 +673,11 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
             violations.setdefault(p_upper, []).append("No weekend shifts")
 
-        # 0) Min shifts
+        # 0) Min shifts (across all months)
         if min_required and len(evs) < min_required:
             violations.setdefault(p_upper, []).append(f"Has {len(evs)} shifts < min {min_required}")
 
-        # 1) Max shifts
-        if eff_max is not None and len(evs) > eff_max:
-            violations.setdefault(p_upper, []).append(f"Has {len(evs)} shifts > max {eff_max}")
+        # 1) Max shifts (already handled per month above)
 
         # 2) Rest days BETWEEN blocks (not between every consecutive shift)
         dates_sorted = sorted([ev.start.date() for ev in evs])
@@ -588,7 +687,7 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
             # Also check 12-hour rest within each block
             evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == p_upper]
-            for block_start, block_end in blocks:
+            for block_start, block_end, _ in blocks:
                 block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
                 block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
                 for a, b in zip(block_shifts, block_shifts[1:]):
@@ -722,8 +821,13 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         # 2) Provider overrides / month defaults
         pr = prov_rules.get(p_upper, {}) or {}
         eff_max = pr.get("max_shifts", base_max)
-        if _provider_has_vacation_in_month(pr):
-            eff_max = max(0, (eff_max or 0) - 3)
+        # Calculate vacation weeks for the current month being generated
+        # We need to determine which month we're currently generating for
+        current_month = d.month
+        current_year = d.year
+        vacation_weeks = _provider_vacation_weeks_in_month(pr, current_year, current_month)
+        if vacation_weeks > 0:
+            eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
         
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
@@ -1000,6 +1104,18 @@ def _serialize_events_for_download(events):
 def make_month_days(year: int, month: int) -> List[date]:
     start, end = month_start_end(year, month)
     return list(date_range(start, end))
+
+def make_three_months_days(start_year: int, start_month: int) -> List[date]:
+    """Generate days for three consecutive months starting from start_month."""
+    all_days = []
+    for i in range(3):
+        year = start_year
+        month = start_month + i
+        if month > 12:
+            year += 1
+            month -= 12
+        all_days.extend(make_month_days(year, month))
+    return all_days
 
 
 
@@ -1868,19 +1984,20 @@ def main():
         # Action buttons
         g1, g2, g3 = st.columns(3)
         with g1:
-            if st.button("🔄 Generate Draft", help="Generate schedule from rules"):
+            if st.button("🔄 Generate Draft (3 Months)", help="Generate schedule for next 3 months from rules"):
                 providers = st.session_state.providers_df["initials"].tolist()
                 if not providers:
                     st.warning("Add providers first.")
                 else:
                     rules = RuleConfig(**st.session_state.rules)
-                    days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+                    # Generate days for the next 3 months starting from current month
+                    days = make_three_months_days(st.session_state.month.year, st.session_state.month.month)
                     # Generate new events using the greedy algorithm
                     new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
                     # Convert SEvent objects to dictionary format for calendar
                     st.session_state.events = [_event_to_dict(e) for e in new_events]
                     st.session_state.comments = {}
-                    st.success(f"Draft schedule generated with {len(st.session_state.events)} events!")
+                    st.success(f"Draft schedule generated for 3 months with {len(st.session_state.events)} events!")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
@@ -1892,10 +2009,10 @@ def main():
                     for p, arr in viols.items():
                         st.error(f"❌ {p}:\n - " + "\n - ".join(arr))
         with g3:
-            if st.button("🗑️ Clear Month", help="Clear all events for this month"):
+            if st.button("🗑️ Clear All", help="Clear all events"):
                 st.session_state.events = []
                 st.session_state.comments = {}
-                st.success("Month cleared!")
+                st.success("All events cleared!")
         
         # Calendar display
         render_calendar()
