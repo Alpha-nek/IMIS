@@ -1655,12 +1655,6 @@ def provider_rules_panel():
             st.success(f"Saved provider_caps.json to {data_dir}")
         except Exception as e:
             st.error(f"Failed to save provider_caps.json: {e}")
-        
-
-        
-st.success("Saved provider rules.")
-    
-
 
 
 def schedule_grid_view():
