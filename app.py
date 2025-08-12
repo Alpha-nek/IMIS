@@ -183,6 +183,10 @@ def get_shift_label_maps():
     key_for_label = {v: k for k, v in label_for_key.items()}
     return label_for_key, key_for_label
 
+def provider_weekend_count(p: str) -> int:
+        return sum(1 for e in events
+               if e.extendedProps.get("provider") == p and e.start.weekday() >= 5)
+
 def get_global_rules():
     return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
 
@@ -1833,9 +1837,7 @@ if st.button("Apply grid to calendar"):
             run += 1; cur += timedelta(days=1)
         return run
 
-    def provider_weekend_count(p: str) -> int:
-        return sum(1 for e in events
-               if e.extendedProps.get("provider") == p and e.start.weekday() >= 5)
+    
 
     def total_block_len_if_assigned(provider, d0):
         ds = provider_days(provider)
@@ -1973,6 +1975,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
