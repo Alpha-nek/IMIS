@@ -1,7 +1,8 @@
 # app.py — Interactive Monthly Scheduler for Multi-Doctor Shifts (Streamlit)
 # ---------------------------------------------------------------
-# Created by: Yazan Al-Fanek, MD
-#
+# 
+# Vibe Coded By Yazan Al-Fanek, MD and Chat GPT5
+# 
 # Features
 # - Upload or paste a provider list (initials)
 # - Define/confirm shift types
@@ -224,15 +225,30 @@ def identify_coverage_gaps(events: List[SEvent], shift_types: List[Dict], shift_
     """Identify days with insufficient provider coverage."""
     coverage_by_day = {}
     
-    # Initialize coverage tracking for each day
+    # Get the month range from events to check all days
+    if not events:
+        return []
+    
+    # Find the month range from events
+    event_dates = [event.start.date() for event in events]
+    min_date = min(event_dates)
+    max_date = max(event_dates)
+    
+    # Initialize coverage tracking for all days in the month
+    current_date = min_date
+    while current_date <= max_date:
+        coverage_by_day[current_date] = {shift["key"]: [] for shift in shift_types}
+        current_date += timedelta(days=1)
+    
+    # Count actual coverage from events
     for event in events:
         event_date = event.start.date()
-        if event_date not in coverage_by_day:
-            coverage_by_day[event_date] = {shift["key"]: [] for shift in shift_types}
-        
         shift_type = event.extendedProps.get("shift_type", "")
-        if shift_type in coverage_by_day[event_date]:
-            coverage_by_day[event_date][shift_type].append(event.extendedProps.get("provider", ""))
+        provider = event.extendedProps.get("provider", "").strip().upper()
+        
+        if event_date in coverage_by_day and shift_type in coverage_by_day[event_date]:
+            if provider:  # Only count if provider is not empty
+                coverage_by_day[event_date][shift_type].append(provider)
     
     gaps = []
     for date, day_coverage in coverage_by_day.items():
@@ -2525,11 +2541,7 @@ def main():
                             shifts_df = pd.DataFrame(list(shifts_data.items()), columns=["Provider", "Total Shifts"])
                             shifts_df = shifts_df.sort_values("Total Shifts", ascending=False)
                             
-                            col1, col2 = st.columns([2, 1])
-                            with col1:
-                                st.dataframe(shifts_df, use_container_width=True)
-                            with col2:
-                                st.bar_chart(shifts_df.set_index("Provider"))
+                            st.dataframe(shifts_df, use_container_width=True)
                             
                             # 2. Weekend shifts per provider
                             st.subheader("🌅 Weekend Shifts per Provider")
@@ -2537,16 +2549,15 @@ def main():
                             weekend_df = pd.DataFrame(list(weekend_data.items()), columns=["Provider", "Weekend Shifts"])
                             weekend_df = weekend_df.sort_values("Weekend Shifts", ascending=False)
                             
-                            col1, col2 = st.columns([2, 1])
-                            with col1:
-                                st.dataframe(weekend_df, use_container_width=True)
-                            with col2:
-                                st.bar_chart(weekend_df.set_index("Provider"))
+                            st.dataframe(weekend_df, use_container_width=True)
                             
                             # 3. Coverage gaps
                             st.subheader("⚠️ Coverage Gaps")
                             gaps = identify_coverage_gaps(evs, st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES), 
                                                         st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+                            
+                            # Debug information
+                            st.caption(f"📊 **Debug Info**: Analyzing {len(evs)} events across {len(set(event.start.date() for event in evs))} unique days")
                             
                             if gaps:
                                 gaps_df = pd.DataFrame(gaps)
@@ -2562,6 +2573,16 @@ def main():
                                 
                                 # Summary of gaps
                                 st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                                
+                                # Show detailed breakdown
+                                with st.expander("🔍 Detailed Coverage Analysis"):
+                                    st.write("**Shift Type Breakdown:**")
+                                    shift_breakdown = gaps_df.groupby("Shift Type").agg({
+                                        "Expected": "sum",
+                                        "Actual": "sum", 
+                                        "Shortage": "sum"
+                                    }).reset_index()
+                                    st.dataframe(shift_breakdown, use_container_width=True)
                             else:
                                 st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
                         else:
@@ -2584,11 +2605,7 @@ def main():
                         shifts_df = pd.DataFrame(list(shifts_data.items()), columns=["Provider", "Total Shifts"])
                         shifts_df = shifts_df.sort_values("Total Shifts", ascending=False)
                         
-                        col1, col2 = st.columns([2, 1])
-                        with col1:
-                            st.dataframe(shifts_df, use_container_width=True)
-                        with col2:
-                            st.bar_chart(shifts_df.set_index("Provider"))
+                        st.dataframe(shifts_df, use_container_width=True)
                         
                         # 2. Weekend shifts per provider
                         st.subheader("🌅 Weekend Shifts per Provider")
@@ -2596,16 +2613,15 @@ def main():
                         weekend_df = pd.DataFrame(list(weekend_data.items()), columns=["Provider", "Weekend Shifts"])
                         weekend_df = weekend_df.sort_values("Weekend Shifts", ascending=False)
                         
-                        col1, col2 = st.columns([2, 1])
-                        with col1:
-                            st.dataframe(weekend_df, use_container_width=True)
-                        with col2:
-                            st.bar_chart(weekend_df.set_index("Provider"))
+                        st.dataframe(weekend_df, use_container_width=True)
                         
                         # 3. Coverage gaps
                         st.subheader("⚠️ Coverage Gaps")
                         gaps = identify_coverage_gaps(evs, st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES), 
                                                     st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+                        
+                        # Debug information
+                        st.caption(f"📊 **Debug Info**: Analyzing {len(evs)} events across {len(set(event.start.date() for event in evs))} unique days")
                         
                         if gaps:
                             gaps_df = pd.DataFrame(gaps)
@@ -2621,6 +2637,16 @@ def main():
                             
                             # Summary of gaps
                             st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                            
+                            # Show detailed breakdown
+                            with st.expander("🔍 Detailed Coverage Analysis"):
+                                st.write("**Shift Type Breakdown:**")
+                                shift_breakdown = gaps_df.groupby("Shift Type").agg({
+                                    "Expected": "sum",
+                                    "Actual": "sum", 
+                                    "Shortage": "sum"
+                                }).reset_index()
+                                st.dataframe(shift_breakdown, use_container_width=True)
                         else:
                             st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
                     else:
