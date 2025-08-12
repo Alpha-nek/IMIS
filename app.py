@@ -2550,6 +2550,8 @@ def main():
                             
                             if gaps:
                                 gaps_df = pd.DataFrame(gaps)
+                                # Ensure date column is properly converted to datetime
+                                gaps_df["date"] = pd.to_datetime(gaps_df["date"])
                                 gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
                                 gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
                                 gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
@@ -2607,6 +2609,8 @@ def main():
                         
                         if gaps:
                             gaps_df = pd.DataFrame(gaps)
+                            # Ensure date column is properly converted to datetime
+                            gaps_df["date"] = pd.to_datetime(gaps_df["date"])
                             gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
                             gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
                             gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
