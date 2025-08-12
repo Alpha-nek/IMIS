@@ -55,6 +55,7 @@ DEFAULT_SHIFT_TYPES = [
     {"key": "R12", "label": "7am–7pm Rounder",   "start": "07:00", "end": "19:00", "color": "#16a34a"},
     {"key": "A12", "label": "7am–7pm Admitter",  "start": "07:00", "end": "19:00", "color": "#f59e0b"},
     {"key": "A10", "label": "10am–10pm Admitter", "start": "10:00", "end": "22:00", "color": "#ef4444"},
+    {"key": "APP", "label": "APP Provider",      "start": "07:00", "end": "19:00", "color": "#8b5cf6"},
 ]
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -67,7 +68,12 @@ PROVIDER_INITIALS_DEFAULT = [
     "YH","XL","MA","LM","MQ","CM","AI"
 ]
 
-DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
+# ----- APP Provider roster -----
+APP_PROVIDER_INITIALS = [
+    "AP1", "AP2", "AP3", "AP4", "AP5", "AP6", "AP7", "AP8", "AP9", "AP10"
+]
+
+DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2, "APP": 2}
 
 
 def _normalize_initials_list(items):
@@ -714,6 +720,9 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {})
     prov_rules: Dict[str, Dict[str, Any]] = st.session_state.get("provider_rules", {})
 
+    # Get APP providers
+    app_providers = APP_PROVIDER_INITIALS.copy()
+    
     # Counters and accumulator
     counts: Dict[str, int] = {p: 0 for p in providers}
     nights: Dict[str, int] = {p: 0 for p in providers}
@@ -756,6 +765,28 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         pu = (p or "").upper()
         return sum(1 for e in events if (e.extendedProps.get("provider") or "").upper() == pu and e.start.weekday() >= 5)
 
+    # ---------- APP shift helpers ----------
+    def is_weekday(d: date) -> bool:
+        return d.weekday() < 5  # Monday = 0, Friday = 4
+    
+    def is_weekend(d: date) -> bool:
+        return d.weekday() >= 5  # Saturday = 5, Sunday = 6
+    
+    def get_app_shift_capacity(d: date) -> int:
+        """Get APP shift capacity for a given day (2 on weekdays, 1 on weekends)"""
+        if is_weekday(d):
+            return 2
+        else:
+            return 1
+    
+    def day_app_shift_count(d: date) -> int:
+        """Count how many APP shifts are already assigned on a given day"""
+        return day_shift_count(d, "APP")
+    
+    def is_app_provider(p: str) -> bool:
+        """Check if a provider is an APP provider"""
+        return p.upper() in [ap.upper() for ap in app_providers]
+
     # ---------- feasibility + scoring ----------
     def ok(p: str, d: date, skey: str) -> bool:
         p_upper = (p or "").upper()
@@ -784,8 +815,19 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
             return False
 
         # 4) Per-day caps & one-shift-per-day
-        if day_shift_count(d, skey) >= cap_map.get(skey, 1):
-            return False
+        if skey == "APP":
+            # APP shift specific rules
+            # Only APP providers can take APP shifts
+            if not is_app_provider(p):
+                return False
+            # Check APP shift capacity (2 on weekdays, 1 on weekends)
+            if day_app_shift_count(d) >= get_app_shift_capacity(d):
+                return False
+        else:
+            # Regular shift capacity check
+            if day_shift_count(d, skey) >= cap_map.get(skey, 1):
+                return False
+        
         if provider_has_shift_on_day(p, d):
             return False
 
@@ -1772,12 +1814,15 @@ def schedule_grid_view():
                 # Apply changes automatically
                 apply_grid_to_calendar(edited_grid, year, month, row_meta)
                 st.success("✅ Grid changes applied automatically!")
-                st.rerun()
+                # Remove automatic rerun to improve performance
+                # st.rerun()
 
         # Manual apply button (for backup)
         if st.button("Apply grid to calendar (Manual)"):
             apply_grid_to_calendar(edited_grid, year, month, row_meta)
-            st.rerun()
+            st.success("✅ Grid changes applied manually!")
+            # Only rerun on manual apply if needed
+            # st.rerun()
         
         # Save functionality
         col1, col2 = st.columns(2)
@@ -2140,10 +2185,12 @@ def main():
                     st.error("❌ No providers loaded! Please go to the Providers tab and load providers first.")
                 else:
                     providers = st.session_state.providers_df["initials"].tolist()
+                    # Add APP providers to the list
+                    providers.extend(APP_PROVIDER_INITIALS)
                     if not providers:
                         st.error("❌ Provider list is empty! Please add providers in the Providers tab.")
                     else:
-                        st.info(f"🔄 Generating schedule for {len(providers)} providers...")
+                        st.info(f"🔄 Generating schedule for {len(providers)} providers (including {len(APP_PROVIDER_INITIALS)} APP providers)...")
                         rules = RuleConfig(**st.session_state.rules)
                         # Generate days for the current month only
                         days = make_month_days(st.session_state.month.year, st.session_state.month.month)
