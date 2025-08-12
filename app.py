@@ -216,8 +216,6 @@ def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
 # State helpers
 # -------------------------
 
-
-
     
 # --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
@@ -509,7 +507,11 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
             eff_max = max(0, (eff_max or 0) - 3)
 
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+        min_rest = rules.min_rest_hours_between_shifts
+
+        weekend_required = pr.get("require_weekend", rules.require_at_least_one_weekend)
+        if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
+        violations.setdefault(p_upper, []).append("No weekend shifts")
 
         # 0) Min shifts
         if min_required and len(evs) < min_required:
@@ -639,7 +641,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         if _provider_has_vacation_in_month(pr):
             eff_max = max(0, (eff_max or 0) - 3)
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest   = pr.get("min_rest_hours", rules.min_rest_hours_between_shifts)
+        min_rest = rules.min_rest_hours_between_shifts
     
         # 3) Hard block: unavailable (specific date or vacation range)
         if is_provider_unavailable_on_date(p_upper, d):
@@ -680,34 +682,32 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         return True
     
     def score(provider_id: str, day: date, shift_key: str) -> float:
-        """
-        Compute a score to choose among eligible providers for a given shift.
-        Higher scores favor assignment.  The scoring logic pushes providers
-        toward their minimum shifts, prefers contiguous blocks up to the preferred
-        minimum block size, balances workload, and lightly penalizes hitting the
-        maximum block size cap.
-        """
         sc = 0.0
-        # Push toward the minimum required shifts for the month
+    
+        # push to minimum
         if counts[provider_id] < min_required:
             sc += 4.0
     
-        # Prefer extending existing blocks, especially up to the preferred min block size
+        # contiguity up to preferred min block size
         days_set = provider_days(provider_id)
         block_len = left_run_len(days_set, day)
-        if block_len > 0:
-            sc += 2.0  # reward extending a block
-        if block_len < mbs:
-            sc += 4.0  # strong reward until the preferred min block size is met
+        if block_len > 0: sc += 2.0
+        if block_len < mbs: sc += 4.0
     
-        # Slight load balancing: fewer shifts → slightly higher score
+        # gentle load balance
         sc += max(0, 20 - counts[provider_id]) * 0.01
     
-        # Soft penalty if this assignment would hit the max block size (still allowed)
+        # avoid hitting hard block cap
         if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
             sc -= 0.2
     
+        # NEW: weekend incentive for those who require it and have none yet
+        weekend_required_for_p = prov_rules.get(provider_id, {}).get("require_weekend", rules.require_at_least_one_weekend)
+        if day.weekday() >= 5 and weekend_required_for_p and provider_weekend_count(provider_id) == 0:
+            sc += 3.0
+    
         return sc
+
 
     for current_day in days:
         for shift_key in stypes:
@@ -1056,13 +1056,6 @@ def engine_panel():
             key="rule_max_block",
         )
         rc.max_block_size = None if mbx_val == 0 else int(mbx_val)
-    
-        rc.min_rest_hours_between_shifts = st.number_input(
-            "Min rest hours between shifts",
-            min_value=0, max_value=48,
-            value=int(getattr(rc, "min_rest_hours_between_shifts", 0)),
-            key="rule_min_rest",
-        )
     
         rc.require_at_least_one_weekend = st.checkbox(
             "Require at least one weekend shift",
@@ -1450,7 +1443,6 @@ def provider_rules_panel():
         st.info("Add providers first.")
         return
 
-    # Global selected provider (from Engine panel)
     sel = (st.session_state.get("highlight_provider", "") or "").strip().upper()
     if not sel:
         st.info("Select a provider in the Engine to edit rules.")
@@ -1459,16 +1451,15 @@ def provider_rules_panel():
         st.warning(f"{sel} not in current roster.")
         return
 
-    # Stores
     rules_map = st.session_state.setdefault("provider_rules", {})
     st.session_state.setdefault("provider_caps", {})
 
-    # Shift label maps
+    # Shift maps
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
     label_for_key = {s["key"]: s["label"] for s in stypes}
     key_for_label = {v: k for k, v in label_for_key.items()}
 
-    # ----- Allowed shift types
+    # Allowed shift types
     current_allowed = st.session_state["provider_caps"].get(sel, [])
     default_labels = [label_for_key[k] for k in current_allowed if k in label_for_key]
 
@@ -1489,8 +1480,7 @@ def provider_rules_panel():
     st.subheader("Overrides (optional)")
 
     base_default = recommended_max_shifts_for_month()
-    curr = rules_map.get(sel, {})
-    global_rules = get_global_rules()
+    curr = rules_map.get(sel, {}).copy()  # work on a copy
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1512,6 +1502,7 @@ def provider_rules_panel():
             value=("max_nights" in curr),
             key=f"pr_use_nights_{sel}",
         )
+        global_rules = get_global_rules()
         default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
         max_n = st.number_input(
             "Max nights (this month)",
@@ -1520,16 +1511,19 @@ def provider_rules_panel():
             key=f"pr_max_n_{sel}",
         )
 
-    use_rest = st.checkbox(
-        "Override min rest hours",
-        value=("min_rest_hours" in curr),
-        key=f"pr_use_rest_{sel}",
+    # NEW: Weekend requirement override (no min_rest editor anywhere)
+    use_weekend = st.checkbox(
+        "Override weekend requirement",
+        value=("require_weekend" in curr),
+        key=f"pr_use_weekend_{sel}",
     )
-    min_rest = st.number_input(
-        "Min rest hours between shifts",
-        0, 48,
-        value=int(curr.get("min_rest_hours", global_rules.min_rest_hours_between_shifts)),
-        key=f"pr_min_rest_{sel}",
+    wk_idx = 0 if curr.get("require_weekend", True) else 1
+    wk_choice = st.radio(
+        "Weekend requirement",
+        options=["Require at least one", "No weekend required"],
+        index=wk_idx,
+        key=f"pr_weekend_choice_{sel}",
+        horizontal=True,
     )
 
     st.markdown("---")
@@ -1540,7 +1534,6 @@ def provider_rules_panel():
         key=f"pr_unavail_{sel}",
     )
 
-    # ----- Vacations (date ranges)
     st.markdown("---")
     st.subheader("Vacations (date ranges)")
     vac_list = curr.get("vacations", [])
@@ -1574,39 +1567,57 @@ def provider_rules_panel():
                 rules_map[sel] = curr
                 st.experimental_rerun()
 
-    st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
+    notes_val = st.text_area("Notes (optional)", value=curr.get("notes", ""), key=f"pr_notes_{sel}")
 
+    # Save (MERGE — never wipe unrelated keys)
     if st.button("Save provider rules", key=f"pr_save_{sel}"):
-        new_entry = {}
+        new_entry = rules_map.get(sel, {}).copy()
+
+        # merge toggles
         if use_max:    new_entry["max_shifts"] = int(max_sh)
+        else:          new_entry.pop("max_shifts", None)
+
         if use_nights: new_entry["max_nights"] = int(max_n)
-        if use_rest:   new_entry["min_rest_hours"] = int(min_rest)
+        else:          new_entry.pop("max_nights", None)
+
+        if use_weekend:
+            new_entry["require_weekend"] = (wk_choice == "Require at least one")
+        else:
+            new_entry.pop("require_weekend", None)
 
         # normalize dates
         import pandas as pd
-        unavail = []
-        for tok in [t.strip() for t in dates_txt.split(",") if t.strip()]:
-            try:
-                unavail.append(str(pd.to_datetime(tok).date()))
-            except Exception:
-                pass
-        if unavail:
-            new_entry["unavailable_dates"] = unavail
+        toks = [t.strip() for t in dates_txt.split(",") if t.strip()]
+        if toks:
+            clean = []
+            for tok in toks:
+                try: clean.append(str(pd.to_datetime(tok).date()))
+                except Exception: pass
+            if clean:
+                new_entry["unavailable_dates"] = clean
+            else:
+                new_entry.pop("unavailable_dates", None)
+        else:
+            new_entry.pop("unavailable_dates", None)
 
+        # vacations
         if vac_list:
             new_entry["vacations"] = vac_list
+        else:
+            new_entry.pop("vacations", None)
 
-        notes_val = st.session_state.get(f"pr_notes_{sel}", "")
-        if notes_val:
-            new_entry["notes"] = notes_val
+        # notes
+        if notes_val.strip():
+            new_entry["notes"] = notes_val.strip()
+        else:
+            new_entry.pop("notes", None)
 
         if new_entry:
             rules_map[sel] = new_entry
         else:
             rules_map.pop(sel, None)
-        st.success("Saved.")
 
-
+        st.success("Saved provider rules.")
 
 
 def schedule_grid_view():
@@ -1822,6 +1833,10 @@ if st.button("Apply grid to calendar"):
             run += 1; cur += timedelta(days=1)
         return run
 
+    def provider_weekend_count(p: str) -> int:
+    return sum(1 for e in events
+               if e.extendedProps.get("provider") == p and e.start.weekday() >= 5)
+
     def total_block_len_if_assigned(provider, d0):
         ds = provider_days(provider)
         L = left_run_len(ds, d0)
@@ -1958,6 +1973,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
