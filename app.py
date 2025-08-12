@@ -917,6 +917,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
        
 
     # ---------- build schedule ----------
+    total_assignments = 0
     for current_day in days:
         for shift_key in stypes:
             capacity = cap_map.get(shift_key, 1)
@@ -925,6 +926,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 if not candidates:
                     continue
                 best = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
+                total_assignments += 1
 
                 sdef = sdefs[shift_key]
                 start_dt = datetime.combine(current_day, parse_time(sdef["start"]))
@@ -945,6 +947,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 if shift_key == "N12":
                     nights[best] += 1
 
+    st.write(f"Debug assign_greedy: Made {total_assignments} assignments, returning {len(events)} events")
     return events
 
 # -------------------------
@@ -1880,12 +1883,16 @@ def main():
                 if not providers:
                     st.warning("Add providers first.")
                 else:
+                    st.write(f"Debug: Generating for {len(providers)} providers: {providers}")
                     rules = RuleConfig(**st.session_state.rules)
                     days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+                    st.write(f"Debug: Generating for {len(days)} days in {st.session_state.month}")
                     # Generate new events using the greedy algorithm
                     new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
+                    st.write(f"Debug: Generated {len(new_events)} events from assign_greedy")
                     # Convert SEvent objects to dictionary format for calendar
                     st.session_state.events = [_event_to_dict(e) for e in new_events]
+                    st.write(f"Debug: Converted to {len(st.session_state.events)} dictionary events")
                     st.session_state.comments = {}
                     st.success(f"Draft schedule generated with {len(st.session_state.events)} events!")
         with g2:
