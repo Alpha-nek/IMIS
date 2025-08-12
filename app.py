@@ -511,7 +511,7 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
         weekend_required = pr.get("require_weekend", rules.require_at_least_one_weekend)
         if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
-        violations.setdefault(p_upper, []).append("No weekend shifts")
+            violations.setdefault(p_upper, []).append("No weekend shifts")
 
         # 0) Min shifts
         if min_required and len(evs) < min_required:
@@ -1973,6 +1973,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
