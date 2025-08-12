@@ -2172,18 +2172,147 @@ def main():
                             provider_counts[provider] = 0
                         provider_counts[provider] += 1
                 
-                st.info(f"📊 Total events: {len(evs)}")
-                if provider_counts:
-                    st.info("📊 Provider shift counts:")
-                    for provider, count in sorted(provider_counts.items()):
-                        st.info(f"  • {provider}: {count} shifts")
-                
                 viols = validate_rules(evs, rules)
-                if not viols:
-                    st.success("✅ No violations detected.")
+                
+                # Create a comprehensive validation results interface
+                st.markdown("## 📋 Schedule Validation Results")
+                
+                # Summary metrics in columns
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Events", len(evs))
+                with col2:
+                    st.metric("Providers", len(provider_counts))
+                with col3:
+                    st.metric("Violations", len(viols) if viols else 0)
+                with col4:
+                    status = "✅ Valid" if not viols else "❌ Issues Found"
+                    st.metric("Status", status)
+                
+                # Create tabs for different views
+                if viols:
+                    tab_summary, tab_details, tab_stats = st.tabs(["📊 Summary", "🔍 Details", "📈 Statistics"])
+                    
+                    with tab_summary:
+                        st.subheader("🚨 Violation Summary")
+                        
+                        # Quick violation overview
+                        violation_types = {}
+                        for provider, violations in viols.items():
+                            for violation in violations:
+                                # Extract violation type from message
+                                if "exceeds max" in violation.lower():
+                                    violation_types["Max Shifts"] = violation_types.get("Max Shifts", 0) + 1
+                                elif "below minimum" in violation.lower():
+                                    violation_types["Min Shifts"] = violation_types.get("Min Shifts", 0) + 1
+                                elif "insufficient rest" in violation.lower():
+                                    violation_types["Rest Periods"] = violation_types.get("Rest Periods", 0) + 1
+                                elif "unavailable" in violation.lower():
+                                    violation_types["Unavailable Dates"] = violation_types.get("Unavailable Dates", 0) + 1
+                                else:
+                                    violation_types["Other"] = violation_types.get("Other", 0) + 1
+                        
+                        # Display violation types
+                        if violation_types:
+                            cols = st.columns(len(violation_types))
+                            for i, (violation_type, count) in enumerate(violation_types.items()):
+                                with cols[i]:
+                                    st.metric(violation_type, count)
+                        
+                        # Providers with most violations
+                        provider_violation_counts = {p: len(v) for p, v in viols.items()}
+                        if provider_violation_counts:
+                            st.subheader("⚠️ Providers with Issues")
+                            sorted_providers = sorted(provider_violation_counts.items(), key=lambda x: x[1], reverse=True)
+                            
+                            for provider, count in sorted_providers[:5]:  # Show top 5
+                                st.warning(f"**{provider}**: {count} violation(s)")
+                    
+                    with tab_details:
+                        st.subheader("🔍 Detailed Violations")
+                        
+                        # Group violations by provider in expandable sections
+                        for provider, violations in viols.items():
+                            with st.expander(f"**{provider}** ({len(violations)} violations)", expanded=False):
+                                for i, violation in enumerate(violations, 1):
+                                    # Color code violations
+                                    if "exceeds max" in violation.lower():
+                                        st.error(f"{i}. {violation}")
+                                    elif "below minimum" in violation.lower():
+                                        st.warning(f"{i}. {violation}")
+                                    elif "insufficient rest" in violation.lower():
+                                        st.error(f"{i}. {violation}")
+                                    elif "unavailable" in violation.lower():
+                                        st.error(f"{i}. {violation}")
+                                    else:
+                                        st.info(f"{i}. {violation}")
+                    
+                    with tab_stats:
+                        st.subheader("📈 Provider Statistics")
+                        
+                        # Provider shift counts in a nice table
+                        if provider_counts:
+                            st.write("**Shift Distribution:**")
+                            
+                            # Create a DataFrame for better display
+                            import pandas as pd
+                            stats_df = pd.DataFrame([
+                                {"Provider": provider, "Shifts": count}
+                                for provider, count in sorted(provider_counts.items())
+                            ])
+                            
+                            # Add violation count column
+                            stats_df["Violations"] = stats_df["Provider"].map(
+                                {p: len(v) for p, v in viols.items()}
+                            ).fillna(0).astype(int)
+                            
+                            # Color code the table
+                            def highlight_violations(row):
+                                if row["Violations"] > 0:
+                                    return ['background-color: #ffebee'] * len(row)
+                                return [''] * len(row)
+                            
+                            st.dataframe(
+                                stats_df.style.apply(highlight_violations, axis=1),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                            
+                            # Summary statistics
+                            st.write("**Summary:**")
+                            st.write(f"• Average shifts per provider: {sum(provider_counts.values()) / len(provider_counts):.1f}")
+                            st.write(f"• Providers with violations: {len(viols)}")
+                            st.write(f"• Total violations: {sum(len(v) for v in viols.values())}")
                 else:
-                    for p, arr in viols.items():
-                        st.error(f"❌ {p}:\n - " + "\n - ".join(arr))
+                    # No violations - show success with details
+                    st.success("🎉 **Schedule is Valid!** No rule violations detected.")
+                    
+                    # Show provider statistics
+                    if provider_counts:
+                        st.subheader("📊 Provider Statistics")
+                        
+                        # Create a nice summary
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Shift Distribution:**")
+                            for provider, count in sorted(provider_counts.items()):
+                                st.write(f"• **{provider}**: {count} shifts")
+                        
+                        with col2:
+                            st.write("**Summary:**")
+                            st.write(f"• Total events: {len(evs)}")
+                            st.write(f"• Providers: {len(provider_counts)}")
+                            st.write(f"• Average shifts: {sum(provider_counts.values()) / len(provider_counts):.1f}")
+                        
+                        # Show a simple chart
+                        if len(provider_counts) > 1:
+                            st.subheader("📈 Shift Distribution Chart")
+                            import pandas as pd
+                            chart_df = pd.DataFrame([
+                                {"Provider": provider, "Shifts": count}
+                                for provider, count in sorted(provider_counts.items())
+                            ])
+                            st.bar_chart(chart_df.set_index("Provider"))
         with g3:
             if st.button("🗑️ Clear All", help="Clear all events"):
                 st.session_state.events = []
