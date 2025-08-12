@@ -1752,12 +1752,12 @@ def schedule_grid_view():
                 st.error("❌ Double assignments detected:\n" + "\n".join(conflicts))
             else:
                 # Apply changes automatically
-                apply_grid_to_calendar(edited_grid, year, month)
+                apply_grid_to_calendar(edited_grid, year, month, row_meta)
                 st.success("✅ Grid changes applied automatically!")
 
         # Manual apply button (for backup)
         if st.button("Apply grid to calendar (Manual)"):
-            apply_grid_to_calendar(edited_grid, year, month)
+            apply_grid_to_calendar(edited_grid, year, month, row_meta)
         
         # Save functionality
         col1, col2 = st.columns(2)
@@ -1768,7 +1768,7 @@ def schedule_grid_view():
             if st.button("📁 Load Saved Month"):
                 load_month_from_file(year, month)
 
-def apply_grid_to_calendar(edited_grid, target_year, target_month):
+def apply_grid_to_calendar(edited_grid, target_year, target_month, row_meta=None):
     """Apply grid changes to calendar events"""
     # Always normalize existing events before processing
     st.session_state.events = events_for_calendar(st.session_state.get("events", []))
@@ -1780,6 +1780,20 @@ def apply_grid_to_calendar(edited_grid, target_year, target_month):
     global_rules = get_global_rules()
     base_max = recommended_max_shifts_for_month()
     mbx = getattr(global_rules, "max_block_size", None)
+    
+    # If row_meta is not provided, we need to build it
+    if row_meta is None:
+        stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
+        row_meta = []
+        for s in stypes:
+            skey = s["key"]
+            cap = int(cap_map.get(skey, 1))
+            for slot in range(1, cap + 1):
+                row_label = f"{skey} — {s['label']} (slot {slot})"
+                row_meta.append({
+                    "row_label": row_label, "skey": skey, "sdef": s,
+                    "slot": slot
+                })
 
     # keep comments by (date, shift_key, provider)
     comments_by_key = {}
@@ -2112,9 +2126,8 @@ def main():
                     else:
                         st.info(f"🔄 Generating schedule for {len(providers)} providers...")
                         rules = RuleConfig(**st.session_state.rules)
-                        # Generate days for the next 3 months starting from next month
-                        next_month = st.session_state.month + relativedelta(months=1)
-                        days = make_three_months_days(next_month.year, next_month.month)
+                        # Generate days for the current month only
+                        days = make_month_days(st.session_state.month.year, st.session_state.month.month)
                         # Add randomness seed for different schedules on each generation
                         import random
                         random_seed = random.randint(1, 10000)
@@ -2125,11 +2138,27 @@ def main():
                         st.session_state.events = [_event_to_dict(e) for e in new_events]
                         st.session_state.comments = {}
                         st.session_state.generation_count += 1
-                        st.success(f"✅ Draft schedule generated for 3 months with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
+                        st.success(f"✅ Draft schedule generated for {st.session_state.month.strftime('%B %Y')} with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
                 evs = [SEvent(**{**e, "start": datetime.fromisoformat(e["start"]), "end": datetime.fromisoformat(e["end"])}) for e in st.session_state.events]
+                
+                # Show shift counts for debugging
+                provider_counts = {}
+                for ev in evs:
+                    provider = (ev.extendedProps.get("provider") or "").strip().upper()
+                    if provider:
+                        if provider not in provider_counts:
+                            provider_counts[provider] = 0
+                        provider_counts[provider] += 1
+                
+                st.info(f"📊 Total events: {len(evs)}")
+                if provider_counts:
+                    st.info("📊 Provider shift counts:")
+                    for provider, count in sorted(provider_counts.items()):
+                        st.info(f"  • {provider}: {count} shifts")
+                
                 viols = validate_rules(evs, rules)
                 if not viols:
                     st.success("✅ No violations detected.")
@@ -2157,7 +2186,7 @@ def main():
                 "• **Dynamic Minimum Shifts**: Automatically enforced based on month length\n"
                 "• **Shift Consistency**: Providers stay on same shift type within blocks\n"
                 "• **Random Generation**: Each generate creates a different schedule\n"
-                "• **3-Month Planning**: Generates for next 3 months from current month")
+                "• **Single Month Generation**: Generates for the current month displayed")
         
         rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
         
