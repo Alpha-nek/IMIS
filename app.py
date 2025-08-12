@@ -587,27 +587,27 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
 # Assignment Logic
 def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict[str, Any]], rules: RuleConfig) -> List[SEvent]:
-    import pandas as pd
     sdefs = {s["key"]: s for s in shift_types}
     stypes = [s["key"] for s in shift_types]
-    cap_map: Dict[str, int] = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+
+    cap_map: Dict[str, int]      = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
     prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {})
     prov_rules: Dict[str, Dict[str, Any]] = st.session_state.get("provider_rules", {})
 
-    counts = {p: 0 for p in providers}
-    nights = {p: 0 for p in providers}
-    events: List[SEvent] = []
+    counts: Dict[str, int] = {p: 0 for p in providers}
+    nights: Dict[str, int] = {p: 0 for p in providers}
+    events: List[SEvent] = []  # <— provider_weekend_count reads this
 
     base_max = recommended_max_shifts_for_month()
     min_required = int(getattr(rules, "min_shifts_per_provider", 15))
-    mbs = getattr(rules, "min_block_size", 1)
+    mbs = int(getattr(rules, "min_block_size", 1) or 1)
     mbx = getattr(rules, "max_block_size", None)
 
     def day_shift_count(d: date, skey: str) -> int:
         return sum(1 for e in events if e.extendedProps.get("shift_key") == skey and e.start.date() == d)
 
     def provider_has_shift_on_day(p: str, d: date) -> bool:
-        return any(e.extendedProps.get("provider") == p and e.start.date() == d for e in events)
+        return any((e.extendedProps.get("provider") == p) and (e.start.date() == d) for e in events)
 
     def provider_days(p: str) -> Set[date]:
         return {e.start.date() for e in events if e.extendedProps.get("provider") == p}
@@ -629,61 +629,127 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         L = left_run_len(ds, d)
         R = right_run_len(ds, d)
         return L + 1 + R
-            
+
+    def provider_weekend_count(p: str) -> int:
+        """How many weekend (Sat/Sun) shifts this provider already has in 'events'."""
+        pu = (p or "").strip().upper()
+        return sum(
+            1
+            for e in events
+            if (e.extendedProps.get("provider") or "").strip().upper() == pu and e.start.weekday() >= 5
+        )
+
     def ok(p: str, d: date, skey: str) -> bool:
         """Return True if provider p can take shift skey on date d."""
         p_upper = (p or "").strip().upper()
-    
+
         # 1) Eligibility (allowed shift keys)
-        allowed = st.session_state.get("provider_caps", {}).get(p_upper, [])
+        allowed = prov_caps.get(p_upper, [])
         if allowed and skey not in allowed:
             return False
-    
+
         # 2) Provider-specific overrides + month-aware effective max
-        pr = st.session_state.get("provider_rules", {}).get(p_upper, {}) or {}
+        pr = prov_rules.get(p_upper, {}) or {}
         eff_max = pr.get("max_shifts", base_max)
         if _provider_has_vacation_in_month(pr):
             eff_max = max(0, (eff_max or 0) - 3)
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
+
+        # Use ONLY global min rest (no per-provider editor)
         min_rest = rules.min_rest_hours_between_shifts
-    
+
         # 3) Hard block: unavailable (specific date or vacation range)
         if is_provider_unavailable_on_date(p_upper, d):
             return False
-    
+
         # 4) Per-day caps and single-shift-per-day
         if day_shift_count(d, skey) >= cap_map.get(skey, 1):
             return False
         if provider_has_shift_on_day(p, d):
             return False
-    
+
         # 5) Max totals (per-provider)
         if eff_max is not None and counts[p] + 1 > eff_max:
             return False
         if skey == "N12" and max_nights is not None and nights[p] + 1 > max_nights:
             return False
-    
+
         # 6) Max block size (don’t create a block longer than mbx)
-        if mbx and mbx > 0:
-            if total_block_len_if_assigned(p, d) > mbx:
-                return False
-    
-        # 7) Rest windows with existing assignments for this provider
+        if mbx and mbx > 0 and total_block_len_if_assigned(p, d) > mbx:
+            return False
+
+        # 7) Rest windows vs already-assigned events
         sdef = sdefs[skey]
         start_dt = datetime.combine(d, parse_time(sdef["start"]))
         end_dt   = datetime.combine(d, parse_time(sdef["end"]))
-        if end_dt <= start_dt:
-            end_dt += timedelta(days=1)
-    
+        if end_dt <= start_dt: end_dt += timedelta(days=1)
+
         for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper):
-            rest_after_prev = (start_dt - e.end).total_seconds() / 3600
-            rest_before_next = (e.start - end_dt).total_seconds() / 3600
-            if -(min_rest or 0) < rest_after_prev < (min_rest or 0):
+            rest_after_prev  = (start_dt - e.end).total_seconds() / 3600
+            rest_before_next = (e.start  - end_dt).total_seconds() / 3600
+            if -(min_rest or 0) < rest_after_prev < (min_rest or 0):  # window too tight
                 return False
             if -(min_rest or 0) < rest_before_next < (min_rest or 0):
                 return False
-    
+
         return True
+
+    def score(provider_id: str, day: date, shift_key: str) -> float:
+        sc = 0.0
+        # Push toward minimum shifts
+        if counts[provider_id] < min_required:
+            sc += 4.0
+
+        # Prefer extending blocks, especially up to preferred min block size
+        ds = provider_days(provider_id)
+        L = left_run_len(ds, day)
+        if L > 0: sc += 2.0
+        if L < mbs: sc += 4.0
+
+        # Slight load balancing
+        sc += max(0, 20 - counts[provider_id]) * 0.01
+
+        # Soft penalty if we’re about to hit the max block size (still allowed)
+        if mbx and mbx > 0 and total_block_len_if_assigned(provider_id, day) == mbx:
+            sc -= 0.2
+
+        # Weekend incentive if required and none yet
+        weekend_required_for_p = prov_rules.get(provider_id, {}).get("require_weekend", rules.require_at_least_one_weekend)
+        if day.weekday() >= 5 and weekend_required_for_p and provider_weekend_count(provider_id) == 0:
+            sc += 3.0
+
+        return sc
+
+    # Build schedule
+    for current_day in days:
+        for shift_key in stypes:
+            capacity = cap_map.get(shift_key, 1)
+            for _ in range(capacity):
+                candidates = [prov for prov in providers if ok(prov, current_day, shift_key)]
+                if not candidates:
+                    continue
+                best = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
+                sdef = sdefs[shift_key]
+
+                start_dt = datetime.combine(current_day, parse_time(sdef["start"]))
+                end_dt   = datetime.combine(current_day, parse_time(sdef["end"]))
+                if end_dt <= start_dt: end_dt += timedelta(days=1)
+
+                ev = SEvent(
+                    id=str(uuid.uuid4()),
+                    title=f"{sdef['label']} — {best}",
+                    start=start_dt,
+                    end=end_dt,
+                    backgroundColor=sdef.get("color"),
+                    extendedProps={"provider": best, "shift_key": shift_key, "label": sdef["label"]},
+                )
+                events.append(ev)
+                counts[best] += 1
+                if shift_key == "N12":
+                    nights[best] += 1
+
+    return events
+
     
     def score(provider_id: str, day: date, shift_key: str) -> float:
         sc = 0.0
@@ -1975,6 +2041,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
