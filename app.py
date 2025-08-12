@@ -289,7 +289,39 @@ def init_session_state():
 
     # Initialize session state with defaults
     st.session_state.setdefault("month", date.today().replace(day=1))
-    st.session_state.setdefault("providers_df", pd.DataFrame(columns=["initials"]))
+    
+    # Load default providers from CSV file if providers_df is empty
+    if "providers_df" not in st.session_state or st.session_state.providers_df.empty:
+        try:
+            # Try to load from IMIS_initials.csv
+            if os.path.exists("IMIS_initials.csv"):
+                providers_df = pd.read_csv("IMIS_initials.csv")
+                # Clean up the data - remove empty rows and normalize initials
+                providers_df = providers_df.dropna()
+                providers_df["initials"] = providers_df["initials"].astype(str).str.strip().str.upper()
+                providers_df = providers_df[providers_df["initials"] != ""]
+                providers_df = providers_df[providers_df["initials"] != "nan"]
+                providers_df = providers_df[providers_df["initials"] != "NO"]  # Remove problematic entry
+                if not providers_df.empty:
+                    st.session_state["providers_df"] = providers_df
+                    st.session_state["providers_loaded"] = True
+                else:
+                    # If CSV is empty or has no valid data, use defaults
+                    default_providers = pd.DataFrame({"initials": PROVIDER_INITIALS_DEFAULT})
+                    st.session_state["providers_df"] = default_providers
+                    st.session_state["providers_loaded"] = True
+            else:
+                # Fallback to default providers if CSV doesn't exist
+                default_providers = pd.DataFrame({"initials": PROVIDER_INITIALS_DEFAULT})
+                st.session_state["providers_df"] = default_providers
+                st.session_state["providers_loaded"] = True
+        except Exception as e:
+            st.error(f"Failed to load providers: {e}")
+            # Fallback to default providers
+            default_providers = pd.DataFrame({"initials": PROVIDER_INITIALS_DEFAULT})
+            st.session_state["providers_df"] = default_providers
+            st.session_state["providers_loaded"] = True
+    
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
     st.session_state.setdefault("provider_caps", {})
@@ -298,6 +330,7 @@ def init_session_state():
     st.session_state.setdefault("comments", {})
     st.session_state.setdefault("highlight_provider", "")
     st.session_state.setdefault("rules", RuleConfig().model_dump())
+    st.session_state.setdefault("providers_loaded", False)
 
 
 def recommended_max_shifts_for_month() -> int:
@@ -1834,8 +1867,18 @@ def schedule_grid_view():
 def main():
     init_session_state()
     
+
+    
     # Main header
     st.title("🏥 Hospitalist Monthly Scheduler")
+    
+    # Provider status indicator
+    if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
+        provider_count = len(st.session_state.providers_df)
+        st.success(f"✅ {provider_count} providers loaded and ready")
+    else:
+        st.error("❌ No providers loaded. Please go to the Providers tab to load providers.")
+    
     st.markdown("---")
     
     # Navigation tabs for better organization
@@ -1855,30 +1898,39 @@ def main():
             if st.button("Go to Month"):
                 st.session_state.month = date(int(year), int(month), 1)
         with col4:
-            provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()) if not st.session_state.providers_df.empty else []
-            options = ["(All providers)"] + provs
-            default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
-            idx = options.index(default) if default in options else 0
-            sel = st.selectbox("Highlight provider", options=options, index=idx)
-            st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+            # Ensure providers are loaded and get the list
+            if not st.session_state.providers_df.empty:
+                provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist())
+                options = ["(All providers)"] + provs
+                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
+                idx = options.index(default) if default in options else 0
+                sel = st.selectbox("Highlight provider", options=options, index=idx)
+                st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+            else:
+                st.warning("No providers loaded. Please check the Providers tab.")
+                st.session_state.highlight_provider = ""
         
         # Action buttons
         g1, g2, g3 = st.columns(3)
         with g1:
             if st.button("🔄 Generate Draft (3 Months)", help="Generate schedule for next 3 months from rules"):
-                providers = st.session_state.providers_df["initials"].tolist()
-                if not providers:
-                    st.warning("Add providers first.")
+                if st.session_state.providers_df.empty:
+                    st.error("❌ No providers loaded! Please go to the Providers tab and load providers first.")
                 else:
-                    rules = RuleConfig(**st.session_state.rules)
-                    # Generate days for the next 3 months starting from current month
-                    days = make_three_months_days(st.session_state.month.year, st.session_state.month.month)
-                    # Generate new events using the greedy algorithm
-                    new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
-                    # Convert SEvent objects to dictionary format for calendar
-                    st.session_state.events = [_event_to_dict(e) for e in new_events]
-                    st.session_state.comments = {}
-                    st.success(f"Draft schedule generated for 3 months with {len(st.session_state.events)} events!")
+                    providers = st.session_state.providers_df["initials"].tolist()
+                    if not providers:
+                        st.error("❌ Provider list is empty! Please add providers in the Providers tab.")
+                    else:
+                        st.info(f"🔄 Generating schedule for {len(providers)} providers...")
+                        rules = RuleConfig(**st.session_state.rules)
+                        # Generate days for the next 3 months starting from current month
+                        days = make_three_months_days(st.session_state.month.year, st.session_state.month.month)
+                        # Generate new events using the greedy algorithm
+                        new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
+                        # Convert SEvent objects to dictionary format for calendar
+                        st.session_state.events = [_event_to_dict(e) for e in new_events]
+                        st.session_state.comments = {}
+                        st.success(f"✅ Draft schedule generated for 3 months with {len(new_events)} events!")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
@@ -1960,6 +2012,39 @@ def main():
         st.subheader("👥 Provider Roster")
         current_list = st.session_state.providers_df["initials"].astype(str).tolist()
         st.caption(f"Currently loaded: {len(current_list)} providers")
+        
+        # Add a button to load default providers if none are loaded
+        if len(current_list) == 0:
+            st.warning("No providers loaded. Please load default providers or add providers manually.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Load Default Providers"):
+                    default_providers = pd.DataFrame({"initials": PROVIDER_INITIALS_DEFAULT})
+                    st.session_state["providers_df"] = default_providers
+                    st.session_state["providers_loaded"] = True
+                    st.success(f"Loaded {len(PROVIDER_INITIALS_DEFAULT)} default providers!")
+                    st.rerun()
+            with col2:
+                if st.button("Load from CSV"):
+                    try:
+                        if os.path.exists("IMIS_initials.csv"):
+                            providers_df = pd.read_csv("IMIS_initials.csv")
+                            providers_df = providers_df.dropna()
+                            providers_df["initials"] = providers_df["initials"].astype(str).str.strip().str.upper()
+                            providers_df = providers_df[providers_df["initials"] != ""]
+                            providers_df = providers_df[providers_df["initials"] != "nan"]
+                            providers_df = providers_df[providers_df["initials"] != "NO"]
+                            if not providers_df.empty:
+                                st.session_state["providers_df"] = providers_df
+                                st.session_state["providers_loaded"] = True
+                                st.success(f"Loaded {len(providers_df)} providers from CSV!")
+                                st.rerun()
+                            else:
+                                st.error("CSV file is empty or has no valid data.")
+                        else:
+                            st.error("IMIS_initials.csv file not found.")
+                    except Exception as e:
+                        st.error(f"Failed to load CSV: {e}")
         
         col1, col2 = st.columns(2)
         with col1:
