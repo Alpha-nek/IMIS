@@ -32,7 +32,7 @@ from googleapiclient.errors import HttpError
 import numpy as np
 import pandas as pd
 import streamlit as st
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 try:
     from streamlit_calendar import calendar
@@ -92,7 +92,8 @@ class RuleConfig(BaseModel):
 class Provider(BaseModel):
     initials: str
 
-    @validator("initials")
+    @field_validator("initials")
+    @classmethod
     def normalize(cls, v: str) -> str:
         return v.strip().upper()
 
@@ -108,7 +109,7 @@ class SEvent(BaseModel):
     extendedProps: Dict[str, Any] = {}
 
     def to_fc(self) -> Dict[str, Any]:
-        d = self.dict()
+        d = self.model_dump()
         d["start"] = self.start.isoformat()
         d["end"] = self.end.isoformat()
         return d
@@ -186,11 +187,15 @@ def get_shift_label_maps():
     return label_for_key, key_for_label
 
 def provider_weekend_count(p: str) -> int:
-        return sum(1 for e in events
-               if e.extendedProps.get("provider") == p and e.start.weekday() >= 5)
+    """Count weekend shifts for a provider from current events."""
+    import pandas as pd
+    events = st.session_state.get("events", [])
+    return sum(1 for e in events
+               if (e.get("extendedProps") or {}).get("provider") == p and 
+               pd.to_datetime(e.get("start")).weekday() >= 5)
 
 def get_global_rules():
-    return RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
+    return RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
 
 def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
     """Returns True if provider is unavailable (specific date or any vacation range) on 'day'."""
@@ -254,7 +259,7 @@ def init_session_state():
             st.session_state["providers_df"] = pd.DataFrame({
                 "initials": _normalize_initials_list(df["initials"].tolist())
             })
-    st.session_state.setdefault("rules", RuleConfig().dict())
+    st.session_state.setdefault("rules", RuleConfig().model_dump())
 # migrate if missing/None
     if st.session_state["rules"].get("max_block_size") is None:
         st.session_state["rules"]["max_block_size"] = 7
@@ -274,7 +279,7 @@ def init_session_state():
         "providers_df",
         pd.DataFrame({"initials": sorted(set(PROVIDER_INITIALS_DEFAULT))})
     )
-    st.session_state.setdefault("rules", RuleConfig().dict())
+    st.session_state.setdefault("rules", RuleConfig().model_dump())
     st.session_state.setdefault("provider_rules", {})     # per-provider overrides & vacations
     st.session_state.setdefault("provider_caps", {})      # per-provider allowed shift keys
     st.session_state.setdefault("events", [])             # calendar events (JSON-safe dicts)
@@ -810,6 +815,78 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                         sc += 0.5
         except Exception:
             pass
+
+        # Half-month shift preference scoring
+        try:
+            pr = prov_rules.get(provider_id, {}) or {}
+            half_month_pref = pr.get("half_month_preference", None)
+            if half_month_pref is not None:
+                day_of_month = day.day
+                if half_month_pref == 0:  # First half preference
+                    if day_of_month <= 15:
+                        sc += 1.5  # Bonus for first half
+                    else:
+                        sc -= 0.5  # Small penalty for second half
+                elif half_month_pref == 1:  # Last half preference
+                    if day_of_month > 15:
+                        sc += 1.5  # Bonus for second half
+                    else:
+                        sc -= 0.5  # Small penalty for first half
+        except Exception:
+            pass
+
+        # Shift type consistency within blocks scoring
+        try:
+            pr = prov_rules.get(provider_id, {}) or {}
+            if pr.get("prefer_shift_consistency", False):
+                consistency_strength = pr.get("shift_consistency_strength", 3)
+                
+                # Check if this shift type matches the existing block
+                ds = provider_days(provider_id)
+                if ds:
+                    # Find the block this day would be part of
+                    left_run = left_run_len(ds, day)
+                    right_run = right_run_len(ds, day)
+                    
+                    # Check shifts in the existing block
+                    block_start = day - timedelta(days=left_run)
+                    block_end = day + timedelta(days=right_run)
+                    
+                    # Get shift types in the existing block
+                    block_shift_types = set()
+                    for ev in events:
+                        if (ev.extendedProps.get("provider") or "").upper() == provider_id.upper():
+                            ev_date = ev.start.date()
+                            if block_start <= ev_date <= block_end:
+                                block_shift_types.add(ev.extendedProps.get("shift_key"))
+                    
+                    # Classify shift types
+                    night_shifts = {"N12", "NB"}  # Night shifts
+                    day_shifts = {"R12", "A12", "A10"}  # Day shifts
+                    
+                    current_shift_type = "night" if shift_key in night_shifts else "day"
+                    
+                    # Check if block is consistent
+                    block_has_nights = any(s in night_shifts for s in block_shift_types)
+                    block_has_days = any(s in day_shifts for s in block_shift_types)
+                    
+                    if block_has_nights and block_has_days:
+                        # Mixed block - penalize if adding different type
+                        if (current_shift_type == "night" and not block_has_nights) or \
+                           (current_shift_type == "day" and not block_has_days):
+                            sc -= consistency_strength * 0.5
+                    elif block_has_nights and current_shift_type == "day":
+                        # Adding day shift to night block
+                        sc -= consistency_strength * 0.8
+                    elif block_has_days and current_shift_type == "night":
+                        # Adding night shift to day block
+                        sc -= consistency_strength * 0.8
+                    else:
+                        # Consistent block - bonus
+                        sc += consistency_strength * 0.3
+        except Exception:
+            pass
+
         return sc
        
 
@@ -1270,6 +1347,41 @@ def provider_rules_panel():
     else:
         ratio_val = None
 
+    # Half-month shift preference
+    use_half_month = st.checkbox(
+        "Set half-month shift preference",
+        value=("half_month_preference" in curr),
+        key=f"pr_use_half_month_{sel}",
+    )
+    if use_half_month:
+        half_month_choice = st.radio(
+            "Preferred half of month",
+            options=["First half (1-15)", "Last half (16-31)", "No preference"],
+            index=curr.get("half_month_preference", 2),  # 0=first, 1=last, 2=none
+            key=f"pr_half_month_choice_{sel}",
+            horizontal=True,
+        )
+        half_month_val = {"First half (1-15)": 0, "Last half (16-31)": 1, "No preference": 2}[half_month_choice]
+    else:
+        half_month_val = None
+
+    # Shift type consistency within blocks
+    use_shift_consistency = st.checkbox(
+        "Prefer consistent shift types in blocks",
+        value=("prefer_shift_consistency" in curr),
+        key=f"pr_use_shift_consistency_{sel}",
+    )
+    if use_shift_consistency:
+        consistency_strength = st.slider(
+            "Consistency preference strength",
+            min_value=1, max_value=5,
+            value=int(curr.get("shift_consistency_strength", 3)),
+            help="1=weak preference, 5=strong preference to avoid mixing night/day shifts",
+            key=f"pr_consistency_strength_{sel}",
+        )
+    else:
+        consistency_strength = None
+
     wk_idx = 0 if curr.get("require_weekend", True) else 1
     wk_choice = st.radio(
         "Weekend requirement",
@@ -1350,6 +1462,20 @@ def provider_rules_panel():
                 new_entry.pop("day_night_ratio", None)
         except Exception:
             pass
+
+        # store half-month preference if set
+        if use_half_month and half_month_val is not None:
+            new_entry["half_month_preference"] = int(half_month_val)
+        else:
+            new_entry.pop("half_month_preference", None)
+
+        # store shift consistency preference if set
+        if use_shift_consistency and consistency_strength is not None:
+            new_entry["prefer_shift_consistency"] = True
+            new_entry["shift_consistency_strength"] = int(consistency_strength)
+        else:
+            new_entry.pop("prefer_shift_consistency", None)
+            new_entry.pop("shift_consistency_strength", None)
 
 
 
@@ -1804,7 +1930,7 @@ def main():
         
         # Global rules section
         st.subheader("📋 Scheduling Rules")
-        rc = RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
+        rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
         
         col1, col2 = st.columns(2)
         with col1:
@@ -1820,7 +1946,7 @@ def main():
             else:
                 rc.max_nights_per_provider = None
         
-        st.session_state.rules = rc.dict()
+        st.session_state.rules = rc.model_dump()
         
         # Shift types section
         st.subheader("🕐 Shift Types")
