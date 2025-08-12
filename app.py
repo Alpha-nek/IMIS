@@ -758,14 +758,14 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                     return False
 
         
-    # Enforce >=12h rest between shifts inside the same block
-    for e in events:
-        if (e.extendedProps.get("provider") or "").upper() == p_upper:
-            rest_after_prev_hours = (start_dt - e.end).total_seconds() / 3600.0
-            rest_before_next_hours = (e.start - end_dt).total_seconds() / 3600.0
-            if (-0.1 < rest_after_prev_hours < 12) or (-0.1 < rest_before_next_hours < 12):
-                return False
-return True
+        # Enforce >=12h rest between shifts inside the same block
+        for e in events:
+            if (e.extendedProps.get("provider") or "").upper() == p_upper:
+                rest_after_prev_hours = (start_dt - e.end).total_seconds() / 3600.0
+                rest_before_next_hours = (e.start - end_dt).total_seconds() / 3600.0
+                if (-0.1 < rest_after_prev_hours < 12) or (-0.1 < rest_before_next_hours < 12):
+                    return False
+        return True
 
     def score(provider_id: str, day: date, shift_key: str) -> float:
         sc = 0.0
@@ -789,7 +789,7 @@ return True
         if day.weekday() >= 5 and weekend_required and provider_weekend_count(provider_id) == 0:
             sc += 3.0
     
-         # soft incentive to meet provider-specific day/night ratio if configured
+        # soft incentive to meet provider-specific day/night ratio if configured
         try:
             pr = prov_rules.get(provider_id, {}) or {}
             ratio = pr.get("day_night_ratio", None)  # percent of day shifts
@@ -890,327 +890,15 @@ def _serialize_events_for_download(events):
     return [_event_to_dict(e) for e in (events or [])]
 
 
-def sidebar_inputs():
-    st.sidebar.header("Providers & Rules")
-
-    # ---- Safety bootstraps (avoid missing-key errors) ----
-    st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
-    st.session_state.setdefault("provider_caps", {})
-    # Ensure providers_df exists with your preloaded roster
-    base_roster = _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)
-    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
-        st.session_state["providers_df"] = pd.DataFrame({"initials": base_roster})
-    elif st.session_state.providers_df.empty:
-        st.session_state["providers_df"] = pd.DataFrame({"initials": base_roster})
-    else:
-        st.session_state["providers_df"] = pd.DataFrame({
-            "initials": _normalize_initials_list(st.session_state.providers_df["initials"].tolist())
-        })
-
-    # ===================== Providers (manage in-app) =====================
-    st.sidebar.subheader("Providers")
-    current_list = st.session_state.providers_df["initials"].astype(str).tolist()
-    st.sidebar.caption(f"{len(current_list)} providers loaded.")
-
-    with st.sidebar.expander("Add providers", expanded=False):
-        new_one = st.text_input("Add single provider (initials)", key="add_single_init")
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Add", key="btn_add_single"):
-                cand = _normalize_initials_list([new_one])
-                if not cand:
-                    st.warning("Enter initials to add.")
-                else:
-                    initial = list(cand)[0]
-                    if initial in current_list:
-                        st.info(f"{initial} is already in the list.")
-                    else:
-                        st.session_state.providers_df = pd.DataFrame(
-                            {"initials": _normalize_initials_list(current_list + [initial])}
-                        )
-                        st.toast(f"Added {initial}", icon="✅")
-
-        st.markdown("---")
-        batch = st.text_area("Add multiple (comma/space/newline separated)", key="add_batch_area")
-        if st.button("Add batch", key="btn_add_batch"):
-            tokens = _normalize_initials_list(batch.replace(",", "\n").split())
-            if not tokens:
-                st.warning("Nothing to add.")
-            else:
-                merged = _normalize_initials_list(current_list + list(tokens))
-                st.session_state.providers_df = pd.DataFrame({"initials": merged})
-                st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
-
-    with st.sidebar.expander("Remove providers", expanded=False):
-        to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
-        if st.button("Remove selected", key="btn_rm"):
-            if not to_remove:
-                st.info("No providers selected.")
-            else:
-                remaining = [p for p in current_list if p not in set(to_remove)]
-                st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
-                st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
-                st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
-
-
-    # ===================== Rules =====================
-    st.sidebar.subheader("Rules")
-    rc = RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
-    rc.max_shifts_per_provider = st.sidebar.number_input("Max shifts/provider", 1, 31, value=int(rc.max_shifts_per_provider))
-    rc.min_rest_days_between_shifts = st.number_input(
-    "Min rest (days) between shifts",
-    min_value=0.0, max_value=14.0, step=0.5,
-    value=float(getattr(rc, "min_rest_days_between_shifts", 1.0)),
-    key="rule_min_rest_days",)
-    rc.min_block_size = st.sidebar.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
-    rc.require_at_least_one_weekend = st.sidebar.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
-    limit_nights = st.sidebar.checkbox(
-        "Limit 7pm–7am (N12) nights per provider",
-        value=st.session_state.rules.get("max_nights_per_provider", 6) is not None
-    )
-    if limit_nights:
-        default_nights = int(st.session_state.rules.get("max_nights_per_provider", 6) or 0)
-        rc.max_nights_per_provider = st.sidebar.number_input("Max nights/provider", 0, 31, value=default_nights)
-    else:
-        rc.max_nights_per_provider = None
-    st.session_state.rules = rc.dict()
-
-    # ===================== Shift Types editor =====================
-    st.sidebar.subheader("Shift Types")
-    st.sidebar.caption("Edit labels/times; colors only affect calendar display.")
-    for i, s in enumerate(st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())):
-        with st.sidebar.expander(f"{s['label']} ({s['key']})", expanded=False):
-            s["label"] = st.text_input("Label", value=s["label"], key=f"s_lbl_{i}")
-            s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
-            s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
-            s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
-    # write back edited shifts
-    st.session_state["shift_types"] = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
-
-    # ===================== Daily shift capacities =====================
-    st.sidebar.subheader("Daily shift capacities")
-    if st.sidebar.button("Reset to default capacities"):
-        st.session_state["shift_capacity"] = DEFAULT_SHIFT_CAPACITY.copy()
-        st.toast("Capacities reset to defaults.", icon="♻️")
-
-    cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
-    for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy()):
-        key = s["key"]; label = s["label"]
-        default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
-        cap_map[key] = int(
-            st.sidebar.number_input(
-                f"{label} ({key}) capacity/day",
-                min_value=0, max_value=50, value=default_cap, key=f"cap_{key}"
-            )
-        )
-    st.session_state["shift_capacity"] = cap_map
-
-   
-              
 @st.cache_data
 def make_month_days(year: int, month: int) -> List[date]:
     start, end = month_start_end(year, month)
     return list(date_range(start, end))
 
 
-def top_controls():
-    st.title("Hospitalist Monthly Scheduler — MVP")
-    c1, c2, c3, c4 = st.columns([1,1,1,2])
-    with c1:
-        year = st.number_input("Year", min_value=2020, max_value=2100, value=st.session_state.month.year)
-    with c2:
-        month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.month.month)
-    with c3:
-        if st.button("Go to Month"):
-            st.session_state.month = date(int(year), int(month), 1)
-    with c4:
-        provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()) if not st.session_state.providers_df.empty else []
-        options = ["(All providers)"] + provs
-        default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
-        idx = options.index(default) if default in options else 0
-        sel = st.selectbox("Highlight provider (initials)", options=options, index=idx)
-        st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
-    
 
 
-    # Generate & Validate buttons
-    g1, g2, g3 = st.columns(3)
-    with g1:
-        if st.button("Generate Draft from Rules"):
-            providers = st.session_state.providers_df["initials"].tolist()
-            if not providers:
-                st.warning("Add providers first.")
-            else:
-                rules = RuleConfig(**st.session_state.rules)
-                days = make_month_days(st.session_state.month.year, st.session_state.month.month)
-                st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
-                st.session_state.events = [e.to_fc() for e in assign_greedy(providers, days, st.session_state.shift_types, rules)]
-                st.session_state.comments = {}
-    with g2:
-        if st.button("Validate Schedule"):
-            rules = RuleConfig(**st.session_state.rules)
-            evs = [SEvent(**{**e, "start": datetime.fromisoformat(e["start"]), "end": datetime.fromisoformat(e["end"])}) for e in st.session_state.events]
-            viols = validate_rules(evs, rules)
-            if not viols:
-                st.success("No violations detected.")
-            else:
-                for p, arr in viols.items():
-                    st.error(f"{p}:\n - " + "\n - ".join(arr))
-    with g3:
-        if st.button("Clear Month"):
-            st.session_state.events = []
-            st.session_state.comments = {}
 
-def engine_panel():
-    import pandas as pd
-    st.header("Engine")
-
-    # --- ONE global provider selector ---
-    provider_selector()
-
-    # ===== Providers (manage roster) =====
-    st.subheader("Providers")
-    current_list = st.session_state.providers_df["initials"].astype(str).tolist()
-    st.caption(f"{len(current_list)} providers loaded.")
-
-    with st.expander("Add providers", expanded=False):
-        new_one = st.text_input("Add single provider (initials)", key="add_single_init")
-        col_a1, col_a2 = st.columns([1, 1])
-        with col_a1:
-            if st.button("Add", key="btn_add_single"):
-                cand = _normalize_initials_list([new_one])
-                if cand:
-                    initial = list(cand)[0]
-                    if initial not in current_list:
-                        st.session_state.providers_df = pd.DataFrame(
-                            {"initials": _normalize_initials_list(current_list + [initial])}
-                        )
-                        st.toast(f"Added {initial}", icon="✅")
-                else:
-                    st.warning("Enter initials to add.")
-        st.markdown("---")
-        batch = st.text_area("Add multiple (comma/space/newline separated)", key="add_batch_area")
-        if st.button("Add batch", key="btn_add_batch"):
-            tokens = _normalize_initials_list(batch.replace(",", "\n").split())
-            if tokens:
-                merged = _normalize_initials_list(current_list + list(tokens))
-                st.session_state.providers_df = pd.DataFrame({"initials": merged})
-                st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
-            else:
-                st.warning("Nothing to add.")
-
-    with st.expander("Remove providers", expanded=False):
-        to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
-        if st.button("Remove selected", key="btn_rm"):
-            if to_remove:
-                remaining = [p for p in current_list if p not in set(to_remove)]
-                st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
-                st.session_state["provider_caps"] = {
-                    k: v for k, v in st.session_state.provider_caps.items() if k in remaining
-                }
-                st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
-            else:
-                st.info("No providers selected.")
-
-
-    # ===== Global rules =====
-   # ===== Global rules =====
-    st.subheader("Rules (global)")
-    
-    # Load current rules safely
-    rc_data = st.session_state.get("rules", RuleConfig().dict())
-    rc = RuleConfig(**rc_data)
-    
-    # Month-aware recommendation (31-day→16, 30-day→15)
-    rec_max = recommended_max_shifts_for_month()
-    
-    col1, col2 = st.columns(2, gap="medium")
-    
-    with col1:
-        rc.max_shifts_per_provider = st.number_input(
-            "Max shifts/provider",
-            min_value=1, max_value=50,
-            value=int(rc.max_shifts_per_provider or rec_max),
-            key="rule_max_shifts",
-            help=f"Recommended this month: {rec_max}",
-        )
-    
-        rc.min_shifts_per_provider = st.number_input(
-            "Min shifts/provider",
-            min_value=0, max_value=50,
-            value=int(getattr(rc, "min_shifts_per_provider", 15)),
-            key="rule_min_shifts",
-        )
-    
-        rc.min_block_size = st.number_input(
-            "Preferred block size (days)",
-            min_value=1, max_value=7,
-            value=int(getattr(rc, "min_block_size", 1)),
-            key="rule_min_block",
-        )
-    
-    with col2:
-        # Max shifts per block (0 = no max). Default to 7 when unset/None.
-        mbx_init = rc.max_block_size if rc.max_block_size is not None else 7
-        mbx_val = st.number_input(
-            "Max shifts per block (0 = no max)",
-            min_value=0, max_value=31,
-            value=int(mbx_init),
-            key="rule_max_block",
-        )
-        rc.max_block_size = None if mbx_val == 0 else int(mbx_val)
-    
-        rc.require_at_least_one_weekend = st.checkbox(
-            "Require at least one weekend shift",
-            value=bool(getattr(rc, "require_at_least_one_weekend", False)),
-            key="rule_req_weekend",
-        )
-    
-    # Nights limit toggle + value
-    limit_nights = st.checkbox(
-        "Limit 7pm–7am (N12) nights per provider",
-        value=(getattr(rc, "max_nights_per_provider", None) is not None),
-        key="rule_limit_nights",
-    )
-    if limit_nights:
-        default_nights = int(getattr(rc, "max_nights_per_provider", 6) or 6)
-        rc.max_nights_per_provider = st.number_input(
-            "Max nights/provider",
-            min_value=0, max_value=50,
-            value=default_nights,
-            key="rule_max_nights",
-        )
-    else:
-        rc.max_nights_per_provider = None
-    
-    # Persist back to session
-    st.session_state["rules"] = rc.dict()
-
-    # ===== Shift Types =====
-    st.subheader("Shift Types")
-    st.caption("Edit labels/times; colors only affect calendar display.")
-    for i, s in enumerate(st.session_state.shift_types):
-        with st.expander(f"{s['label']} ({s['key']})", expanded=False):
-            s["label"] = st.text_input("Label", value=s["label"], key=f"s_lbl_{i}")
-            s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
-            s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
-            s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
-
-    # ===== Daily capacities (with default reset) =====
-    st.subheader("Daily shift capacities")
-    if st.button("Reset to default capacities"):
-        st.session_state["shift_capacity"] = DEFAULT_SHIFT_CAPACITY.copy()
-        st.toast("Capacities reset to defaults.", icon="♻️")
-
-    cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
-    for s in st.session_state.shift_types:
-        key = s["key"]; label = s["label"]
-        default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
-        cap_map[key] = int(
-            st.number_input(f"{label} ({key}) capacity/day", min_value=0, max_value=50, value=default_cap, key=f"cap_{key}")
-        )
-    st.session_state["shift_capacity"] = cap_map
 
 
 
@@ -1443,95 +1131,7 @@ def render_calendar():
     if changed:
         st.toast("Calendar updated", icon="✅")
 
-def middle_actions_panel():
-    """Month nav + generate/validate/clear, shown under the calendar (middle column)."""
-    import pandas as pd
 
-    st.subheader("Actions")
-
-    # Month navigation row
-    nav_prev, nav_label, nav_next = st.columns([1, 2, 1])
-    with nav_prev:
-        if st.button("◀ Prev month", key="mid_prev_month"):
-            m = st.session_state.month
-            y = m.year - (1 if m.month == 1 else 0)
-            mm = 12 if m.month == 1 else m.month - 1
-            st.session_state.month = date(y, mm, 1)
-    with nav_label:
-        st.markdown(
-            f"<div style='text-align:center;font-weight:600'>{st.session_state.month:%B %Y}</div>",
-            unsafe_allow_html=True
-        )
-    with nav_next:
-        if st.button("Next month ▶", key="mid_next_month"):
-            m = st.session_state.month
-            y = m.year + (1 if m.month == 12 else 0)
-            mm = 1 if m.month == 12 else m.month + 1
-            st.session_state.month = date(y, mm, 1)
-
-    # Action buttons row
-    act1, act2, act3 = st.columns(3)
-    with act1:
-        if st.button("Generate Draft from Rules", key="mid_generate"):
-            providers = st.session_state.providers_df["initials"].astype(str).tolist()
-            if not providers:
-                st.warning("Add providers first.")
-            else:
-                rules = RuleConfig(**st.session_state.rules)
-                days = make_month_days(st.session_state.month.year, st.session_state.month.month)
-                evs = assign_greedy(providers, days, st.session_state.shift_types, rules)
-
-                # preserve events outside this month
-                def is_this_month(e):
-                    try:
-                        d = pd.to_datetime(e["start"]).date()
-                        return d.year == st.session_state.month.year and d.month == st.session_state.month.month
-                    except Exception:
-                        return False
-
-                keep_others = [E for E in st.session_state.events if not is_this_month(E)]
-                new_json = [e.to_fc() if hasattr(e, "to_fc") else e for e in evs]
-                st.session_state.events = events_for_calendar(keep_others + new_json)
-                st.success("Draft generated.")
-
-    with act2:
-        if st.button("Validate schedule", key="mid_validate"):
-            # Convert JSON events to SEvent if needed
-            def _to_sevent(E):
-                if isinstance(E, dict):
-                    ext = E.get("extendedProps") or {}
-                    return SEvent(
-                        id=E.get("id", ""),
-                        title=E.get("title", ""),
-                        start=pd.to_datetime(E["start"]).to_pydatetime(),
-                        end=pd.to_datetime(E["end"]).to_pydatetime(),
-                        backgroundColor=E.get("backgroundColor"),
-                        extendedProps={
-                            "provider": ext.get("provider"),
-                            "shift_key": ext.get("shift_key"),
-                            "label": ext.get("label"),
-                        },
-                    )
-                return E
-
-            events_obj = [_to_sevent(E) for E in st.session_state.events]
-            viol = validate_rules(events_obj, RuleConfig(**st.session_state.rules))
-            if not viol:
-                st.success("No violations found.")
-            else:
-                for who, msgs in viol.items():
-                    st.warning(f"**{who}**:\n- " + "\n- ".join(msgs))
-
-    with act3:
-        if st.button("Clear month", key="mid_clear"):
-            def is_this_month(e):
-                try:
-                    d = pd.to_datetime(e["start"]).date()
-                    return d.year == st.session_state.month.year and d.month == st.session_state.month.month
-                except Exception:
-                    return False
-            st.session_state.events = [E for E in st.session_state.events if not is_this_month(E)]
-            st.toast("Cleared this month.", icon="🧹")
 
 # provider rules section
 # make sure this version is in your codebase
@@ -1935,199 +1535,197 @@ def schedule_grid_view():
             key="grid_editor",
         )
 
-       # Apply back to events
-if st.button("Apply grid to calendar"):
-    # Always normalize existing events before processing
-    st.session_state.events = events_for_calendar(st.session_state.get("events", []))
+        # Apply back to events
+        if st.button("Apply grid to calendar"):
+            # Always normalize existing events before processing
+            st.session_state.events = events_for_calendar(st.session_state.get("events", []))
 
-    sdefs = {s["key"]: s for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())}
-    cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
-    prov_caps = st.session_state.get("provider_caps", {})
-    prov_rules = st.session_state.get("provider_rules", {})
-    global_rules = get_global_rules()
-    base_max = recommended_max_shifts_for_month()
-    mbx = getattr(global_rules, "max_block_size", None)
+            sdefs = {s["key"]: s for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())}
+            cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
+            prov_caps = st.session_state.get("provider_caps", {})
+            prov_rules = st.session_state.get("provider_rules", {})
+            global_rules = get_global_rules()
+            base_max = recommended_max_shifts_for_month()
+            mbx = getattr(global_rules, "max_block_size", None)
 
-    # keep comments by (date, shift_key, provider)
-    comments_by_key = {}
-    for e in st.session_state.events:
-        ext = (e.get("extendedProps") or {})
-        skey = ext.get("shift_key")
-        if not skey or skey not in sdefs:
-            continue
-        try:
-            d0 = pd.to_datetime(e["start"]).date()
-        except Exception:
-            continue
-        if d0.year == year and d0.month == month:
-            prov0 = (ext.get("provider") or "").strip().upper()
-            comments_by_key[(d0, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
+            # keep comments by (date, shift_key, provider)
+            comments_by_key = {}
+            for e in st.session_state.events:
+                ext = (e.get("extendedProps") or {})
+                skey = ext.get("shift_key")
+                if not skey or skey not in sdefs:
+                    continue
+                try:
+                    d0 = pd.to_datetime(e["start"]).date()
+                except Exception:
+                    continue
+                if d0.year == year and d0.month == month:
+                    prov0 = (ext.get("provider") or "").strip().upper()
+                    comments_by_key[(d0, skey, prov0)] = list(st.session_state.comments.get(e["id"], []))
 
-    # identify grid-controlled events for this month
-    def is_grid_event(E: dict) -> bool:
-        ext = (E.get("extendedProps") or {})
-        skey = ext.get("shift_key")
-        if not skey or skey not in sdefs:
-            return False
-        try:
-            d0 = pd.to_datetime(E["start"]).date()
-        except Exception:
-            return False
-        return d0.year == year and d0.month == month
+            # identify grid-controlled events for this month
+            def is_grid_event(E: dict) -> bool:
+                ext = (E.get("extendedProps") or {})
+                skey = ext.get("shift_key")
+                if not skey or skey not in sdefs:
+                    return False
+                try:
+                    d0 = pd.to_datetime(E["start"]).date()
+                except Exception:
+                    return False
+                return d0.year == year and d0.month == month
 
-    preserved = [E for E in st.session_state.events if not is_grid_event(E)]
+            preserved = [E for E in st.session_state.events if not is_grid_event(E)]
 
-    new_events = []
-    seen_day_provider = set()  # {(date, provider)}
-    conflicts = []
+            new_events = []
+            seen_day_provider = set()  # {(date, provider)}
+            conflicts = []
 
-    # helpers that look at what's been added so far (new_events)
-    def day_shift_count(dy, key):
-        return sum(1 for E in new_events
-                   if pd.to_datetime(E["start"]).date() == dy and
-                      (E.get("extendedProps") or {}).get("shift_key") == key)
+            # helpers that look at what's been added so far (new_events)
+            def day_shift_count(dy, key):
+                return sum(1 for E in new_events
+                           if pd.to_datetime(E["start"]).date() == dy and
+                              (E.get("extendedProps") or {}).get("shift_key") == key)
 
-    def provider_has_shift_on_day(provider, dy):
-        return any(
-            (E.get("extendedProps") or {}).get("provider", "").upper() == provider and
-            pd.to_datetime(E["start"]).date() == dy
-            for E in new_events
-        )
+            def provider_has_shift_on_day(provider, dy):
+                return any(
+                    (E.get("extendedProps") or {}).get("provider", "").upper() == provider and
+                    pd.to_datetime(E["start"]).date() == dy
+                    for E in new_events
+                )
 
-    def provider_days(provider):
-        return {pd.to_datetime(E["start"]).date()
-                for E in new_events
-                if (E.get("extendedProps") or {}).get("provider", "").upper() == provider}
+            def provider_days(provider):
+                return {pd.to_datetime(E["start"]).date()
+                        for E in new_events
+                        if (E.get("extendedProps") or {}).get("provider", "").upper() == provider}
 
-    def left_run_len(days_set, d0):
-        run = 0; cur = d0 - timedelta(days=1)
-        while cur in days_set:
-            run += 1; cur -= timedelta(days=1)
-        return run
+            def left_run_len(days_set, d0):
+                run = 0; cur = d0 - timedelta(days=1)
+                while cur in days_set:
+                    run += 1; cur -= timedelta(days=1)
+                return run
 
-    def right_run_len(days_set, d0):
-        run = 0; cur = d0 + timedelta(days=1)
-        while cur in days_set:
-            run += 1; cur += timedelta(days=1)
-        return run
+            def right_run_len(days_set, d0):
+                run = 0; cur = d0 + timedelta(days=1)
+                while cur in days_set:
+                    run += 1; cur += timedelta(days=1)
+                return run
 
-    
+            def total_block_len_if_assigned(provider, d0):
+                ds = provider_days(provider)
+                L = left_run_len(ds, d0)
+                R = right_run_len(ds, d0)
+                return L + 1 + R
 
-    def total_block_len_if_assigned(provider, d0):
-        ds = provider_days(provider)
-        L = left_run_len(ds, d0)
-        R = right_run_len(ds, d0)
-        return L + 1 + R
+            # live counters for per-provider totals/nights in this month build
+            counts = {}
+            nights = {}
 
-    # live counters for per-provider totals/nights in this month build
-    counts = {}
-    nights = {}
+            row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
+            day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
 
-    row_to_key = {rm["row_label"]: rm["skey"] for rm in row_meta}
-    day_only_cols = [c for c in edited_grid.columns if c.isdigit()]
+            for row_label in edited_grid.index:
+                skey = row_to_key.get(row_label)
+                if not skey:
+                    continue
+                sdef = sdefs.get(skey)
+                if not sdef:
+                    continue
 
-    for row_label in edited_grid.index:
-        skey = row_to_key.get(row_label)
-        if not skey:
-            continue
-        sdef = sdefs.get(skey)
-        if not sdef:
-            continue
+                for col in day_only_cols:
+                    prov = edited_grid.at[row_label, col]
+                    prov = ("" if prov is None else str(prov)).strip().upper()
+                    if not prov:
+                        continue
 
-        for col in day_only_cols:
-            prov = edited_grid.at[row_label, col]
-            prov = ("" if prov is None else str(prov)).strip().upper()
-            if not prov:
-                continue
+                    day_date = date(year, month, int(col))
 
-            day_date = date(year, month, int(col))
+                    # one shift per provider per day
+                    key_dp = (day_date, prov)
+                    if key_dp in seen_day_provider or provider_has_shift_on_day(prov, day_date):
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate same-day assignment; skipped)")
+                        continue
 
-            # one shift per provider per day
-            key_dp = (day_date, prov)
-            if key_dp in seen_day_provider or provider_has_shift_on_day(prov, day_date):
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (duplicate same-day assignment; skipped)")
-                continue
+                    # per-shift daily capacity (in case capacity < number of rows filled)
+                    if day_shift_count(day_date, skey) >= int(cap_map.get(skey, 1)):
+                        conflicts.append(f"{day_date:%Y-%m-%d} {skey} over capacity; skipped")
+                        continue
 
-            # per-shift daily capacity (in case capacity < number of rows filled)
-            if day_shift_count(day_date, skey) >= int(cap_map.get(skey, 1)):
-                conflicts.append(f"{day_date:%Y-%m-%d} {skey} over capacity; skipped")
-                continue
+                    # hard block: unavailable (vacation or specific date)
+                    if is_provider_unavailable_on_date(prov, day_date):
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (on vacation/unavailable; skipped)")
+                        continue
 
-            # hard block: unavailable (vacation or specific date)
-            if is_provider_unavailable_on_date(prov, day_date):
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} (on vacation/unavailable; skipped)")
-                continue
+                    # eligibility (allowed shift types)
+                    allowed = prov_caps.get(prov, [])
+                    if allowed and skey not in allowed:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} not eligible for {skey}; skipped")
+                        continue
 
-            # eligibility (allowed shift types)
-            allowed = prov_caps.get(prov, [])
-            if allowed and skey not in allowed:
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} not eligible for {skey}; skipped")
-                continue
+                    # effective max shifts (month default, minus 3 if any vacation in month)
+                    pr = prov_rules.get(prov, {}) or {}
+                    eff_max = pr.get("max_shifts", base_max)
+                    if _provider_has_vacation_in_month(pr):
+                        eff_max = max(0, (eff_max or 0) - 3)
 
-            # effective max shifts (month default, minus 3 if any vacation in month)
-            pr = prov_rules.get(prov, {}) or {}
-            eff_max = pr.get("max_shifts", base_max)
-            if _provider_has_vacation_in_month(pr):
-                eff_max = max(0, (eff_max or 0) - 3)
+                    counts.setdefault(prov, 0)
+                    nights.setdefault(prov, 0)
 
-            counts.setdefault(prov, 0)
-            nights.setdefault(prov, 0)
+                    if eff_max is not None and counts[prov] + 1 > eff_max:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max shifts {eff_max}; skipped")
+                        continue
 
-            if eff_max is not None and counts[prov] + 1 > eff_max:
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max shifts {eff_max}; skipped")
-                continue
+                    # max nights
+                    max_nights = pr.get("max_nights", global_rules.max_nights_per_provider)
+                    if skey == "N12" and max_nights is not None and nights[prov] + 1 > max_nights:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max nights {max_nights}; skipped")
+                        continue
 
-            # max nights
-            max_nights = pr.get("max_nights", global_rules.max_nights_per_provider)
-            if skey == "N12" and max_nights is not None and nights[prov] + 1 > max_nights:
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} exceeds max nights {max_nights}; skipped")
-                continue
+                    # max block size (if set)
+                    if mbx and mbx > 0 and total_block_len_if_assigned(prov, day_date) > mbx:
+                        conflicts.append(f"{day_date:%Y-%m-%d} — {prov} would exceed max block {mbx}; skipped")
+                        continue
 
-            # max block size (if set)
-            if mbx and mbx > 0 and total_block_len_if_assigned(prov, day_date) > mbx:
-                conflicts.append(f"{day_date:%Y-%m-%d} — {prov} would exceed max block {mbx}; skipped")
-                continue
+                    # build event
+                    def _parse(hhmm: str):
+                        hh, mm = hhmm.split(":")
+                        return time(int(hh), int(mm))
+                    start_dt = datetime.combine(day_date, _parse(sdef["start"]))
+                    end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
+                    if end_dt <= start_dt:
+                        end_dt += timedelta(days=1)
 
-            # build event
-            def _parse(hhmm: str):
-                hh, mm = hhmm.split(":")
-                return time(int(hh), int(mm))
-            start_dt = datetime.combine(day_date, _parse(sdef["start"]))
-            end_dt   = datetime.combine(day_date, _parse(sdef["end"]))
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
+                    eid = str(uuid.uuid4())
+                    ev = {
+                        "id": eid,
+                        "title": f"{sdef['label']} — {prov}",
+                        "start": start_dt.isoformat(),
+                        "end":   end_dt.isoformat(),
+                        "allDay": False,
+                        "backgroundColor": sdef.get("color"),
+                        "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
+                    }
+                    new_events.append(ev)
+                    seen_day_provider.add(key_dp)
 
-            eid = str(uuid.uuid4())
-            ev = {
-                "id": eid,
-                "title": f"{sdef['label']} — {prov}",
-                "start": start_dt.isoformat(),
-                "end":   end_dt.isoformat(),
-                "allDay": False,
-                "backgroundColor": sdef.get("color"),
-                "extendedProps": {"provider": prov, "shift_key": skey, "label": sdef["label"]},
-            }
-            new_events.append(ev)
-            seen_day_provider.add(key_dp)
+                    # carry comments forward if any mapping existed
+                    k = (day_date, skey, prov)
+                    if k in st.session_state.comments:
+                        st.session_state.comments[eid] = st.session_state.comments[k]
+                    elif k in comments_by_key:
+                        st.session_state.comments[eid] = comments_by_key[k]
 
-            # carry comments forward if any mapping existed
-            k = (day_date, skey, prov)
-            if k in st.session_state.comments:
-                st.session_state.comments[eid] = st.session_state.comments[k]
-            elif k in comments_by_key:
-                st.session_state.comments[eid] = comments_by_key[k]
+                    # update counters
+                    counts[prov] += 1
+                    if skey == "N12":
+                        nights[prov] += 1
 
-            # update counters
-            counts[prov] += 1
-            if skey == "N12":
-                nights[prov] += 1
+            st.session_state.events = events_for_calendar(preserved + new_events)
 
-    st.session_state.events = events_for_calendar(preserved + new_events)
-
-    if conflicts:
-        st.warning("Some cells were skipped:\n- " + "\n- ".join(conflicts))
-    else:
-        st.success("Applied grid to calendar.")
+            if conflicts:
+                st.warning("Some cells were skipped:\n- " + "\n- ".join(conflicts))
+            else:
+                st.success("Applied grid to calendar.")
 
 
 
@@ -2136,16 +1734,175 @@ if st.button("Apply grid to calendar"):
 # -------------------------
 def main():
     init_session_state()
-    left_col, mid_col, right_col = st.columns([3,5,3], gap="large")
-    with left_col:
-        engine_panel()                 # (now without bulk eligibility + actions)
-    with mid_col:
+    
+    # Main header
+    st.title("🏥 Hospitalist Monthly Scheduler")
+    st.markdown("---")
+    
+    # Navigation tabs for better organization
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View"])
+    
+    with tab1:
+        # Calendar tab - main scheduling interface
+        st.header("Monthly Calendar")
+        
+        # Top controls in a clean layout
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+        with col1:
+            year = st.number_input("Year", min_value=2020, max_value=2100, value=st.session_state.month.year)
+        with col2:
+            month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.month.month)
+        with col3:
+            if st.button("Go to Month"):
+                st.session_state.month = date(int(year), int(month), 1)
+        with col4:
+            provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist()) if not st.session_state.providers_df.empty else []
+            options = ["(All providers)"] + provs
+            default = st.session_state.highlight_provider if st.session_state.highlight_provider in provs else "(All providers)"
+            idx = options.index(default) if default in options else 0
+            sel = st.selectbox("Highlight provider", options=options, index=idx)
+            st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+        
+        # Action buttons
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            if st.button("🔄 Generate Draft", help="Generate schedule from rules"):
+                providers = st.session_state.providers_df["initials"].tolist()
+                if not providers:
+                    st.warning("Add providers first.")
+                else:
+                    rules = RuleConfig(**st.session_state.rules)
+                    days = make_month_days(st.session_state.month.year, st.session_state.month.month)
+                    st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
+                    st.session_state.events = [e.to_fc() for e in assign_greedy(providers, days, st.session_state.shift_types, rules)]
+                    st.session_state.comments = {}
+                    st.success("Draft schedule generated!")
+        with g2:
+            if st.button("✅ Validate Schedule", help="Check for rule violations"):
+                rules = RuleConfig(**st.session_state.rules)
+                evs = [SEvent(**{**e, "start": datetime.fromisoformat(e["start"]), "end": datetime.fromisoformat(e["end"])}) for e in st.session_state.events]
+                viols = validate_rules(evs, rules)
+                if not viols:
+                    st.success("✅ No violations detected.")
+                else:
+                    for p, arr in viols.items():
+                        st.error(f"❌ {p}:\n - " + "\n - ".join(arr))
+        with g3:
+            if st.button("🗑️ Clear Month", help="Clear all events for this month"):
+                st.session_state.events = []
+                st.session_state.comments = {}
+                st.success("Month cleared!")
+        
+        # Calendar display
         render_calendar()
-        middle_actions_panel()         # ← new spot for actions
-        schedule_grid_view()
-    with right_col:
+    
+    with tab2:
+        # Settings tab - global rules and shift types
+        st.header("Global Settings")
+        
+        # Global rules section
+        st.subheader("📋 Scheduling Rules")
+        rc = RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            rc.max_shifts_per_provider = st.number_input("Max shifts/provider", 1, 31, value=int(rc.max_shifts_per_provider))
+            rc.min_rest_days_between_shifts = st.number_input("Min rest (days) between shifts", min_value=0.0, max_value=14.0, step=0.5, value=float(getattr(rc, "min_rest_days_between_shifts", 1.0)))
+            rc.min_block_size = st.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
+        with col2:
+            rc.require_at_least_one_weekend = st.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
+            limit_nights = st.checkbox("Limit 7pm–7am (N12) nights per provider", value=st.session_state.rules.get("max_nights_per_provider", 6) is not None)
+            if limit_nights:
+                default_nights = int(st.session_state.rules.get("max_nights_per_provider", 6) or 0)
+                rc.max_nights_per_provider = st.number_input("Max nights/provider", 0, 31, value=default_nights)
+            else:
+                rc.max_nights_per_provider = None
+        
+        st.session_state.rules = rc.dict()
+        
+        # Shift types section
+        st.subheader("🕐 Shift Types")
+        st.caption("Edit labels, times, and colors for each shift type.")
+        for i, s in enumerate(st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())):
+            with st.expander(f"{s['label']} ({s['key']})", expanded=False):
+                s["label"] = st.text_input("Label", value=s["label"], key=f"s_lbl_{i}")
+                s["start"] = st.text_input("Start (HH:MM)", value=s["start"], key=f"s_st_{i}")
+                s["end"]   = st.text_input("End (HH:MM)",   value=s["end"],   key=f"s_en_{i}")
+                s["color"] = st.color_picker("Color", value=s.get("color", "#3388ff"), key=f"s_co_{i}")
+        
+        # Daily capacities section
+        st.subheader("📊 Daily Shift Capacities")
+        if st.button("Reset to default capacities"):
+            st.session_state["shift_capacity"] = DEFAULT_SHIFT_CAPACITY.copy()
+            st.toast("Capacities reset to defaults.", icon="♻️")
+        
+        cap_map = dict(st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+        for s in st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy()):
+            key = s["key"]; label = s["label"]
+            default_cap = int(cap_map.get(key, DEFAULT_SHIFT_CAPACITY.get(key, 1)))
+            cap_map[key] = int(st.number_input(f"{label} ({key}) capacity/day", min_value=0, max_value=50, value=default_cap, key=f"cap_{key}"))
+        st.session_state["shift_capacity"] = cap_map
+    
+    with tab3:
+        # Providers tab - manage provider roster and individual rules
+        st.header("Provider Management")
+        
+        # Provider roster management
+        st.subheader("👥 Provider Roster")
+        current_list = st.session_state.providers_df["initials"].astype(str).tolist()
+        st.caption(f"Currently loaded: {len(current_list)} providers")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.expander("➕ Add Providers", expanded=False):
+                new_one = st.text_input("Add single provider (initials)", key="add_single_init")
+                if st.button("Add", key="btn_add_single"):
+                    cand = _normalize_initials_list([new_one])
+                    if not cand:
+                        st.warning("Enter initials to add.")
+                    else:
+                        initial = list(cand)[0]
+                        if initial in current_list:
+                            st.info(f"{initial} is already in the list.")
+                        else:
+                            st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(current_list + [initial])})
+                            st.toast(f"Added {initial}", icon="✅")
+                
+                st.markdown("---")
+                batch = st.text_area("Add multiple (comma/space/newline separated)", key="add_batch_area")
+                if st.button("Add batch", key="btn_add_batch"):
+                    tokens = _normalize_initials_list(batch.replace(",", "\n").split())
+                    if not tokens:
+                        st.warning("Nothing to add.")
+                    else:
+                        merged = _normalize_initials_list(current_list + list(tokens))
+                        st.session_state.providers_df = pd.DataFrame({"initials": merged})
+                        st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
+        
+        with col2:
+            with st.expander("➖ Remove Providers", expanded=False):
+                to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
+                if st.button("Remove selected", key="btn_rm"):
+                    if not to_remove:
+                        st.info("No providers selected.")
+                    else:
+                        remaining = [p for p in current_list if p not in set(to_remove)]
+                        st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
+                        st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
+                        st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
+        
+        # Provider-specific rules
+        st.subheader("⚙️ Provider-Specific Rules")
+        provider_selector()
         provider_rules_panel()
+    
+    with tab4:
+        # Grid view tab
+        st.header("📊 Schedule Grid View")
+        st.caption("Edit assignments directly in the grid below")
+        schedule_grid_view()
 
-main()
+if __name__ == "__main__":
+    main()
 
 
