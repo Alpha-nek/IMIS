@@ -226,6 +226,21 @@ def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
 # --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
+    # --- Load persisted provider rules & caps from disk if present ---
+    try:
+        if os.path.exists("provider_rules.json"):
+            with open("provider_rules.json") as _f:
+                st.session_state["provider_rules"] = json.load(_f)
+    except Exception:
+        st.warning("Failed to load provider_rules.json; starting with empty map.")
+
+    try:
+        if os.path.exists("provider_caps.json"):
+            with open("provider_caps.json") as _f:
+                st.session_state["provider_caps"] = json.load(_f)
+    except Exception:
+        st.warning("Failed to load provider_caps.json; starting with empty map.")
+
      # Provider roster (preloaded with your list)
     if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
         st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
@@ -539,14 +554,19 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         if eff_max is not None and len(evs) > eff_max:
             violations.setdefault(p_upper, []).append(f"Has {len(evs)} shifts > max {eff_max}")
 
-        # 2) Rest hours between consecutive assignments
-        for a, b in zip(evs, evs[1:]):
-            rest_days = (b.start - a.end).total_seconds() / 86400.0
-            if rest_days < (min_rest_days or 0.0):
+        # 2) Rest days BETWEEN blocks (not between every consecutive shift)
+        dates_sorted = sorted([ev.start.date() for ev in evs])
+        # compute contiguous blocks of assignments
+        blocks = _contiguous_blocks(dates_sorted)
+        for i in range(len(blocks) - 1):
+            end_prev = blocks[i][1]
+            start_next = blocks[i+1][0]
+            gap_days = (start_next - end_prev).days
+            if gap_days < (min_rest_days or 0.0):
                 violations.setdefault(p_upper, []).append(
-                    f"Rest {rest_days:.2f} days < min {min_rest_days:.2f} days "
-                    f"between {a.start:%m-%d} and {b.start:%m-%d}"
+                    f"Gap {gap_days} days between {end_prev:%Y-%m-%d} and {start_next:%Y-%m-%d} < min {min_rest_days:.2f} days"
                 )
+
 
         # 3) Max nights
         if max_nights is not None:
@@ -696,14 +716,34 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         if end_dt <= start_dt:
             end_dt += timedelta(days=1)
 
-        pu = p_upper
-        for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == pu):
-            rest_after_prev_days  = (start_dt - e.end).total_seconds() / 86400.0
-            rest_before_next_days = (e.start  - end_dt).total_seconds() / 86400.0
-            if -(min_rest_days or 0.0) < rest_after_prev_days < (min_rest_days or 0.0):
-                return False
-            if -(min_rest_days or 0.0) < rest_before_next_days < (min_rest_days or 0.0):
-                return False
+        # Enforce min rest between blocks by simulating adding 'd' to provider's assigned dates
+        if min_rest_days and min_rest_days > 0:
+            # helper: build contiguous blocks from a sorted list of dates
+            def _blocks_from_dates(dates_sorted: list) -> list[tuple[date, date]]:
+                bl = []
+                if not dates_sorted:
+                    return bl
+                start = prev = dates_sorted[0]
+                for dd in dates_sorted[1:]:
+                    if (dd - prev).days == 1:
+                        prev = dd
+                    else:
+                        bl.append((start, prev))
+                        start = prev = dd
+                bl.append((start, prev))
+                return bl
+
+            existing_dates = sorted([ev.start.date() for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper])
+            # simulate adding the candidate day
+            merged = sorted(set(existing_dates + [d]))
+            new_blocks = _blocks_from_dates(merged)
+            # check gaps between adjacent blocks
+            for i in range(len(new_blocks) - 1):
+                end_prev = new_blocks[i][1]
+                start_next = new_blocks[i+1][0]
+                gap_days = (start_next - end_prev).days
+                if gap_days < min_rest_days:
+                    return False
 
         return True
 
@@ -724,6 +764,27 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         weekend_required = prov_rules.get(provider_id, {}).get("require_weekend", rules.require_at_least_one_weekend)
         if day.weekday() >= 5 and weekend_required and provider_weekend_count(provider_id) == 0:
             sc += 3.0
+        # soft incentive to meet provider-specific day/night ratio if configured
+        try:
+            pr = prov_rules.get(provider_id, {}) or {}
+            ratio = pr.get("day_night_ratio", None)  # percent of day shifts
+            if ratio is not None:
+                desired_night_frac = max(0.0, (100.0 - float(ratio)) / 100.0)
+                cur_nights = nights.get(provider_id, 0)
+                cur_total = counts.get(provider_id, 0)
+                est_total = cur_total + 1
+                est_nights = cur_nights + (1 if shift_key == "N12" else 0)
+                est_night_frac = est_nights / max(1, est_total)
+                # penalize if assigning a night would push above desired fraction
+                if shift_key == "N12" and est_night_frac > desired_night_frac + 0.05:
+                    sc -= 2.0
+                # small bonus if assigning a day reduces night fraction toward target
+                if shift_key != "N12":
+                    if est_night_frac < desired_night_frac - 0.10:
+                        sc += 0.5
+        except Exception:
+            pass
+
         return sc
 
     # ---------- build schedule ----------
@@ -1500,6 +1561,15 @@ def provider_rules_panel():
     base_default = recommended_max_shifts_for_month()
     curr = rules_map.get(sel, {}).copy()  # work on a copy
 
+    # Show current assigned shifts & weekend count for selected provider
+    all_events = st.session_state.get("events", [])
+    shift_count = sum(1 for e in all_events if (e.get("extendedProps") or {}).get("provider",""
+                       ).strip().upper() == sel)
+    weekend_count = sum(1 for e in all_events if (e.get("extendedProps") or {}).get("provider",""
+                        ).strip().upper() == sel and pd.to_datetime(e.get("start")).weekday() >= 5)
+    st.markdown(f"**Current month shifts:** {shift_count} | **Weekend shifts:** {weekend_count}")
+
+
     c1, c2 = st.columns(2)
     with c1:
         use_max = st.checkbox(
@@ -1556,6 +1626,22 @@ def provider_rules_panel():
         value=float(default_rest_days),
         key=f"pr_min_rest_{sel}",
     )
+
+    # Day/night ratio per provider (percent day shifts)
+    use_ratio = st.checkbox(
+        "Set day/night ratio %",
+        value=("day_night_ratio" in curr),
+        key=f"pr_use_ratio_{sel}",
+    )
+    if use_ratio:
+        ratio_val = st.slider(
+            "Percent day shifts",
+            min_value=0, max_value=100,
+            value=int(curr.get("day_night_ratio", 70)),
+            key=f"pr_ratio_val_{sel}",
+        )
+    else:
+        ratio_val = None
 
     wk_idx = 0 if curr.get("require_weekend", True) else 1
     wk_choice = st.radio(
@@ -1629,6 +1715,16 @@ def provider_rules_panel():
         if use_rest:
             new_entry["min_rest_days"] = float(min_rest_days)
 
+        # store day/night ratio if set
+        try:
+            if use_ratio and ratio_val is not None:
+                new_entry["day_night_ratio"] = int(ratio_val)
+            else:
+                new_entry.pop("day_night_ratio", None)
+        except Exception:
+            pass
+
+
 
         # normalize dates
         import pandas as pd
@@ -1662,7 +1758,19 @@ def provider_rules_panel():
         else:
             rules_map.pop(sel, None)
 
-        st.success("Saved provider rules.")
+        
+        # persist provider rules & caps to disk
+        try:
+            with open("provider_rules.json", "w") as _f:
+                json.dump(rules_map, _f)
+        except Exception:
+            st.warning("Failed to save provider_rules.json")
+        try:
+            with open("provider_caps.json", "w") as _f:
+                json.dump(st.session_state.get("provider_caps", {}), _f)
+        except Exception:
+            st.warning("Failed to save provider_caps.json")
+st.success("Saved provider rules.")
 
 
 def schedule_grid_view():
@@ -2014,8 +2122,3 @@ def main():
         provider_rules_panel()
 
 main()
-
-
-
-
-
