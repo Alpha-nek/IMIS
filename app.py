@@ -1834,7 +1834,7 @@ if st.button("Apply grid to calendar"):
         return run
 
     def provider_weekend_count(p: str) -> int:
-    return sum(1 for e in events
+        return sum(1 for e in events
                if e.extendedProps.get("provider") == p and e.start.weekday() >= 5)
 
     def total_block_len_if_assigned(provider, d0):
@@ -1973,6 +1973,7 @@ def main():
         provider_rules_panel()
 
 main()
+
 
 
 
