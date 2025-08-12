@@ -1,5 +1,7 @@
 # app.py — Interactive Monthly Scheduler for Multi-Doctor Shifts (Streamlit)
 # ---------------------------------------------------------------
+# Created by: Yazan Al-Fanek, MD
+#
 # Features
 # - Upload or paste a provider list (initials)
 # - Define/confirm shift types
@@ -164,6 +166,103 @@ class SEvent(BaseModel):
 # -------------------------
 # Utility Functions
 # -------------------------
+
+def calculate_provider_statistics(events: List[SEvent]) -> Dict[str, Any]:
+    """Calculate comprehensive provider statistics from events."""
+    provider_stats = {}
+    coverage_by_day = {}
+    
+    for event in events:
+        provider = (event.extendedProps.get("provider") or "").strip().upper()
+        if not provider:
+            continue
+            
+        # Initialize provider stats if not exists
+        if provider not in provider_stats:
+            provider_stats[provider] = {
+                "total_shifts": 0,
+                "weekend_shifts": 0,
+                "shift_types": {},
+                "dates": set()
+            }
+        
+        # Count total shifts
+        provider_stats[provider]["total_shifts"] += 1
+        
+        # Count shift types
+        shift_type = event.extendedProps.get("shift_type", "Unknown")
+        provider_stats[provider]["shift_types"][shift_type] = provider_stats[provider]["shift_types"].get(shift_type, 0) + 1
+        
+        # Check if weekend shift
+        event_date = event.start.date()
+        if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            provider_stats[provider]["weekend_shifts"] += 1
+        
+        # Track dates for coverage analysis
+        provider_stats[provider]["dates"].add(event_date)
+        
+        # Track coverage by day
+        if event_date not in coverage_by_day:
+            coverage_by_day[event_date] = []
+        coverage_by_day[event_date].append({
+            "provider": provider,
+            "shift_type": shift_type,
+            "start": event.start,
+            "end": event.end
+        })
+    
+    # Convert dates set to list for JSON serialization
+    for provider in provider_stats:
+        provider_stats[provider]["dates"] = list(provider_stats[provider]["dates"])
+    
+    return {
+        "provider_stats": provider_stats,
+        "coverage_by_day": coverage_by_day
+    }
+
+def identify_coverage_gaps(events: List[SEvent], shift_types: List[Dict], shift_capacity: Dict) -> List[Dict]:
+    """Identify days with insufficient provider coverage."""
+    coverage_by_day = {}
+    
+    # Initialize coverage tracking for each day
+    for event in events:
+        event_date = event.start.date()
+        if event_date not in coverage_by_day:
+            coverage_by_day[event_date] = {shift["key"]: [] for shift in shift_types}
+        
+        shift_type = event.extendedProps.get("shift_type", "")
+        if shift_type in coverage_by_day[event_date]:
+            coverage_by_day[event_date][shift_type].append(event.extendedProps.get("provider", ""))
+    
+    gaps = []
+    for date, day_coverage in coverage_by_day.items():
+        for shift_type, providers in day_coverage.items():
+            expected_capacity = shift_capacity.get(shift_type, 1)
+            
+            # Special handling for APP shifts
+            if shift_type == "APP":
+                if date.weekday() < 5:  # Weekday
+                    expected_capacity = 2
+                else:  # Weekend
+                    expected_capacity = 1
+            
+            # Apply holiday adjustments
+            holiday_info = is_holiday(date)
+            if holiday_info:
+                expected_capacity = max(1, int(expected_capacity * holiday_info["capacity_multiplier"]))
+            
+            actual_coverage = len(providers)
+            if actual_coverage < expected_capacity:
+                gaps.append({
+                    "date": date,
+                    "shift_type": shift_type,
+                    "expected": expected_capacity,
+                    "actual": actual_coverage,
+                    "providers": providers,
+                    "shortage": expected_capacity - actual_coverage
+                })
+    
+    return gaps
 
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
@@ -2414,13 +2513,114 @@ def main():
                     
                     with tab_stats:
                         st.subheader("📈 Provider Statistics")
-                        st.info("Provider statistics have been removed as requested.")
+                        
+                        # Calculate statistics
+                        stats_data = calculate_provider_statistics(evs)
+                        provider_stats = stats_data["provider_stats"]
+                        
+                        if provider_stats:
+                            # 1. Total shifts per provider
+                            st.subheader("📊 Total Shifts per Provider")
+                            shifts_data = {provider: data["total_shifts"] for provider, data in provider_stats.items()}
+                            shifts_df = pd.DataFrame(list(shifts_data.items()), columns=["Provider", "Total Shifts"])
+                            shifts_df = shifts_df.sort_values("Total Shifts", ascending=False)
+                            
+                            col1, col2 = st.columns([2, 1])
+                            with col1:
+                                st.dataframe(shifts_df, use_container_width=True)
+                            with col2:
+                                st.bar_chart(shifts_df.set_index("Provider"))
+                            
+                            # 2. Weekend shifts per provider
+                            st.subheader("🌅 Weekend Shifts per Provider")
+                            weekend_data = {provider: data["weekend_shifts"] for provider, data in provider_stats.items()}
+                            weekend_df = pd.DataFrame(list(weekend_data.items()), columns=["Provider", "Weekend Shifts"])
+                            weekend_df = weekend_df.sort_values("Weekend Shifts", ascending=False)
+                            
+                            col1, col2 = st.columns([2, 1])
+                            with col1:
+                                st.dataframe(weekend_df, use_container_width=True)
+                            with col2:
+                                st.bar_chart(weekend_df.set_index("Provider"))
+                            
+                            # 3. Coverage gaps
+                            st.subheader("⚠️ Coverage Gaps")
+                            gaps = identify_coverage_gaps(evs, st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES), 
+                                                        st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+                            
+                            if gaps:
+                                gaps_df = pd.DataFrame(gaps)
+                                gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
+                                gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
+                                gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
+                                gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
+                                gaps_df = gaps_df.sort_values("Date")
+                                
+                                st.dataframe(gaps_df, use_container_width=True)
+                                
+                                # Summary of gaps
+                                st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                            else:
+                                st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
+                        else:
+                            st.warning("⚠️ No provider data available for statistics.")
                 else:
                     # No violations - show success with details
                     st.success("🎉 **Schedule is Valid!** No rule violations detected.")
                     
-                    # Provider statistics removed as requested
-                    st.info("Provider statistics have been removed as requested.")
+                    # Show statistics even when no violations
+                    st.subheader("📈 Provider Statistics")
+                    
+                    # Calculate statistics
+                    stats_data = calculate_provider_statistics(evs)
+                    provider_stats = stats_data["provider_stats"]
+                    
+                    if provider_stats:
+                        # 1. Total shifts per provider
+                        st.subheader("📊 Total Shifts per Provider")
+                        shifts_data = {provider: data["total_shifts"] for provider, data in provider_stats.items()}
+                        shifts_df = pd.DataFrame(list(shifts_data.items()), columns=["Provider", "Total Shifts"])
+                        shifts_df = shifts_df.sort_values("Total Shifts", ascending=False)
+                        
+                        col1, col2 = st.columns([2, 1])
+                        with col1:
+                            st.dataframe(shifts_df, use_container_width=True)
+                        with col2:
+                            st.bar_chart(shifts_df.set_index("Provider"))
+                        
+                        # 2. Weekend shifts per provider
+                        st.subheader("🌅 Weekend Shifts per Provider")
+                        weekend_data = {provider: data["weekend_shifts"] for provider, data in provider_stats.items()}
+                        weekend_df = pd.DataFrame(list(weekend_data.items()), columns=["Provider", "Weekend Shifts"])
+                        weekend_df = weekend_df.sort_values("Weekend Shifts", ascending=False)
+                        
+                        col1, col2 = st.columns([2, 1])
+                        with col1:
+                            st.dataframe(weekend_df, use_container_width=True)
+                        with col2:
+                            st.bar_chart(weekend_df.set_index("Provider"))
+                        
+                        # 3. Coverage gaps
+                        st.subheader("⚠️ Coverage Gaps")
+                        gaps = identify_coverage_gaps(evs, st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES), 
+                                                    st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY))
+                        
+                        if gaps:
+                            gaps_df = pd.DataFrame(gaps)
+                            gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
+                            gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
+                            gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
+                            gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
+                            gaps_df = gaps_df.sort_values("Date")
+                            
+                            st.dataframe(gaps_df, use_container_width=True)
+                            
+                            # Summary of gaps
+                            st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                        else:
+                            st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
+                    else:
+                        st.warning("⚠️ No provider data available for statistics.")
         with g3:
             if st.button("🗑️ Clear All", help="Clear all events"):
                 st.session_state.events = []
