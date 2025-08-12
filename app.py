@@ -559,6 +559,18 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         # compute contiguous blocks of assignments
         blocks = _contiguous_blocks(dates_sorted)
         for i in range(len(blocks) - 1):
+
+        # Also check 12-hour rest within each block
+        evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == provider]
+        for block_start, block_end in blocks:
+            block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
+            block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
+            for a, b in zip(block_shifts, block_shifts[1:]):
+                rest_hours = (pd.to_datetime(b["start"]) - pd.to_datetime(a["end"])).total_seconds() / 3600.0
+                if rest_hours < 12:
+                    violations.setdefault(provider, []).append(
+                        f"Rest {rest_hours:.1f}h < 12h between {a['start']} and {b['start']}"
+                    )
             end_prev = blocks[i][1]
             start_next = blocks[i+1][0]
             gap_days = (start_next - end_prev).days
@@ -745,7 +757,15 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 if gap_days < min_rest_days:
                     return False
 
-        return True
+        
+    # Enforce >=12h rest between shifts inside the same block
+    for e in events:
+        if (e.extendedProps.get("provider") or "").upper() == p_upper:
+            rest_after_prev_hours = (start_dt - e.end).total_seconds() / 3600.0
+            rest_before_next_hours = (e.start - end_dt).total_seconds() / 3600.0
+            if (-0.1 < rest_after_prev_hours < 12) or (-0.1 < rest_before_next_hours < 12):
+                return False
+return True
 
     def score(provider_id: str, day: date, shift_key: str) -> float:
         sc = 0.0
