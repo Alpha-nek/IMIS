@@ -252,8 +252,13 @@ def identify_coverage_gaps(events: List[SEvent], shift_types: List[Dict], shift_
     
     gaps = []
     for date, day_coverage in coverage_by_day.items():
+        # Only check days that have at least one event
+        day_has_events = any(len(providers) > 0 for providers in day_coverage.values())
+        if not day_has_events:
+            continue
+            
         for shift_type, providers in day_coverage.items():
-            # Get the actual expected capacity from session state
+            # Get the actual expected capacity from the provided shift_capacity dict
             expected_capacity = shift_capacity.get(shift_type, 1)
             
             # Special handling for APP shifts
@@ -799,8 +804,14 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
                 # But we still check for other rules like rest periods
                 pass
             else:
-                # Regular providers: check max shifts
-                eff_max = pr.get("max_shifts", recommended_max_shifts_for_month())
+                # Regular providers: check max shifts using individual provider rules
+                # First check if provider has specific max_shifts rule
+                if "max_shifts" in pr:
+                    eff_max = pr["max_shifts"]
+                else:
+                    # Use recommended max only if provider doesn't have specific rule
+                    eff_max = recommended_max_shifts_for_month()
+                
                 vacation_weeks = _provider_vacation_weeks_in_month(pr, year, month)
                 if vacation_weeks > 0:
                     eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
@@ -813,7 +824,13 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
             # Validate minimum shifts for this month (only for regular providers)
             if not is_app_provider:
-                min_required = get_min_shifts_for_month(year, month)
+                # Check if provider has specific min_shifts rule
+                if "min_shifts" in pr:
+                    min_required = pr["min_shifts"]
+                else:
+                    # Use default minimum only if provider doesn't have specific rule
+                    min_required = get_min_shifts_for_month(year, month)
+                
                 if len(month_evs) < min_required:
                     violations.setdefault(p_upper, []).append(
                         f"Month {year}-{month:02d}: {len(month_evs)} shifts below minimum {min_required}"
@@ -1401,6 +1418,123 @@ def render_calendar():
             st.rerun()
     with col4:
         st.caption("💡 Navigate to change which month the Generate button will create schedules for")
+    
+    # Add Google Calendar sync button
+    if st.button("📅 Sync to Google Calendar", help="Sync current month's schedule to Google Calendar"):
+        # Show provider selection for sync
+        st.subheader("👤 Select Provider to Sync")
+        
+        # Get all providers
+        if not st.session_state.providers_df.empty:
+            all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
+            app_providers = sorted(APP_PROVIDER_INITIALS)
+            
+            # Create provider options with separators
+            provider_options = ["(Select Provider)"]
+            if all_providers:
+                provider_options.append("--- Physicians ---")
+                provider_options.extend(all_providers)
+            if app_providers:
+                provider_options.append("--- APPs ---")
+                provider_options.extend(app_providers)
+            
+            # Provider selection
+            selected_provider = st.selectbox(
+                "Provider to Sync",
+                options=provider_options,
+                key="quick_sync_provider"
+            )
+            
+            if selected_provider != "(Select Provider)" and not selected_provider.startswith("---"):
+                # Initialize provider-specific session state
+                provider_key = f"gcal_provider_{selected_provider}"
+                if provider_key not in st.session_state:
+                    st.session_state[provider_key] = {
+                        "connected": False,
+                        "calendar_id": "primary",
+                        "calendar_name": "Primary Calendar"
+                    }
+                
+                provider_state = st.session_state[provider_key]
+                
+                # Connect to Google Calendar
+                svc = get_gcal_service()
+                if svc:
+                    provider_state["connected"] = True
+                    
+                    # Choose calendar
+                    calendars = gcal_list_calendars(svc)
+                    if calendars:
+                        cal_ids = [c[0] for c in calendars]
+                        cal_labels = [c[1] for c in calendars]
+                        
+                        default_cal = provider_state.get("calendar_id", "primary")
+                        if default_cal not in cal_ids:
+                            default_cal = cal_ids[0]
+                        
+                        sel_idx = cal_ids.index(default_cal)
+                        sel_label = st.selectbox(
+                            f"{selected_provider}'s Calendar",
+                            options=cal_labels,
+                            index=sel_idx,
+                            key=f"quick_calendar_{selected_provider}"
+                        )
+                        sel_id = cal_ids[cal_labels.index(sel_label)]
+                        provider_state["calendar_id"] = sel_id
+                        provider_state["calendar_name"] = sel_label
+                        
+                        # Filter events for this provider in current month
+                        provider_events = []
+                        current_year = st.session_state.month.year
+                        current_month = st.session_state.month.month
+                        
+                        for event in st.session_state.get("events", []):
+                            ext = event.get("extendedProps", {})
+                            event_provider = (ext.get("provider") or "").strip().upper()
+                            if event_provider == selected_provider:
+                                try:
+                                    event_date = pd.to_datetime(event["start"]).date()
+                                    if event_date.year == current_year and event_date.month == current_month:
+                                        provider_events.append(event)
+                                except Exception:
+                                    continue
+                        
+                        if provider_events:
+                            st.write(f"**{selected_provider}**: {len(provider_events)} shifts in {st.session_state.month.strftime('%B %Y')}")
+                            
+                            if st.button(f"Sync {selected_provider}'s Shifts to Google Calendar", key=f"quick_sync_execute_{selected_provider}"):
+                                created, updated = 0, 0
+                                for event in provider_events:
+                                    body = local_event_to_gcal_body(event)
+                                    # Try to find existing GCal event by our app_event_id
+                                    g_ev = gcal_find_by_app_id(svc, sel_id, event.get("id", ""))
+                                    if g_ev is None:
+                                        # Create
+                                        svc.events().insert(calendarId=sel_id, body=body).execute()
+                                        created += 1
+                                    else:
+                                        # Update if changed
+                                        if (g_ev.get("summary") != body["summary"]) or (not _is_same_event_times(g_ev, body)):
+                                            g_ev["summary"] = body["summary"]
+                                            g_ev["start"] = body["start"]
+                                            g_ev["end"] = body["end"]
+                                            g_ev["description"] = body["description"]
+                                            g_ev.setdefault("extendedProperties", {}).setdefault("private", {}).update(
+                                                body["extendedProperties"]["private"]
+                                            )
+                                            svc.events().update(calendarId=sel_id, eventId=g_ev["id"], body=g_ev).execute()
+                                            updated += 1
+                                st.success(f"✅ Synced {selected_provider}: created {created}, updated {updated} events to {sel_label}")
+                        else:
+                            st.info(f"No shifts found for {selected_provider} in {st.session_state.month.strftime('%B %Y')}")
+                    else:
+                        st.warning("No calendars available for this account.")
+                else:
+                    st.error("Failed to connect to Google Calendar. Please check your credentials.")
+            else:
+                st.info("Please select a provider to sync their shifts.")
+        else:
+            st.warning("No providers loaded. Please load providers first.")
     
     # Holiday indicator for current month
     current_month_holidays = []
@@ -2375,7 +2509,7 @@ def main():
     st.markdown("---")
     
     # Navigation tabs for better organization
-    tab1, tab2, tab3, tab4 = st.tabs(["📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests"])
     
     with tab1:
         # Calendar tab - main scheduling interface
@@ -2876,6 +3010,597 @@ def main():
         st.header("📊 Schedule Grid View")
         st.caption("Edit assignments directly in the grid below")
         schedule_grid_view()
+
+    with tab5:
+        # Google Calendar Sync tab
+        provider_google_calendar_sync()
+
+    with tab6:
+        # Provider Requests tab
+        st.header("📝 Provider Requests")
+        st.caption("Providers can submit vacation requests, blackout dates, and shift swap requests")
+        provider_requests_panel()
+
+def execute_shift_swap(provider1: str, day1: int, provider2: str, day2: int, year: int, month: int) -> bool:
+    """Execute a shift swap between two providers on different days"""
+    try:
+        # Normalize events
+        st.session_state.events = events_for_calendar(st.session_state.get("events", []))
+        
+        # Find events for the specified days and providers
+        events_to_swap = []
+        target_events = []
+        
+        for event in st.session_state.events:
+            ext = event.get("extendedProps", {})
+            event_provider = ext.get("provider", "").strip().upper()
+            try:
+                event_date = pd.to_datetime(event["start"]).date()
+            except Exception:
+                continue
+                
+            if event_date.year == year and event_date.month == month:
+                if event_date.day == day1 and event_provider == provider1:
+                    events_to_swap.append(event)
+                elif event_date.day == day2 and event_provider == provider2:
+                    target_events.append(event)
+        
+        if not events_to_swap or not target_events:
+            st.error(f"No shifts found for the specified providers and days")
+            return False
+        
+        # Swap the providers
+        for event in events_to_swap:
+            event["extendedProps"]["provider"] = provider2
+            event["title"] = event["title"].replace(provider1, provider2)
+        
+        for event in target_events:
+            event["extendedProps"]["provider"] = provider1
+            event["title"] = event["title"].replace(provider2, provider1)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Error during shift swap: {e}")
+        return False
+
+def provider_google_calendar_sync():
+    """Allow each provider to sync their shifts to their own Google Calendar."""
+    st.subheader("👤 Provider Google Calendar Sync")
+    st.caption("Each provider can connect to their own Google Calendar and sync their shifts.")
+    
+    # Get all providers
+    if st.session_state.providers_df.empty:
+        st.warning("No providers loaded. Please load providers first.")
+        return
+    
+    all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
+    app_providers = sorted(APP_PROVIDER_INITIALS)
+    
+    # Create provider options with separators
+    provider_options = ["(Select Provider)"]
+    if all_providers:
+        provider_options.append("--- Physicians ---")
+        provider_options.extend(all_providers)
+    if app_providers:
+        provider_options.append("--- APPs ---")
+        provider_options.extend(app_providers)
+    
+    # Provider selection
+    selected_provider = st.selectbox(
+        "Select Provider to Sync",
+        options=provider_options,
+        key="provider_sync_select"
+    )
+    
+    if selected_provider == "(Select Provider)" or selected_provider.startswith("---"):
+        st.info("Please select a provider to sync their shifts to Google Calendar.")
+        return
+    
+    # Initialize provider-specific session state
+    provider_key = f"gcal_provider_{selected_provider}"
+    if provider_key not in st.session_state:
+        st.session_state[provider_key] = {
+            "connected": False,
+            "calendar_id": "primary",
+            "calendar_name": "Primary Calendar"
+        }
+    
+    provider_state = st.session_state[provider_key]
+    
+    # Connect to Google Calendar for this provider
+    svc = None
+    if st.button(f"Connect {selected_provider}'s Google Calendar", key=f"connect_{selected_provider}"):
+        svc = get_gcal_service()
+        if svc:
+            provider_state["connected"] = True
+            st.success(f"Connected {selected_provider} to Google Calendar.")
+        else:
+            st.error("Failed to connect to Google Calendar.")
+    
+    # Try to reuse previous connection
+    if provider_state.get("connected"):
+        svc = get_gcal_service()
+    
+    if not svc:
+        st.caption(f"Click **Connect {selected_provider}'s Google Calendar** to authenticate.")
+        return
+    
+    # Choose calendar for this provider
+    calendars = gcal_list_calendars(svc)
+    if not calendars:
+        st.warning("No calendars available for this account.")
+        return
+    
+    cal_ids = [c[0] for c in calendars]
+    cal_labels = [c[1] for c in calendars]
+    
+    default_cal = provider_state.get("calendar_id", "primary")
+    if default_cal not in cal_ids:
+        default_cal = cal_ids[0]
+    
+    sel_idx = cal_ids.index(default_cal)
+    sel_label = st.selectbox(
+        f"{selected_provider}'s Calendar",
+        options=cal_labels,
+        index=sel_idx,
+        key=f"calendar_{selected_provider}"
+    )
+    sel_id = cal_ids[cal_labels.index(sel_label)]
+    provider_state["calendar_id"] = sel_id
+    provider_state["calendar_name"] = sel_label
+    
+    st.caption(f"Target: **{sel_label}** for {selected_provider}")
+    
+    # Filter events for this provider
+    provider_events = []
+    for event in st.session_state.get("events", []):
+        ext = event.get("extendedProps", {})
+        event_provider = (ext.get("provider") or "").strip().upper()
+        if event_provider == selected_provider:
+            provider_events.append(event)
+    
+    if not provider_events:
+        st.info(f"No shifts found for {selected_provider}.")
+        return
+    
+    # Show provider's shifts summary
+    st.subheader(f"📊 {selected_provider}'s Shifts Summary")
+    shifts_by_month = {}
+    for event in provider_events:
+        try:
+            event_date = pd.to_datetime(event["start"]).date()
+            month_key = (event_date.year, event_date.month)
+            if month_key not in shifts_by_month:
+                shifts_by_month[month_key] = []
+            shifts_by_month[month_key].append(event)
+        except Exception:
+            continue
+    
+    # Display shifts by month
+    for (year, month), month_events in sorted(shifts_by_month.items()):
+        month_name = date(year, month, 1).strftime('%B %Y')
+        st.write(f"**{month_name}**: {len(month_events)} shifts")
+    
+    # Sync options
+    st.subheader(f"🔄 Sync Options for {selected_provider}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button(f"Sync {selected_provider}'s Shifts → Google", key=f"sync_{selected_provider}"):
+            created, updated = 0, 0
+            for event in provider_events:
+                body = local_event_to_gcal_body(event)
+                # Try to find existing GCal event by our app_event_id
+                g_ev = gcal_find_by_app_id(svc, sel_id, event.get("id", ""))
+                if g_ev is None:
+                    # Create
+                    svc.events().insert(calendarId=sel_id, body=body).execute()
+                    created += 1
+                else:
+                    # Update if changed
+                    if (g_ev.get("summary") != body["summary"]) or (not _is_same_event_times(g_ev, body)):
+                        g_ev["summary"] = body["summary"]
+                        g_ev["start"] = body["start"]
+                        g_ev["end"] = body["end"]
+                        g_ev["description"] = body["description"]
+                        g_ev.setdefault("extendedProperties", {}).setdefault("private", {}).update(
+                            body["extendedProperties"]["private"]
+                        )
+                        svc.events().update(calendarId=sel_id, eventId=g_ev["id"], body=g_ev).execute()
+                        updated += 1
+            st.success(f"Synced {selected_provider}: created {created}, updated {updated} events")
+    
+    with col2:
+        if st.button(f"Remove {selected_provider}'s Events from Google", key=f"remove_{selected_provider}"):
+            removed = 0
+            # Get all local event IDs for this provider
+            local_ids = {event["id"] for event in provider_events}
+            
+            # Find and remove events from Google Calendar
+            page_token = None
+            while True:
+                resp = svc.events().list(
+                    calendarId=sel_id,
+                    singleEvents=True,
+                    showDeleted=False,
+                    pageToken=page_token
+                ).execute()
+                
+                for g_ev in resp.get("items", []):
+                    priv = (g_ev.get("extendedProperties") or {}).get("private", {}) or {}
+                    app_id = priv.get("app_event_id")
+                    if app_id and app_id in local_ids:
+                        svc.events().delete(calendarId=sel_id, eventId=g_ev["id"]).execute()
+                        removed += 1
+                
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+            
+            st.success(f"Removed {removed} events for {selected_provider} from Google Calendar")
+    
+    # Show sync status
+    st.subheader(f"📋 Sync Status for {selected_provider}")
+    st.info(f"**Connected**: {provider_state['connected']}")
+    st.info(f"**Calendar**: {provider_state['calendar_name']}")
+    st.info(f"**Total Shifts**: {len(provider_events)}")
+    
+    # Quick sync for current month only
+    st.subheader(f"📅 Quick Sync - Current Month")
+    current_month_events = []
+    current_year = st.session_state.month.year
+    current_month = st.session_state.month.month
+    
+    for event in provider_events:
+        try:
+            event_date = pd.to_datetime(event["start"]).date()
+            if event_date.year == current_year and event_date.month == current_month:
+                current_month_events.append(event)
+        except Exception:
+            continue
+    
+    if current_month_events:
+        st.write(f"**{current_month_events[0]['start'][:7]}**: {len(current_month_events)} shifts")
+        if st.button(f"Sync {selected_provider}'s Current Month Only", key=f"quick_sync_{selected_provider}"):
+            created, updated = 0, 0
+            for event in current_month_events:
+                body = local_event_to_gcal_body(event)
+                g_ev = gcal_find_by_app_id(svc, sel_id, event.get("id", ""))
+                if g_ev is None:
+                    svc.events().insert(calendarId=sel_id, body=body).execute()
+                    created += 1
+                else:
+                    if (g_ev.get("summary") != body["summary"]) or (not _is_same_event_times(g_ev, body)):
+                        g_ev["summary"] = body["summary"]
+                        g_ev["start"] = body["start"]
+                        g_ev["end"] = body["end"]
+                        g_ev["description"] = body["description"]
+                        g_ev.setdefault("extendedProperties", {}).setdefault("private", {}).update(
+                            body["extendedProperties"]["private"]
+                        )
+                        svc.events().update(calendarId=sel_id, eventId=g_ev["id"], body=g_ev).execute()
+                        updated += 1
+            st.success(f"Quick sync for {selected_provider}: created {created}, updated {updated} events")
+    else:
+        st.info(f"No shifts for {selected_provider} in the current month.")
+
+
+def google_calendar_panel():
+    st.subheader("Google Calendar Sync")
+
+    # Connect / Authenticate
+    svc = None
+    if st.button("Connect Google Calendar"):
+        svc = get_gcal_service()
+        st.session_state["gcal_connected"] = bool(svc)
+        if svc:
+            st.success("Connected to Google Calendar.")
+    else:
+        # Try to reuse previous session silently
+        if st.session_state.get("gcal_connected"):
+            svc = get_gcal_service()
+
+    if not svc:
+        st.caption("Click **Connect Google Calendar** to authenticate.")
+        return
+
+    # Choose calendar
+    calendars = gcal_list_calendars(svc)
+    if not calendars:
+        st.warning("No calendars available for this account.")
+        return
+    cal_ids = [c[0] for c in calendars]
+    cal_labels = [c[1] for c in calendars]
+
+    default_cal = st.session_state.get("gcal_calendar_id", "primary")
+    if default_cal not in cal_ids:
+        default_cal = cal_ids[0]
+
+    sel_idx = cal_ids.index(default_cal)
+    sel_label = st.selectbox("Calendar", options=cal_labels, index=sel_idx)
+    sel_id = cal_ids[cal_labels.index(sel_label)]
+    st.session_state["gcal_calendar_id"] = sel_id
+
+    st.caption(f"Target: **{sel_label}**")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Push current month → Google"):
+            to_push = filter_events_for_current_month()
+            created, updated = 0, 0
+            for E in to_push:
+                body = local_event_to_gcal_body(E)
+                # Try to find existing GCal event by our app_event_id
+                g_ev = gcal_find_by_app_id(svc, sel_id, E.get("id",""))
+                if g_ev is None:
+                    # Create
+                    svc.events().insert(calendarId=sel_id, body=body).execute()
+                    created += 1
+                else:
+                    # Update if changed
+                    if (g_ev.get("summary") != body["summary"]) or (not _is_same_event_times(g_ev, body)):
+                        g_ev["summary"] = body["summary"]
+                        g_ev["start"]   = body["start"]
+                        g_ev["end"]     = body["end"]
+                        g_ev["description"] = body["description"]
+                        g_ev.setdefault("extendedProperties", {}).setdefault("private", {}).update(
+                            body["extendedProperties"]["private"]
+                        )
+                        svc.events().update(calendarId=sel_id, eventId=g_ev["id"], body=g_ev).execute()
+                        updated += 1
+            st.success(f"Pushed month: created {created}, updated {updated}")
+
+    with c2:
+        if st.button("Remove this month's pushed events from Google"):
+            # We'll look for events in this month that have our app_event_id private property and delete them
+            year = st.session_state.month.year
+            month = st.session_state.month.month
+            start = datetime(year, month, 1)
+            end = (start + relativedelta(months=1))
+            time_min = start.isoformat() + "Z"
+            time_max = end.isoformat() + "Z"
+
+            removed = 0
+            # Fetch all events in window and filter by privateExtendedProperty via app_event_id of local events
+            local_ids = {e["id"] for e in filter_events_for_current_month()}
+            page_token = None
+            while True:
+                resp = svc.events().list(
+                    calendarId=sel_id, timeMin=time_min, timeMax=time_max,
+                    singleEvents=True, showDeleted=False, pageToken=page_token
+                ).execute()
+                for g_ev in resp.get("items", []):
+                    priv = (g_ev.get("extendedProperties") or {}).get("private", {}) or {}
+                    app_id = priv.get("app_event_id")
+                    if app_id and app_id in local_ids:
+                        svc.events().delete(calendarId=sel_id, eventId=g_ev["id"]).execute()
+                        removed += 1
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+            st.success(f"Removed {removed} events from Google for this month.")
+
+def provider_requests_panel():
+    """Panel for managing provider requests (vacations, blackout dates, shift swaps)."""
+    st.subheader("📝 Provider Requests Management")
+    
+    # Initialize requests in session state
+    if "provider_requests" not in st.session_state:
+        st.session_state.provider_requests = {
+            "vacations": [],
+            "blackout_dates": [],
+            "shift_swaps": []
+        }
+    
+    # Get all providers
+    if st.session_state.providers_df.empty:
+        st.warning("No providers loaded. Please load providers first.")
+        return
+    
+    all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
+    app_providers = sorted(APP_PROVIDER_INITIALS)
+    
+    # Create provider options with separators
+    provider_options = ["(Select Provider)"]
+    if all_providers:
+        provider_options.append("--- Physicians ---")
+        provider_options.extend(all_providers)
+    if app_providers:
+        provider_options.append("--- APPs ---")
+        provider_options.extend(app_providers)
+    
+    # Request type selection
+    request_type = st.selectbox(
+        "Request Type",
+        options=["Vacation Request", "Blackout Date Request", "Shift Swap Request"],
+        key="request_type_select"
+    )
+    
+    if request_type == "Vacation Request":
+        vacation_request_form(provider_options)
+    elif request_type == "Blackout Date Request":
+        blackout_date_request_form(provider_options)
+    elif request_type == "Shift Swap Request":
+        shift_swap_request_form(provider_options)
+    
+    # Display existing requests
+    display_existing_requests()
+
+
+def vacation_request_form(provider_options):
+    """Form for submitting vacation requests."""
+    st.subheader("🏖️ Vacation Request")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        provider = st.selectbox("Provider", options=provider_options, key="vacation_provider")
+        start_date = st.date_input("Start Date", key="vacation_start")
+    with col2:
+        end_date = st.date_input("End Date", key="vacation_end")
+        reason = st.text_area("Reason (optional)", key="vacation_reason", height=100)
+    
+    if st.button("Submit Vacation Request", key="submit_vacation"):
+        if provider == "(Select Provider)" or provider.startswith("---"):
+            st.error("Please select a provider.")
+        elif start_date > end_date:
+            st.error("Start date must be before or equal to end date.")
+        else:
+            request = {
+                "id": f"vacation_{len(st.session_state.provider_requests['vacations'])}",
+                "type": "vacation",
+                "provider": provider,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "reason": reason,
+                "status": "pending",
+                "submitted_date": date.today().isoformat()
+            }
+            st.session_state.provider_requests["vacations"].append(request)
+            st.success(f"Vacation request submitted for {provider} from {start_date} to {end_date}")
+
+
+def blackout_date_request_form(provider_options):
+    """Form for submitting blackout date requests."""
+    st.subheader("🚫 Blackout Date Request")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        provider = st.selectbox("Provider", options=provider_options, key="blackout_provider")
+        blackout_date = st.date_input("Blackout Date", key="blackout_date")
+    with col2:
+        reason = st.text_area("Reason (optional)", key="blackout_reason", height=100)
+    
+    if st.button("Submit Blackout Date Request", key="submit_blackout"):
+        if provider == "(Select Provider)" or provider.startswith("---"):
+            st.error("Please select a provider.")
+        else:
+            request = {
+                "id": f"blackout_{len(st.session_state.provider_requests['blackout_dates'])}",
+                "type": "blackout_date",
+                "provider": provider,
+                "date": blackout_date.isoformat(),
+                "reason": reason,
+                "status": "pending",
+                "submitted_date": date.today().isoformat()
+            }
+            st.session_state.provider_requests["blackout_dates"].append(request)
+            st.success(f"Blackout date request submitted for {provider} on {blackout_date}")
+
+
+def shift_swap_request_form(provider_options):
+    """Form for submitting shift swap requests."""
+    st.subheader("🔄 Shift Swap Request")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        provider1 = st.selectbox("Provider 1", options=provider_options, key="swap_provider1")
+        provider1_date = st.date_input("Provider 1 Date", key="swap_date1")
+    with col2:
+        provider2 = st.selectbox("Provider 2", options=provider_options, key="swap_provider2")
+        provider2_date = st.date_input("Provider 2 Date", key="swap_date2")
+    
+    reason = st.text_area("Reason for swap (optional)", key="swap_reason", height=100)
+    
+    if st.button("Submit Shift Swap Request", key="submit_swap"):
+        if (provider1 == "(Select Provider)" or provider1.startswith("---") or 
+            provider2 == "(Select Provider)" or provider2.startswith("---")):
+            st.error("Please select both providers.")
+        elif provider1 == provider2:
+            st.error("Please select different providers for the swap.")
+        else:
+            request = {
+                "id": f"swap_{len(st.session_state.provider_requests['shift_swaps'])}",
+                "type": "shift_swap",
+                "provider1": provider1,
+                "provider1_date": provider1_date.isoformat(),
+                "provider2": provider2,
+                "provider2_date": provider2_date.isoformat(),
+                "reason": reason,
+                "status": "pending",
+                "submitted_date": date.today().isoformat()
+            }
+            st.session_state.provider_requests["shift_swaps"].append(request)
+            st.success(f"Shift swap request submitted between {provider1} ({provider1_date}) and {provider2} ({provider2_date})")
+
+
+def display_existing_requests():
+    """Display all existing requests with management options."""
+    st.subheader("📋 Existing Requests")
+    
+    if not any(st.session_state.provider_requests.values()):
+        st.info("No requests submitted yet.")
+        return
+    
+    # Vacation requests
+    if st.session_state.provider_requests["vacations"]:
+        st.write("**🏖️ Vacation Requests:**")
+        for i, request in enumerate(st.session_state.provider_requests["vacations"]):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"**{request['provider']}**: {request['start_date']} to {request['end_date']}")
+                if request['reason']:
+                    st.caption(f"Reason: {request['reason']}")
+                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
+            with col2:
+                if st.button("Approve", key=f"approve_vacation_{i}"):
+                    st.session_state.provider_requests["vacations"][i]["status"] = "approved"
+                    st.rerun()
+            with col3:
+                if st.button("Reject", key=f"reject_vacation_{i}"):
+                    st.session_state.provider_requests["vacations"][i]["status"] = "rejected"
+                    st.rerun()
+    
+    # Blackout date requests
+    if st.session_state.provider_requests["blackout_dates"]:
+        st.write("**🚫 Blackout Date Requests:**")
+        for i, request in enumerate(st.session_state.provider_requests["blackout_dates"]):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"**{request['provider']}**: {request['date']}")
+                if request['reason']:
+                    st.caption(f"Reason: {request['reason']}")
+                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
+            with col2:
+                if st.button("Approve", key=f"approve_blackout_{i}"):
+                    st.session_state.provider_requests["blackout_dates"][i]["status"] = "approved"
+                    st.rerun()
+            with col3:
+                if st.button("Reject", key=f"reject_blackout_{i}"):
+                    st.session_state.provider_requests["blackout_dates"][i]["status"] = "rejected"
+                    st.rerun()
+    
+    # Shift swap requests
+    if st.session_state.provider_requests["shift_swaps"]:
+        st.write("**🔄 Shift Swap Requests:**")
+        for i, request in enumerate(st.session_state.provider_requests["shift_swaps"]):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"**{request['provider1']}** ({request['provider1_date']}) ↔ **{request['provider2']}** ({request['provider2_date']})")
+                if request['reason']:
+                    st.caption(f"Reason: {request['reason']}")
+                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
+            with col2:
+                if st.button("Approve", key=f"approve_swap_{i}"):
+                    st.session_state.provider_requests["shift_swaps"][i]["status"] = "approved"
+                    # Execute the swap
+                    success = execute_shift_swap(
+                        request['provider1'], 
+                        int(request['provider1_date'].split('-')[2]), 
+                        request['provider2'], 
+                        int(request['provider2_date'].split('-')[2]),
+                        int(request['provider1_date'].split('-')[0]),
+                        int(request['provider1_date'].split('-')[1])
+                    )
+                    if success:
+                        st.success("Shift swap executed successfully!")
+                    st.rerun()
+            with col3:
+                if st.button("Reject", key=f"reject_swap_{i}"):
+                    st.session_state.provider_requests["shift_swaps"][i]["status"] = "rejected"
+                    st.rerun()
+
 
 def execute_shift_swap(provider1: str, day1: int, provider2: str, day2: int, year: int, month: int) -> bool:
     """Execute a shift swap between two providers on different days"""
