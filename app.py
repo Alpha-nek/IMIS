@@ -21,7 +21,7 @@
 import uuid
 import json
 import os
-import calendar
+import calendar as cal
 from datetime import datetime, date, timedelta, time
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
@@ -36,9 +36,9 @@ import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 try:
-    from streamlit_calendar import calendar
+    from streamlit_calendar import calendar as st_calendar
 except Exception:
-    calendar = None
+    st_calendar = None
 
 # -------------------------
 # Utilities & Data Models
@@ -123,7 +123,7 @@ class SEvent(BaseModel):
 
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
-    days = calendar.monthrange(year, month)[1]
+    days = cal.monthrange(year, month)[1]
     if days == 31:
         return 16
     if days == 30:
@@ -1149,7 +1149,7 @@ def provider_selector():
 
 def render_calendar():
     st.subheader(f"Calendar — {st.session_state.month:%B %Y}")
-    if calendar is None:
+    if st_calendar is None:
         st.warning("streamlit-calendar is not installed or failed to import. Please install and restart.")
         return
 
@@ -1188,7 +1188,7 @@ def render_calendar():
         ]
     
     # Render the calendar
-    state = calendar(
+    state = st_calendar(
         events=events,
         options=cal_options,
         key="calendar",
