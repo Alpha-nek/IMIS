@@ -237,8 +237,11 @@ def init_session_state():
         if os.path.exists("provider_rules.json"):
             with open("provider_rules.json") as _f:
                 st.session_state["provider_rules"] = json.load(_f)
-    except Exception:
-        st.warning("Failed to load provider_rules.json; starting with empty map.")
+            st.success(f"Loaded provider_rules.json with {len(st.session_state['provider_rules'])} providers")
+        else:
+            st.info("No provider_rules.json found; starting with empty map.")
+    except Exception as e:
+        st.error(f"Failed to load provider_rules.json: {e}; starting with empty map.")
 
     try:
         if os.path.exists("provider_caps.json"):
@@ -704,6 +707,12 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         eff_max = pr.get("max_shifts", base_max)
         if _provider_has_vacation_in_month(pr):
             eff_max = max(0, (eff_max or 0) - 3)
+        
+
+        
+
+        
+
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
 
@@ -1236,6 +1245,8 @@ def provider_rules_panel():
 
     rules_map = st.session_state.setdefault("provider_rules", {})
     st.session_state.setdefault("provider_caps", {})
+    
+
 
     # Shift maps
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
@@ -1436,6 +1447,7 @@ def provider_rules_panel():
 
     # Save (MERGE — never wipe unrelated keys)
     if st.button("Save provider rules", key=f"pr_save_{sel}"):
+
         new_entry = rules_map.get(sel, {}).copy()
 
         # merge toggles
@@ -1516,14 +1528,21 @@ def provider_rules_panel():
         try:
             with open("provider_rules.json", "w") as _f:
                 json.dump(rules_map, _f)
-        except Exception:
-            st.warning("Failed to save provider_rules.json")
+            st.success(f"Saved provider_rules.json with {len(rules_map)} providers")
+        except Exception as e:
+            st.error(f"Failed to save provider_rules.json: {e}")
         try:
             with open("provider_caps.json", "w") as _f:
                 json.dump(st.session_state.get("provider_caps", {}), _f)
-        except Exception:
-            st.warning("Failed to save provider_caps.json")
-st.success("Saved provider rules.")
+            st.success("Saved provider_caps.json")
+        except Exception as e:
+            st.error(f"Failed to save provider_caps.json: {e}")
+        
+
+        
+        st.success("Saved provider rules.")
+    
+
 
 
 def schedule_grid_view():
