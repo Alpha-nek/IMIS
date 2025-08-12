@@ -26,10 +26,6 @@ from ui.calendar import render_calendar, render_month_navigation
 from ui.grid import render_schedule_grid, apply_grid_changes_to_calendar
 from ui.providers import providers_panel, load_providers_from_csv
 from ui.requests import provider_requests_panel
-from integrations.google_calendar import (
-    get_gcal_service, gcal_list_calendars, sync_events_to_gcal,
-    remove_events_from_gcal, provider_google_calendar_sync
-)
 
 # Page configuration
 st.set_page_config(
@@ -273,92 +269,13 @@ def main():
     
     with tab5:
         # Google Calendar Sync tab
-        provider_google_calendar_sync()
+        st.header("📅 Google Calendar Sync")
+        st.info("Google Calendar integration will be implemented in the next phase.")
+        st.write("This tab will allow providers to sync their shifts to their Google Calendar.")
     
     with tab6:
         # Provider Requests tab
         provider_requests_panel()
 
-def provider_google_calendar_sync():
-    """Allow each provider to sync their shifts to their own Google Calendar."""
-    st.subheader("👤 Provider Google Calendar Sync")
-    st.caption("Each provider can connect to their own Google Calendar and sync their shifts.")
-    
-    # Get all providers
-    if st.session_state.providers_df.empty:
-        st.warning("No providers loaded. Please load providers first.")
-        return
-    
-    all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
-    app_providers = sorted(APP_PROVIDER_INITIALS)
-    
-    # Filter out APP providers from the physician list
-    physician_providers = [p for p in all_providers if p not in app_providers]
-    
-    # Create provider options with separators
-    provider_options = ["(Select Provider)"]
-    if physician_providers:
-        provider_options.append("--- Physicians ---")
-        provider_options.extend(physician_providers)
-    if app_providers:
-        provider_options.append("--- APPs ---")
-        provider_options.extend(app_providers)
-    
-    # Provider selection
-    selected_provider = st.selectbox(
-        "Select Provider to Sync",
-        options=provider_options,
-        key="provider_sync_select"
-    )
-    
-    if selected_provider == "(Select Provider)" or selected_provider.startswith("---"):
-        st.info("Please select a provider to sync their shifts to Google Calendar.")
-        return
-    
-    # Initialize provider-specific session state
-    provider_key = f"gcal_provider_{selected_provider}"
-    if provider_key not in st.session_state:
-        st.session_state[provider_key] = {
-            "connected": False,
-            "calendar_id": "primary",
-            "calendar_name": "Primary Calendar"
-        }
-    
-    provider_state = st.session_state[provider_key]
-    
-    # Connect to Google Calendar for this provider
-    svc = None
-    if st.button(f"Connect {selected_provider}'s Google Calendar", key=f"connect_{selected_provider}"):
-        svc = get_gcal_service()
-        if svc:
-            provider_state["connected"] = True
-            st.success(f"Connected {selected_provider} to Google Calendar.")
-        else:
-            st.error("Failed to connect to Google Calendar.")
-    
-    # Try to reuse previous connection
-    if provider_state.get("connected"):
-        svc = get_gcal_service()
-    
-    if not svc:
-        st.caption(f"Click **Connect {selected_provider}'s Google Calendar** to authenticate.")
-        return
-    
-    # Choose calendar for this provider
-    calendars = gcal_list_calendars(svc)
-    if not calendars:
-        st.warning("No calendars available for this account.")
-        return
-    
-    cal_ids = [c[0] for c in calendars]
-    cal_labels = [c[1] for c in calendars]
-    
-    default_cal = provider_state.get("calendar_id", "primary")
-    if default_cal not in cal_ids:
-        default_cal = cal_ids[0]
-    
-    sel_idx = cal_ids.index(default_cal)
-    sel_label = st.selectbox(
-        f"{selected_provider}'s Calendar",
-        options=cal_labels,
-        index=
+if __name__ == "__main__":
+    main()
