@@ -76,12 +76,14 @@ def _normalize_initials_list(items):
 
 class RuleConfig(BaseModel):
     # GLOBAL defaults
-    min_shifts_per_provider: int = 15                  # ← default now 15
+    min_shifts_per_provider: int = 15
     max_shifts_per_provider: int = Field(15, ge=1, le=31)
 
-    min_rest_hours_between_shifts: int = Field(12, ge=0, le=48)
+    # CHANGED: rest is now measured in DAYS (float)
+    min_rest_days_between_shifts: float = Field(1.0, ge=0.0, le=14.0)
+
     min_block_size: int = Field(3, ge=1, le=7, description="Minimum consecutive days in a block when possible")
-    max_block_size: Optional[int] = 7                  # 0/None => no cap; we default to 7
+    max_block_size: Optional[int] = 7
 
     require_at_least_one_weekend: bool = True
     max_nights_per_provider: Optional[int] = Field(6, ge=0, le=31)
@@ -240,6 +242,15 @@ def init_session_state():
 # migrate if missing/None
     if st.session_state["rules"].get("max_block_size") is None:
         st.session_state["rules"]["max_block_size"] = 7
+    # Migrate old hours-based field to days-based if present
+    _rules = st.session_state.get("rules", {})
+    if "min_rest_hours_between_shifts" in _rules and "min_rest_days_between_shifts" not in _rules:
+        try:
+            _rules["min_rest_days_between_shifts"] = float(_rules.pop("min_rest_hours_between_shifts")) / 24.0
+        except Exception:
+            _rules["min_rest_days_between_shifts"] = 1.0
+    st.session_state["rules"] = _rules
+
 
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
@@ -412,6 +423,7 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
     import pandas as pd
     violations: dict[str, list[str]] = {}
 
+
     cap_map: dict[str, int]   = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
     prov_caps: dict[str, list[str]] = st.session_state.get("provider_caps", {})
     prov_rules: dict[str, dict]      = st.session_state.get("provider_rules", {})
@@ -500,6 +512,8 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
     min_required = int(getattr(rules, "min_shifts_per_provider", 15))
     mbs = int(getattr(rules, "min_block_size", 1) or 1)
     mbx = getattr(rules, "max_block_size", None)
+    min_rest_days_global = float(getattr(rules, "min_rest_days_between_shifts", 1.0))
+
 
     for p_upper, evs in per_p.items():
         evs.sort(key=lambda e: e.start)
@@ -511,8 +525,8 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
             eff_max = max(0, (eff_max or 0) - 3)
 
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest = rules.min_rest_hours_between_shifts
-
+        min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
+    
         weekend_required = pr.get("require_weekend", rules.require_at_least_one_weekend)
         if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
             violations.setdefault(p_upper, []).append("No weekend shifts")
@@ -527,10 +541,11 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
         # 2) Rest hours between consecutive assignments
         for a, b in zip(evs, evs[1:]):
-            rest = (b.start - a.end).total_seconds() / 3600
-            if rest < (min_rest or 0):
+            rest_days = (b.start - a.end).total_seconds() / 86400.0
+            if rest_days < (min_rest_days or 0.0):
                 violations.setdefault(p_upper, []).append(
-                    f"Rest {rest:.1f}h < min {min_rest}h between {a.start:%m-%d} and {b.start:%m-%d}"
+                    f"Rest {rest_days:.2f} days < min {min_rest_days:.2f} days "
+                    f"between {a.start:%m-%d} and {b.start:%m-%d}"
                 )
 
         # 3) Max nights
@@ -587,8 +602,20 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
 
 # Assignment Logic
 def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict[str, Any]], rules: RuleConfig) -> List[SEvent]:
-    sdefs = {s["key"]: s for s in shift_types}
-    stypes = [s["key"] for s in shift_types]
+    sdef = sdefs[skey]
+    start_dt = datetime.combine(d, parse_time(sdef["start"]))
+    end_dt   = datetime.combine(d, parse_time(sdef["end"]))
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    
+    for e in (ev for ev in events if (ev.extendedProps.get("provider") or "").upper() == p_upper):
+        rest_after_prev_days  = (start_dt - e.end).total_seconds() / 86400.0
+        rest_before_next_days = (e.start  - end_dt).total_seconds() / 86400.0
+        # too close on either side if within (-min_rest_days, +min_rest_days)
+        if -(min_rest_days or 0.0) < rest_after_prev_days < (min_rest_days or 0.0):
+            return False
+        if -(min_rest_days or 0.0) < rest_before_next_days < (min_rest_days or 0.0):
+            return False
 
     cap_map: Dict[str, int]      = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
     prov_caps: Dict[str, List[str]] = st.session_state.get("provider_caps", {})
@@ -656,7 +683,12 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
 
         # Use ONLY global min rest (no per-provider editor)
-        min_rest = rules.min_rest_hours_between_shifts
+        pr = st.session_state.get("provider_rules", {}).get(p_upper, {}) or {}
+        eff_max   = pr.get("max_shifts", base_max)
+        if _provider_has_vacation_in_month(pr):
+            eff_max = max(0, (eff_max or 0) - 3)
+        max_nights    = pr.get("max_nights", rules.max_nights_per_provider)
+        min_rest_days = float(pr.get("min_rest_days", getattr(rules, "min_rest_days_between_shifts", 1.0)))
 
         # 3) Hard block: unavailable (specific date or vacation range)
         if is_provider_unavailable_on_date(p_upper, d):
@@ -928,7 +960,11 @@ def sidebar_inputs():
     st.sidebar.subheader("Rules")
     rc = RuleConfig(**st.session_state.get("rules", RuleConfig().dict()))
     rc.max_shifts_per_provider = st.sidebar.number_input("Max shifts/provider", 1, 31, value=int(rc.max_shifts_per_provider))
-    rc.min_rest_hours_between_shifts = st.sidebar.number_input("Min rest hours between shifts", 0, 48, value=int(rc.min_rest_hours_between_shifts))
+    rc.min_rest_days_between_shifts = st.number_input(
+    "Min rest (days) between shifts",
+    min_value=0.0, max_value=14.0, step=0.5,
+    value=float(getattr(rc, "min_rest_days_between_shifts", 1.0)),
+    key="rule_min_rest_days",)
     rc.min_block_size = st.sidebar.number_input("Preferred block size (days)", 1, 7, value=int(rc.min_block_size))
     rc.require_at_least_one_weekend = st.sidebar.checkbox("Require at least one weekend shift", value=bool(rc.require_at_least_one_weekend))
     limit_nights = st.sidebar.checkbox(
@@ -1587,6 +1623,28 @@ def provider_rules_panel():
         value=("require_weekend" in curr),
         key=f"pr_use_weekend_{sel}",
     )
+    # --- replace the min-rest override UI in provider_rules_panel() ---
+    use_rest = st.checkbox(
+        "Override min rest (days)",
+        value=("min_rest_days" in curr or "min_rest_hours" in curr),  # allow old hours key for migration
+        key=f"pr_use_rest_{sel}",
+    )
+    
+    # Backward-compat default: prefer min_rest_days; fall back to converting hours → days
+    if "min_rest_days" in curr:
+        default_rest_days = float(curr.get("min_rest_days", 1.0))
+    elif "min_rest_hours" in curr:
+        default_rest_days = float(curr.get("min_rest_hours", 24.0)) / 24.0
+    else:
+        default_rest_days = float(getattr(global_rules, "min_rest_days_between_shifts", 1.0))
+    
+    min_rest_days = st.number_input(
+        "Min rest days between shifts",
+        min_value=0.0, max_value=14.0, step=0.5,
+        value=float(default_rest_days),
+        key=f"pr_min_rest_{sel}",
+    )
+
     wk_idx = 0 if curr.get("require_weekend", True) else 1
     wk_choice = st.radio(
         "Weekend requirement",
@@ -1654,6 +1712,11 @@ def provider_rules_panel():
             new_entry["require_weekend"] = (wk_choice == "Require at least one")
         else:
             new_entry.pop("require_weekend", None)
+
+                # in the "Save provider rules" handler:
+        if use_rest:
+            new_entry["min_rest_days"] = float(min_rest_days)
+
 
         # normalize dates
         import pandas as pd
@@ -2023,8 +2086,6 @@ if st.button("Apply grid to calendar"):
 
 
 
-
-
 # -------------------------
 # App entry
 # -------------------------
@@ -2041,63 +2102,6 @@ def main():
         provider_rules_panel()
 
 main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
