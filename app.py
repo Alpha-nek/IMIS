@@ -149,6 +149,17 @@ def recommended_max_shifts_for_month() -> int:
         return 15
     return get_global_rules().max_shifts_per_provider
 
+def get_min_shifts_for_month(year: int, month: int) -> int:
+    """Get minimum shifts required for a specific month based on number of days."""
+    import calendar
+    days = calendar.monthrange(year, month)[1]
+    if days == 31:
+        return 16
+    if days == 30:
+        return 15
+    # For February (28/29 days), use a reasonable minimum
+    return 14
+
 
 # --- Vacation helpers ---
 def _expand_vacation_dates(vacations: list) -> set:
@@ -673,9 +684,11 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
             violations.setdefault(p_upper, []).append("No weekend shifts")
 
-        # 0) Min shifts (across all months)
-        if min_required and len(evs) < min_required:
-            violations.setdefault(p_upper, []).append(f"Has {len(evs)} shifts < min {min_required}")
+        # 0) Min shifts per month (dynamic based on month length)
+        for (year, month), month_events in provider_events_by_month.items():
+            month_min = get_min_shifts_for_month(year, month)
+            if len(month_events) < month_min:
+                violations.setdefault(p_upper, []).append(f"{year}-{month:02d}: {len(month_events)} shifts < min {month_min} for {month}-day month")
 
         # 1) Max shifts (already handled per month above)
 
@@ -775,7 +788,8 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
     # Month-aware/global knobs
     base_max = recommended_max_shifts_for_month()
-    min_required = int(getattr(rules, "min_shifts_per_provider", 15))
+    # Use dynamic minimum based on month length for the current month being processed
+    # We'll calculate this per month during assignment
     mbs = int(getattr(rules, "min_block_size", 1) or 1)
     mbx = getattr(rules, "max_block_size", None)
     min_rest_days_global = float(getattr(rules, "min_rest_days_between_shifts", 1.0))
@@ -901,8 +915,12 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
     def score(provider_id: str, day: date, shift_key: str) -> float:
         sc = 0.0
-        # toward minimum
-        if counts[provider_id] < min_required:
+        
+        # Get dynamic minimum for the current month
+        current_month_min = get_min_shifts_for_month(day.year, day.month)
+        
+        # toward minimum for the current month
+        if counts[provider_id] < current_month_min:
             sc += 4.0
             # contiguous blocks up to preferred min size
             ds = provider_days(provider_id)
@@ -911,6 +929,34 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 sc += 2.0
             if L < mbs:
                 sc += 4.0
+        
+        # Stretch preference: prefer 4-7 day stretches, avoid 1-2 day stretches
+        ds = provider_days(provider_id)
+        if ds:
+            # Check if this would create a short stretch (1-2 days)
+            left_run = left_run_len(ds, day)
+            right_run = right_run_len(ds, day)
+            
+            # If this would be a standalone day or very short stretch
+            if left_run == 0 and right_run == 0:
+                # Standalone day - strong penalty
+                sc -= 3.0
+            elif left_run == 0 and right_run <= 1:
+                # 1-2 day stretch - penalty
+                sc -= 2.0
+            elif left_run <= 1 and right_run == 0:
+                # 1-2 day stretch - penalty
+                sc -= 2.0
+            elif left_run == 0 and right_run >= 3:
+                # Adding to a good stretch (3+ days) - bonus
+                sc += 1.5
+            elif left_run >= 3 and right_run == 0:
+                # Adding to a good stretch (3+ days) - bonus
+                sc += 1.5
+            elif left_run >= 2 and right_run >= 2:
+                # Extending a good stretch - bonus
+                sc += 2.0
+        
         # gentle load balance
         sc += max(0, 20 - counts[provider_id]) * 0.01
         # soft penalty if this hits the max block size
@@ -1190,8 +1236,8 @@ def google_calendar_panel():
             st.success(f"Pushed month: created {created}, updated {updated}")
 
     with c2:
-        if st.button("Remove this month’s pushed events from Google"):
-            # We’ll look for events in this month that have our app_event_id private property and delete them
+        if st.button("Remove this month's pushed events from Google"):
+            # We'll look for events in this month that have our app_event_id private property and delete them
             year = st.session_state.month.year
             month = st.session_state.month.month
             start = datetime(year, month, 1)
@@ -1484,6 +1530,9 @@ def provider_rules_panel():
         help="1=weak preference, 5=strong preference to avoid mixing night/day shifts",
         key=f"pr_consistency_strength_{sel}",
     )
+    
+    # Info about stretch preferences
+    st.info("💡 **Stretch Preferences**: The system automatically prefers 4-7 day stretches and avoids 1-2 day stretches to reduce provider fatigue.")
 
     st.markdown("---")
     st.subheader("Unavailable specific dates")
@@ -2023,6 +2072,13 @@ def main():
         
         # Global rules section
         st.subheader("📋 Scheduling Rules")
+        
+        # Info about dynamic minimum shifts
+        st.info("💡 **Dynamic Minimum Shifts**: The system automatically enforces minimum shifts based on month length:\n"
+                "• 30-day months: 15 shifts minimum\n"
+                "• 31-day months: 16 shifts minimum\n"
+                "• February (28/29 days): 14 shifts minimum")
+        
         rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
         
         col1, col2 = st.columns(2)
