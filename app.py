@@ -66,7 +66,7 @@ PROVIDER_INITIALS_DEFAULT = [
     "YH","XL","MA","LM","MQ","CM","AI"
 ]
 
-DEFAULT_SHIFT_CAPACITY = {"N12": 2, "NB": 1, "R12": 3, "A12": 1, "A10": 1}
+DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
 
 
 def _normalize_initials_list(items):
@@ -1124,15 +1124,6 @@ def render_calendar():
         st.warning("streamlit-calendar is not installed or failed to import. Please install and restart.")
         return
 
-    # Prepare events for FullCalendar
-    all_events = st.session_state.events
-    hi = (st.session_state.highlight_provider or "").strip().upper()
-    if hi:
-        # Show only the selected provider's shifts
-        events = [e for e in all_events if ((e.get("extendedProps") or {}).get("provider", "").strip().upper() == hi)]
-    else:
-        events = list(all_events)
-
     # FullCalendar options
     cal_options = {
         "initialDate": st.session_state.month.isoformat(),
@@ -1159,7 +1150,7 @@ def render_calendar():
     # Prepare JSON-safe events
     events = events_for_calendar(st.session_state.get("events", []))
     
-    # (Optional) filter calendar by the global provider selection
+    # Filter calendar by the global provider selection
     hi = (st.session_state.get("highlight_provider", "") or "").strip().upper()
     if hi:
         events = [
@@ -1170,7 +1161,7 @@ def render_calendar():
     # Render the calendar
     state = calendar(
         events=events,
-        # add your existing options/custom_css/etc. here if needed
+        options=cal_options,
         key="calendar",
     )
 
