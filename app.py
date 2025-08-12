@@ -234,8 +234,12 @@ def init_session_state():
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
     # --- Load persisted provider rules & caps from disk if present ---
     try:
-        if os.path.exists("provider_rules.json"):
-            with open("provider_rules.json") as _f:
+        import os
+        data_dir = os.path.join(os.getcwd(), "data")
+        provider_rules_path = os.path.join(data_dir, "provider_rules.json")
+        
+        if os.path.exists(provider_rules_path):
+            with open(provider_rules_path) as _f:
                 loaded_rules = json.load(_f)
                 # Ensure we don't overwrite existing rules in session state
                 if "provider_rules" not in st.session_state:
@@ -243,18 +247,25 @@ def init_session_state():
                 else:
                     # Merge loaded rules with existing ones
                     st.session_state["provider_rules"].update(loaded_rules)
-            st.success(f"Loaded provider_rules.json with {len(loaded_rules)} providers")
+            st.success(f"Loaded provider_rules.json from {data_dir} with {len(loaded_rules)} providers")
         else:
-            st.info("No provider_rules.json found; starting with empty map.")
+            st.info(f"No provider_rules.json found in {data_dir}; starting with empty map.")
     except Exception as e:
         st.error(f"Failed to load provider_rules.json: {e}; starting with empty map.")
 
     try:
-        if os.path.exists("provider_caps.json"):
-            with open("provider_caps.json") as _f:
+        import os
+        data_dir = os.path.join(os.getcwd(), "data")
+        provider_caps_path = os.path.join(data_dir, "provider_caps.json")
+        
+        if os.path.exists(provider_caps_path):
+            with open(provider_caps_path) as _f:
                 st.session_state["provider_caps"] = json.load(_f)
-    except Exception:
-        st.warning("Failed to load provider_caps.json; starting with empty map.")
+            st.success(f"Loaded provider_caps.json from {data_dir}")
+        else:
+            st.info(f"No provider_caps.json found in {data_dir}; starting with empty map.")
+    except Exception as e:
+        st.error(f"Failed to load provider_caps.json: {e}; starting with empty map.")
 
      # Provider roster (preloaded with your list)
     if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
@@ -1277,9 +1288,9 @@ def provider_rules_panel():
     else:
         st.session_state["provider_caps"][sel] = [key_for_label[lbl] for lbl in picked_labels]
 
-    # ----- Overrides & availability
+    # ----- Provider-specific rules
     st.markdown("---")
-    st.subheader("Overrides (optional)")
+    st.subheader("Provider-specific rules")
 
     base_default = recommended_max_shifts_for_month()
     curr = rules_map.get(sel, {}).copy()  # work on a copy
@@ -1292,14 +1303,9 @@ def provider_rules_panel():
                         ).strip().upper() == sel and pd.to_datetime(e.get("start")).weekday() >= 5)
     st.markdown(f"**Current month shifts:** {shift_count} | **Weekend shifts:** {weekend_count}")
 
-
+    # Max shifts and nights
     c1, c2 = st.columns(2)
     with c1:
-        use_max = st.checkbox(
-            "Override max shifts / month",
-            value=("max_shifts" in curr),
-            key=f"pr_use_max_{sel}",
-        )
         st.caption(f"Recommended default this month: **{base_default}**")
         max_sh = st.number_input(
             "Max shifts (this month)",
@@ -1308,11 +1314,6 @@ def provider_rules_panel():
             key=f"pr_max_{sel}",
         )
     with c2:
-        use_nights = st.checkbox(
-            "Override max nights / month",
-            value=("max_nights" in curr),
-            key=f"pr_use_nights_{sel}",
-        )
         global_rules = get_global_rules()
         default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
         max_n = st.number_input(
@@ -1322,19 +1323,17 @@ def provider_rules_panel():
             key=f"pr_max_n_{sel}",
         )
 
-    # NEW: Weekend requirement override (no min_rest editor anywhere)
-    use_weekend = st.checkbox(
-        "Override weekend requirement",
-        value=("require_weekend" in curr),
-        key=f"pr_use_weekend_{sel}",
+    # Weekend requirement
+    wk_idx = 0 if curr.get("require_weekend", True) else 1
+    wk_choice = st.radio(
+        "Weekend requirement",
+        options=["Require at least one", "No weekend required"],
+        index=wk_idx,
+        key=f"pr_weekend_choice_{sel}",
+        horizontal=True,
     )
-    # --- replace the min-rest override UI in provider_rules_panel() ---
-    use_rest = st.checkbox(
-        "Override min rest (days)",
-        value=("min_rest_days" in curr or "min_rest_hours" in curr),  # allow old hours key for migration
-        key=f"pr_use_rest_{sel}",
-    )
-    
+
+    # Min rest days
     # Backward-compat default: prefer min_rest_days; fall back to converting hours → days
     if "min_rest_days" in curr:
         default_rest_days = float(curr.get("min_rest_days", 1.0))
@@ -1351,63 +1350,30 @@ def provider_rules_panel():
     )
 
     # Day/night ratio per provider (percent day shifts)
-    use_ratio = st.checkbox(
-        "Set day/night ratio %",
-        value=("day_night_ratio" in curr),
-        key=f"pr_use_ratio_{sel}",
+    ratio_val = st.slider(
+        "Percent day shifts",
+        min_value=0, max_value=100,
+        value=int(curr.get("day_night_ratio", 70)),
+        key=f"pr_ratio_val_{sel}",
     )
-    if use_ratio:
-        ratio_val = st.slider(
-            "Percent day shifts",
-            min_value=0, max_value=100,
-            value=int(curr.get("day_night_ratio", 70)),
-            key=f"pr_ratio_val_{sel}",
-        )
-    else:
-        ratio_val = None
 
     # Half-month shift preference
-    use_half_month = st.checkbox(
-        "Set half-month shift preference",
-        value=("half_month_preference" in curr),
-        key=f"pr_use_half_month_{sel}",
+    half_month_choice = st.radio(
+        "Preferred half of month",
+        options=["First half (1-15)", "Last half (16-31)", "No preference"],
+        index=curr.get("half_month_preference", 2),  # 0=first, 1=last, 2=none
+        key=f"pr_half_month_choice_{sel}",
+        horizontal=True,
     )
-    if use_half_month:
-        half_month_choice = st.radio(
-            "Preferred half of month",
-            options=["First half (1-15)", "Last half (16-31)", "No preference"],
-            index=curr.get("half_month_preference", 2),  # 0=first, 1=last, 2=none
-            key=f"pr_half_month_choice_{sel}",
-            horizontal=True,
-        )
-        half_month_val = {"First half (1-15)": 0, "Last half (16-31)": 1, "No preference": 2}[half_month_choice]
-    else:
-        half_month_val = None
+    half_month_val = {"First half (1-15)": 0, "Last half (16-31)": 1, "No preference": 2}[half_month_choice]
 
     # Shift type consistency within blocks
-    use_shift_consistency = st.checkbox(
-        "Prefer consistent shift types in blocks",
-        value=("prefer_shift_consistency" in curr),
-        key=f"pr_use_shift_consistency_{sel}",
-    )
-    if use_shift_consistency:
-        consistency_strength = st.slider(
-            "Consistency preference strength",
-            min_value=1, max_value=5,
-            value=int(curr.get("shift_consistency_strength", 3)),
-            help="1=weak preference, 5=strong preference to avoid mixing night/day shifts",
-            key=f"pr_consistency_strength_{sel}",
-        )
-    else:
-        consistency_strength = None
-
-    wk_idx = 0 if curr.get("require_weekend", True) else 1
-    wk_choice = st.radio(
-        "Weekend requirement",
-        options=["Require at least one", "No weekend required"],
-        index=wk_idx,
-        key=f"pr_weekend_choice_{sel}",
-        horizontal=True,
+    consistency_strength = st.slider(
+        "Shift consistency preference strength",
+        min_value=1, max_value=5,
+        value=int(curr.get("shift_consistency_strength", 3)),
+        help="1=weak preference, 5=strong preference to avoid mixing night/day shifts",
+        key=f"pr_consistency_strength_{sel}",
     )
 
     st.markdown("---")
@@ -1458,44 +1424,15 @@ def provider_rules_panel():
 
         new_entry = rules_map.get(sel, {}).copy()
 
-        # merge toggles
-        if use_max:    new_entry["max_shifts"] = int(max_sh)
-        else:          new_entry.pop("max_shifts", None)
-
-        if use_nights: new_entry["max_nights"] = int(max_n)
-        else:          new_entry.pop("max_nights", None)
-
-        if use_weekend:
-            new_entry["require_weekend"] = (wk_choice == "Require at least one")
-        else:
-            new_entry.pop("require_weekend", None)
-
-                # in the "Save provider rules" handler:
-        if use_rest:
-            new_entry["min_rest_days"] = float(min_rest_days)
-
-        # store day/night ratio if set
-        try:
-            if use_ratio and ratio_val is not None:
-                new_entry["day_night_ratio"] = int(ratio_val)
-            else:
-                new_entry.pop("day_night_ratio", None)
-        except Exception:
-            pass
-
-        # store half-month preference if set
-        if use_half_month and half_month_val is not None:
-            new_entry["half_month_preference"] = int(half_month_val)
-        else:
-            new_entry.pop("half_month_preference", None)
-
-        # store shift consistency preference if set
-        if use_shift_consistency and consistency_strength is not None:
-            new_entry["prefer_shift_consistency"] = True
-            new_entry["shift_consistency_strength"] = int(consistency_strength)
-        else:
-            new_entry.pop("prefer_shift_consistency", None)
-            new_entry.pop("shift_consistency_strength", None)
+        # Always save all provider-specific rules
+        new_entry["max_shifts"] = int(max_sh)
+        new_entry["max_nights"] = int(max_n)
+        new_entry["require_weekend"] = (wk_choice == "Require at least one")
+        new_entry["min_rest_days"] = float(min_rest_days)
+        new_entry["day_night_ratio"] = int(ratio_val)
+        new_entry["half_month_preference"] = int(half_month_val)
+        new_entry["prefer_shift_consistency"] = True
+        new_entry["shift_consistency_strength"] = int(consistency_strength)
 
 
 
@@ -1537,16 +1474,27 @@ def provider_rules_panel():
             # Ensure the rules are properly saved to session state first
             st.session_state["provider_rules"] = rules_map.copy()
             
+            # Use a more robust path for Streamlit deployment
+            import os
+            data_dir = os.path.join(os.getcwd(), "data")
+            os.makedirs(data_dir, exist_ok=True)
+            
             # Then save to disk
-            with open("provider_rules.json", "w") as _f:
+            provider_rules_path = os.path.join(data_dir, "provider_rules.json")
+            with open(provider_rules_path, "w") as _f:
                 json.dump(rules_map, _f)
-            st.success(f"Saved provider_rules.json with {len(rules_map)} providers")
+            st.success(f"Saved provider_rules.json to {data_dir} with {len(rules_map)} providers")
         except Exception as e:
             st.error(f"Failed to save provider_rules.json: {e}")
         try:
-            with open("provider_caps.json", "w") as _f:
+            import os
+            data_dir = os.path.join(os.getcwd(), "data")
+            os.makedirs(data_dir, exist_ok=True)
+            
+            provider_caps_path = os.path.join(data_dir, "provider_caps.json")
+            with open(provider_caps_path, "w") as _f:
                 json.dump(st.session_state.get("provider_caps", {}), _f)
-            st.success("Saved provider_caps.json")
+            st.success(f"Saved provider_caps.json to {data_dir}")
         except Exception as e:
             st.error(f"Failed to save provider_caps.json: {e}")
         
@@ -1934,10 +1882,12 @@ def main():
                 else:
                     rules = RuleConfig(**st.session_state.rules)
                     days = make_month_days(st.session_state.month.year, st.session_state.month.month)
-                    st.session_state.events = [_event_to_dict(e) for e in st.session_state.events]
-                    st.session_state.events = [e.to_fc() for e in assign_greedy(providers, days, st.session_state.shift_types, rules)]
+                    # Generate new events using the greedy algorithm
+                    new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
+                    # Convert SEvent objects to dictionary format for calendar
+                    st.session_state.events = [_event_to_dict(e) for e in new_events]
                     st.session_state.comments = {}
-                    st.success("Draft schedule generated!")
+                    st.success(f"Draft schedule generated with {len(st.session_state.events)} events!")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
