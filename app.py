@@ -66,7 +66,7 @@ PROVIDER_INITIALS_DEFAULT = [
     "YH","XL","MA","LM","MQ","CM","AI"
 ]
 
-DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
+DEFAULT_SHIFT_CAPACITY = {"N12": 2, "NB": 1, "R12": 3, "A12": 1, "A10": 1}
 
 
 def _normalize_initials_list(items):
@@ -725,11 +725,6 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         if _provider_has_vacation_in_month(pr):
             eff_max = max(0, (eff_max or 0) - 3)
         
-
-        
-
-        
-
         max_nights = pr.get("max_nights", rules.max_nights_per_provider)
         min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
 
@@ -790,13 +785,14 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                     return False
 
         
-    # Enforce >=12h rest between shifts inside the same block
-    for e in events:
-        if (e.extendedProps.get("provider") or "").upper() == p_upper:
-            rest_after_prev_hours = (start_dt - e.end).total_seconds() / 3600.0
-            rest_before_next_hours = (e.start - end_dt).total_seconds() / 3600.0
-            if (-0.1 < rest_after_prev_hours < 12) or (-0.1 < rest_before_next_hours < 12):
-                return False
+        # Enforce >=12h rest between shifts inside the same block
+        for e in events:
+            if (e.extendedProps.get("provider") or "").upper() == p_upper:
+                rest_after_prev_hours = (start_dt - e.end).total_seconds() / 3600.0
+                rest_before_next_hours = (e.start - end_dt).total_seconds() / 3600.0
+                if (-0.1 < rest_after_prev_hours < 12) or (-0.1 < rest_before_next_hours < 12):
+                    return False
+        
         return True
 
     def score(provider_id: str, day: date, shift_key: str) -> float:
@@ -918,6 +914,9 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
     # ---------- build schedule ----------
     total_assignments = 0
+    
+
+    
     for current_day in days:
         for shift_key in stypes:
             capacity = cap_map.get(shift_key, 1)
@@ -947,7 +946,7 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
                 if shift_key == "N12":
                     nights[best] += 1
 
-    st.write(f"Debug assign_greedy: Made {total_assignments} assignments, returning {len(events)} events")
+
     return events
 
 # -------------------------
@@ -1883,16 +1882,12 @@ def main():
                 if not providers:
                     st.warning("Add providers first.")
                 else:
-                    st.write(f"Debug: Generating for {len(providers)} providers: {providers}")
                     rules = RuleConfig(**st.session_state.rules)
                     days = make_month_days(st.session_state.month.year, st.session_state.month.month)
-                    st.write(f"Debug: Generating for {len(days)} days in {st.session_state.month}")
                     # Generate new events using the greedy algorithm
                     new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
-                    st.write(f"Debug: Generated {len(new_events)} events from assign_greedy")
                     # Convert SEvent objects to dictionary format for calendar
                     st.session_state.events = [_event_to_dict(e) for e in new_events]
-                    st.write(f"Debug: Converted to {len(st.session_state.events)} dictionary events")
                     st.session_state.comments = {}
                     st.success(f"Draft schedule generated with {len(st.session_state.events)} events!")
         with g2:
