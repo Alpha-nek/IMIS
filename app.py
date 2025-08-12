@@ -75,6 +75,44 @@ APP_PROVIDER_INITIALS = [
 
 DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2, "APP": 2}
 
+# Holiday rules - reduced capacity on major holidays
+HOLIDAY_RULES = {
+    "thanksgiving": {
+        "date_func": lambda year: date(year, 11, 4) + timedelta(days=(3 - date(year, 11, 4).weekday()) % 7 + 21),  # 4th Thursday
+        "capacity_multiplier": 0.5,  # 50% of normal capacity
+        "description": "Thanksgiving Day"
+    },
+    "christmas": {
+        "date_func": lambda year: date(year, 12, 25),
+        "capacity_multiplier": 0.3,  # 30% of normal capacity
+        "description": "Christmas Day"
+    },
+    "new_years": {
+        "date_func": lambda year: date(year, 1, 1),
+        "capacity_multiplier": 0.4,  # 40% of normal capacity
+        "description": "New Year's Day"
+    }
+}
+
+def is_holiday(check_date: date) -> Optional[Dict]:
+    """Check if a date is a holiday and return holiday info if so"""
+    for holiday_name, holiday_info in HOLIDAY_RULES.items():
+        holiday_date = holiday_info["date_func"](check_date.year)
+        if check_date == holiday_date:
+            return {
+                "name": holiday_name,
+                "description": holiday_info["description"],
+                "capacity_multiplier": holiday_info["capacity_multiplier"]
+            }
+    return None
+
+def get_holiday_adjusted_capacity(base_capacity: int, check_date: date) -> int:
+    """Get capacity adjusted for holidays"""
+    holiday_info = is_holiday(check_date)
+    if holiday_info:
+        return max(1, int(base_capacity * holiday_info["capacity_multiplier"]))
+    return base_capacity
+
 
 def _normalize_initials_list(items):
     return sorted({str(x).strip().upper() for x in items if str(x).strip()})
@@ -1042,11 +1080,15 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     
     for current_day in days:
         for shift_key in stypes:
-            # Use dynamic capacity for APP shifts
+            # Get base capacity
             if shift_key == "APP":
-                capacity = get_app_shift_capacity(current_day)
+                base_capacity = get_app_shift_capacity(current_day)
             else:
-                capacity = cap_map.get(shift_key, 1)
+                base_capacity = cap_map.get(shift_key, 1)
+            
+            # Apply holiday adjustments
+            capacity = get_holiday_adjusted_capacity(base_capacity, current_day)
+            
             for _ in range(capacity):
                 candidates = [prov for prov in providers_shuffled if ok(prov, current_day, shift_key)]
                 if not candidates:
@@ -1232,6 +1274,22 @@ def render_calendar():
             st.rerun()
     with col4:
         st.caption("💡 Navigate to change which month the Generate button will create schedules for")
+    
+    # Holiday indicator for current month
+    current_month_holidays = []
+    for day in range(1, 32):  # Check all possible days
+        try:
+            check_date = date(st.session_state.month.year, st.session_state.month.month, day)
+            holiday_info = is_holiday(check_date)
+            if holiday_info:
+                current_month_holidays.append((day, holiday_info))
+        except ValueError:
+            break  # Invalid date (e.g., Feb 30)
+    
+    if current_month_holidays:
+        st.info("🎄 **Holiday Schedule**: Reduced capacity will be applied on:")
+        for day, holiday_info in current_month_holidays:
+            st.write(f"• **{holiday_info['description']}** (Day {day}): {holiday_info['capacity_multiplier']*100:.0f}% of normal capacity")
     
     if st_calendar is None:
         st.warning("streamlit-calendar is not installed or failed to import. Please install and restart.")
@@ -1790,14 +1848,19 @@ def schedule_grid_view():
                         shift_types_in_col.add(rm["skey"])
                 
                 # Set options based on shift types in this column
-                if "APP" in shift_types_in_col:
-                    # If APP shifts are available, only APP providers can be assigned
+                if "APP" in shift_types_in_col and len(shift_types_in_col) == 1:
+                    # If ONLY APP shifts are available, only APP providers can be assigned
                     options = [""] + app_provs
                     help_text = f"Assignments for day {c} (APP providers only)"
-                else:
-                    # All other shifts - only physician providers
+                elif "APP" not in shift_types_in_col:
+                    # If NO APP shifts are available, only physician providers
                     options = [""] + physician_provs
                     help_text = f"Assignments for day {c} (Physicians only)"
+                else:
+                    # Mixed shift types - allow both provider types
+                    all_providers = physician_provs + app_provs
+                    options = [""] + sorted(all_providers)
+                    help_text = f"Assignments for day {c} (All providers)"
                 
                 col_config[c] = st.column_config.SelectboxColumn(
                     options=options,
@@ -1843,6 +1906,34 @@ def schedule_grid_view():
         with col2:
             if st.button("📁 Load Saved Month"):
                 load_month_from_file(year, month)
+        
+        # Shift Swapping Functionality
+        st.subheader("🔄 Shift Swapping")
+        st.caption("Swap shifts between providers for the selected month")
+        
+        # Get all providers for swapping
+        all_providers = sorted(physician_provs + app_provs)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            provider1 = st.selectbox("Provider 1", options=all_providers, key="swap_provider1")
+        with col2:
+            day1 = st.selectbox("Day 1", options=day_cols, key="swap_day1")
+        with col3:
+            provider2 = st.selectbox("Provider 2", options=all_providers, key="swap_provider2")
+        with col4:
+            day2 = st.selectbox("Day 2", options=day_cols, key="swap_day2")
+        
+        if st.button("🔄 Execute Shift Swap", help="Swap shifts between the selected providers and days"):
+            if provider1 == provider2 and day1 == day2:
+                st.warning("⚠️ Please select different providers or days for swapping")
+            else:
+                success = execute_shift_swap(provider1, int(day1), provider2, int(day2), year, month)
+                if success:
+                    st.success("✅ Shift swap completed successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Shift swap failed. Check the console for details.")
 
 def apply_grid_to_calendar(edited_grid, target_year, target_month, row_meta=None):
     """Apply grid changes to calendar events"""
@@ -2332,8 +2423,6 @@ def main():
                         
                         # Provider shift counts in a nice table
                         if provider_counts and len(provider_counts) > 0:
-                            st.write("**Shift Distribution:**")
-                            
                             # Create a DataFrame for better display
                             import pandas as pd
                             stats_df = pd.DataFrame([
@@ -2387,25 +2476,15 @@ def main():
                         # Create a nice summary
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.write("**Shift Distribution:**")
-                            for provider, count in sorted(provider_counts.items()):
-                                st.write(f"• **{provider}**: {count} shifts")
-                        
-                        with col2:
                             st.write("**Summary:**")
                             st.write(f"• Total events: {len(evs)}")
                             st.write(f"• Providers: {len(provider_counts)}")
                             st.write(f"• Average shifts: {sum(provider_counts.values()) / len(provider_counts):.1f}")
                         
-                        # Show a simple chart
-                        if len(provider_counts) > 1:
-                            st.subheader("📈 Shift Distribution Chart")
-                            import pandas as pd
-                            chart_df = pd.DataFrame([
-                                {"Provider": provider, "Shifts": count}
-                                for provider, count in sorted(provider_counts.items())
-                            ])
-                            st.bar_chart(chart_df.set_index("Provider"))
+                        with col2:
+                            st.write("**Provider Counts:**")
+                            for provider, count in sorted(provider_counts.items()):
+                                st.write(f"• **{provider}**: {count} shifts")
                     else:
                         st.warning("⚠️ No provider data available for statistics")
                         st.write("This might happen if:")
@@ -2574,6 +2653,49 @@ def main():
         st.header("📊 Schedule Grid View")
         st.caption("Edit assignments directly in the grid below")
         schedule_grid_view()
+
+def execute_shift_swap(provider1: str, day1: int, provider2: str, day2: int, year: int, month: int) -> bool:
+    """Execute a shift swap between two providers on different days"""
+    try:
+        # Normalize events
+        st.session_state.events = events_for_calendar(st.session_state.get("events", []))
+        
+        # Find events for the specified days and providers
+        events_to_swap = []
+        target_events = []
+        
+        for event in st.session_state.events:
+            ext = event.get("extendedProps", {})
+            event_provider = ext.get("provider", "").strip().upper()
+            try:
+                event_date = pd.to_datetime(event["start"]).date()
+            except Exception:
+                continue
+                
+            if event_date.year == year and event_date.month == month:
+                if event_date.day == day1 and event_provider == provider1:
+                    events_to_swap.append(event)
+                elif event_date.day == day2 and event_provider == provider2:
+                    target_events.append(event)
+        
+        if not events_to_swap or not target_events:
+            st.error(f"No shifts found for the specified providers and days")
+            return False
+        
+        # Swap the providers
+        for event in events_to_swap:
+            event["extendedProps"]["provider"] = provider2
+            event["title"] = event["title"].replace(provider1, provider2)
+        
+        for event in target_events:
+            event["extendedProps"]["provider"] = provider1
+            event["title"] = event["title"].replace(provider2, provider1)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Error during shift swap: {e}")
+        return False
 
 if __name__ == "__main__":
     main()
