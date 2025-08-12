@@ -2414,90 +2414,13 @@ def main():
                     
                     with tab_stats:
                         st.subheader("📈 Provider Statistics")
-                        
-                        # Debug information
-                        st.write(f"**Debug Info:**")
-                        st.write(f"• Total events: {len(evs)}")
-                        st.write(f"• Provider counts: {provider_counts}")
-                        st.write(f"• Number of providers: {len(provider_counts) if provider_counts else 0}")
-                        
-                        # Provider shift counts in a nice table
-                        if provider_counts and len(provider_counts) > 0:
-                            # Create a DataFrame for better display
-                            import pandas as pd
-                            stats_df = pd.DataFrame([
-                                {"Provider": provider, "Shifts": count}
-                                for provider, count in sorted(provider_counts.items())
-                            ])
-                            
-                            # Add violation count column
-                            stats_df["Violations"] = stats_df["Provider"].map(
-                                {p: len(v) for p, v in viols.items()}
-                            ).fillna(0).astype(int)
-                            
-                            # Color code the table
-                            def highlight_violations(row):
-                                if row["Violations"] > 0:
-                                    return ['background-color: #ffebee'] * len(row)
-                                return [''] * len(row)
-                            
-                            st.dataframe(
-                                stats_df.style.apply(highlight_violations, axis=1),
-                                use_container_width=True,
-                                hide_index=True
-                            )
-                            
-                            # Summary statistics
-                            st.write("**Summary:**")
-                            st.write(f"• Average shifts per provider: {sum(provider_counts.values()) / len(provider_counts):.1f}")
-                            st.write(f"• Providers with violations: {len(viols)}")
-                            st.write(f"• Total violations: {sum(len(v) for v in viols.values())}")
-                        else:
-                            st.warning("⚠️ No provider data available for statistics")
-                            st.write("This might happen if:")
-                            st.write("• No events have been generated yet")
-                            st.write("• Events don't have provider information")
-                            st.write("• Events are not in the expected format")
-                            
-                            # Show sample events for debugging
-                            if evs:
-                                st.write("**Sample Events:**")
-                                for i, ev in enumerate(evs[:3]):  # Show first 3 events
-                                    provider = ev.extendedProps.get("provider", "NO_PROVIDER")
-                                    st.write(f"• Event {i+1}: Provider = '{provider}'")
+                        st.info("Provider statistics have been removed as requested.")
                 else:
                     # No violations - show success with details
                     st.success("🎉 **Schedule is Valid!** No rule violations detected.")
                     
-                    # Show provider statistics
-                    if provider_counts and len(provider_counts) > 0:
-                        st.subheader("📊 Provider Statistics")
-                        
-                        # Create a nice summary
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write("**Summary:**")
-                            st.write(f"• Total events: {len(evs)}")
-                            st.write(f"• Providers: {len(provider_counts)}")
-                            st.write(f"• Average shifts: {sum(provider_counts.values()) / len(provider_counts):.1f}")
-                        
-                        with col2:
-                            st.write("**Provider Counts:**")
-                            for provider, count in sorted(provider_counts.items()):
-                                st.write(f"• **{provider}**: {count} shifts")
-                    else:
-                        st.warning("⚠️ No provider data available for statistics")
-                        st.write("This might happen if:")
-                        st.write("• No events have been generated yet")
-                        st.write("• Events don't have provider information")
-                        st.write("• Events are not in the expected format")
-                        
-                        # Show sample events for debugging
-                        if evs:
-                            st.write("**Sample Events:**")
-                            for i, ev in enumerate(evs[:3]):  # Show first 3 events
-                                provider = ev.extendedProps.get("provider", "NO_PROVIDER")
-                                st.write(f"• Event {i+1}: Provider = '{provider}'")
+                    # Provider statistics removed as requested
+                    st.info("Provider statistics have been removed as requested.")
         with g3:
             if st.button("🗑️ Clear All", help="Clear all events"):
                 st.session_state.events = []
