@@ -331,6 +331,7 @@ def init_session_state():
     st.session_state.setdefault("highlight_provider", "")
     st.session_state.setdefault("rules", RuleConfig().model_dump())
     st.session_state.setdefault("providers_loaded", False)
+    st.session_state.setdefault("generation_count", 0)
 
 
 def recommended_max_shifts_for_month() -> int:
@@ -938,55 +939,58 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
         except Exception:
             pass
 
-        # Shift type consistency within blocks scoring
+        # Shift type consistency within blocks scoring - ENHANCED
         try:
-            pr = prov_rules.get(provider_id, {}) or {}
-            if pr.get("prefer_shift_consistency", False):
-                consistency_strength = pr.get("shift_consistency_strength", 3)
+            # Always enforce shift consistency within blocks (not just when provider preference is set)
+            ds = provider_days(provider_id)
+            if ds:
+                # Find the block this day would be part of
+                left_run = left_run_len(ds, day)
+                right_run = right_run_len(ds, day)
                 
-                # Check if this shift type matches the existing block
-                ds = provider_days(provider_id)
-                if ds:
-                    # Find the block this day would be part of
-                    left_run = left_run_len(ds, day)
-                    right_run = right_run_len(ds, day)
+                # Check shifts in the existing block
+                block_start = day - timedelta(days=left_run)
+                block_end = day + timedelta(days=right_run)
+                
+                # Get shift types in the existing block
+                block_shift_types = set()
+                for ev in events:
+                    if (ev.extendedProps.get("provider") or "").upper() == provider_id.upper():
+                        ev_date = ev.start.date()
+                        if block_start <= ev_date <= block_end:
+                            block_shift_types.add(ev.extendedProps.get("shift_key"))
+                
+                # Classify shift types
+                night_shifts = {"N12", "NB"}  # Night shifts
+                day_shifts = {"R12", "A12", "A10"}  # Day shifts
+                
+                current_shift_type = "night" if shift_key in night_shifts else "day"
+                
+                # Check if block is consistent
+                block_has_nights = any(s in night_shifts for s in block_shift_types)
+                block_has_days = any(s in day_shifts for s in block_shift_types)
+                
+                # Strong preference for shift consistency within blocks
+                if block_has_nights and block_has_days:
+                    # Mixed block - strong penalty for adding different type
+                    if (current_shift_type == "night" and not block_has_nights) or \
+                       (current_shift_type == "day" and not block_has_days):
+                        sc -= 5.0  # Strong penalty for breaking consistency
+                elif block_has_nights and current_shift_type == "day":
+                    # Adding day shift to night block - very strong penalty
+                    sc -= 8.0
+                elif block_has_days and current_shift_type == "night":
+                    # Adding night shift to day block - very strong penalty
+                    sc -= 8.0
+                else:
+                    # Consistent block - strong bonus
+                    sc += 3.0
                     
-                    # Check shifts in the existing block
-                    block_start = day - timedelta(days=left_run)
-                    block_end = day + timedelta(days=right_run)
-                    
-                    # Get shift types in the existing block
-                    block_shift_types = set()
-                    for ev in events:
-                        if (ev.extendedProps.get("provider") or "").upper() == provider_id.upper():
-                            ev_date = ev.start.date()
-                            if block_start <= ev_date <= block_end:
-                                block_shift_types.add(ev.extendedProps.get("shift_key"))
-                    
-                    # Classify shift types
-                    night_shifts = {"N12", "NB"}  # Night shifts
-                    day_shifts = {"R12", "A12", "A10"}  # Day shifts
-                    
-                    current_shift_type = "night" if shift_key in night_shifts else "day"
-                    
-                    # Check if block is consistent
-                    block_has_nights = any(s in night_shifts for s in block_shift_types)
-                    block_has_days = any(s in day_shifts for s in block_shift_types)
-                    
-                    if block_has_nights and block_has_days:
-                        # Mixed block - penalize if adding different type
-                        if (current_shift_type == "night" and not block_has_nights) or \
-                           (current_shift_type == "day" and not block_has_days):
-                            sc -= consistency_strength * 0.5
-                    elif block_has_nights and current_shift_type == "day":
-                        # Adding day shift to night block
-                        sc -= consistency_strength * 0.8
-                    elif block_has_days and current_shift_type == "night":
-                        # Adding night shift to day block
-                        sc -= consistency_strength * 0.8
-                    else:
-                        # Consistent block - bonus
-                        sc += consistency_strength * 0.3
+                # Additional bonus for extending existing consistent blocks
+                if left_run > 0 or right_run > 0:
+                    if (current_shift_type == "night" and block_has_nights and not block_has_days) or \
+                       (current_shift_type == "day" and block_has_days and not block_has_nights):
+                        sc += 2.0  # Bonus for extending consistent block
         except Exception:
             pass
 
@@ -996,16 +1000,29 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
     # ---------- build schedule ----------
     total_assignments = 0
     
-
+    # Add randomness to provider selection for different schedules
+    import random
+    providers_shuffled = providers.copy()
+    random.shuffle(providers_shuffled)
     
     for current_day in days:
         for shift_key in stypes:
             capacity = cap_map.get(shift_key, 1)
             for _ in range(capacity):
-                candidates = [prov for prov in providers if ok(prov, current_day, shift_key)]
+                candidates = [prov for prov in providers_shuffled if ok(prov, current_day, shift_key)]
                 if not candidates:
                     continue
-                best = max(candidates, key=lambda prov: score(prov, current_day, shift_key))
+                # Add some randomness to candidate selection when scores are close
+                if len(candidates) > 1:
+                    scores = [(prov, score(prov, current_day, shift_key)) for prov in candidates]
+                    scores.sort(key=lambda x: x[1], reverse=True)
+                    # If top 2 scores are within 10% of each other, randomly choose between them
+                    if len(scores) >= 2 and scores[0][1] > 0 and (scores[0][1] - scores[1][1]) / scores[0][1] < 0.1:
+                        best = random.choice(scores[:2])[0]
+                    else:
+                        best = scores[0][0]
+                else:
+                    best = candidates[0]
                 total_assignments += 1
 
                 sdef = sdefs[shift_key]
@@ -1910,6 +1927,10 @@ def main():
                 st.warning("No providers loaded. Please check the Providers tab.")
                 st.session_state.highlight_provider = ""
         
+        # Generation info
+        if st.session_state.get("generation_count", 0) > 0:
+            st.caption(f"📊 Generated {st.session_state.generation_count} schedule(s) so far. Each generation creates a different schedule!")
+        
         # Action buttons
         g1, g2, g3 = st.columns(3)
         with g1:
@@ -1923,14 +1944,20 @@ def main():
                     else:
                         st.info(f"🔄 Generating schedule for {len(providers)} providers...")
                         rules = RuleConfig(**st.session_state.rules)
-                        # Generate days for the next 3 months starting from current month
-                        days = make_three_months_days(st.session_state.month.year, st.session_state.month.month)
+                        # Generate days for the next 3 months starting from next month
+                        next_month = st.session_state.month + relativedelta(months=1)
+                        days = make_three_months_days(next_month.year, next_month.month)
+                        # Add randomness seed for different schedules on each generation
+                        import random
+                        random_seed = random.randint(1, 10000)
+                        random.seed(random_seed)
                         # Generate new events using the greedy algorithm
                         new_events = assign_greedy(providers, days, st.session_state.shift_types, rules)
                         # Convert SEvent objects to dictionary format for calendar
                         st.session_state.events = [_event_to_dict(e) for e in new_events]
                         st.session_state.comments = {}
-                        st.success(f"✅ Draft schedule generated for 3 months with {len(new_events)} events!")
+                        st.session_state.generation_count += 1
+                        st.success(f"✅ Draft schedule generated for 3 months with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
@@ -1957,11 +1984,12 @@ def main():
         # Global rules section
         st.subheader("📋 Scheduling Rules")
         
-        # Info about dynamic minimum shifts
-        st.info("💡 **Dynamic Minimum Shifts**: The system automatically enforces minimum shifts based on month length:\n"
-                "• 30-day months: 15 shifts minimum\n"
-                "• 31-day months: 16 shifts minimum\n"
-                "• February (28/29 days): 14 shifts minimum")
+        # Info about dynamic minimum shifts and enhanced features
+        st.info("💡 **Enhanced Features**:\n"
+                "• **Dynamic Minimum Shifts**: Automatically enforced based on month length\n"
+                "• **Shift Consistency**: Providers stay on same shift type within blocks\n"
+                "• **Random Generation**: Each generate creates a different schedule\n"
+                "• **3-Month Planning**: Generates for next 3 months from current month")
         
         rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
         
