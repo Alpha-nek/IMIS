@@ -1181,6 +1181,7 @@ def render_calendar():
         "initialView": "dayGridMonth",
         "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,timeGridWeek"},
         "eventTimeFormat": {"hour": "2-digit", "minute": "2-digit", "hour12": False},
+        "datesSet": True,  # Enable date change events
     }
 
     # Custom CSS to dim non-highlighted events
@@ -1211,6 +1212,28 @@ def render_calendar():
         options=cal_options,
         key="calendar",
     )
+    
+    # Handle calendar navigation - update the displayed month
+    if state.get("datesSet"):
+        # Extract the new date range from the calendar navigation
+        dates_info = state["datesSet"]
+        start_date_str = dates_info.get("startStr", "")
+        if start_date_str:
+            try:
+                start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
+                # Update to the first day of the month
+                new_month = date(start_date.year, start_date.month, 1)
+                if new_month != st.session_state.month:
+                    st.session_state.month = new_month
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error parsing date: {e}")
+    
+    # Also handle view changes (month/week view)
+    if state.get("viewChange"):
+        view_info = state["viewChange"]
+        st.session_state.setdefault("calendar_view", "dayGridMonth")
+        st.session_state.calendar_view = view_info.get("viewType", "dayGridMonth")
 
     # Handle interactions
     if state.get("eventClick"):
@@ -2138,7 +2161,7 @@ def main():
                         st.session_state.events = [_event_to_dict(e) for e in new_events]
                         st.session_state.comments = {}
                         st.session_state.generation_count += 1
-                        st.success(f"✅ Draft schedule generated for {st.session_state.month.strftime('%B %Y')} with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
+                        st.success(f"✅ Draft schedule generated for {st.session_state.month.strftime('%B %Y')} (displayed month) with {len(new_events)} events! (Generation #{st.session_state.generation_count}, Seed: {random_seed})")
         with g2:
             if st.button("✅ Validate Schedule", help="Check for rule violations"):
                 rules = RuleConfig(**st.session_state.rules)
@@ -2186,7 +2209,7 @@ def main():
                 "• **Dynamic Minimum Shifts**: Automatically enforced based on month length\n"
                 "• **Shift Consistency**: Providers stay on same shift type within blocks\n"
                 "• **Random Generation**: Each generate creates a different schedule\n"
-                "• **Single Month Generation**: Generates for the current month displayed")
+                "• **Smart Month Generation**: Generates for the month currently displayed in calendar")
         
         rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
         
