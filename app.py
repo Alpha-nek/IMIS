@@ -796,6 +796,10 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
             # Get provider rules
             pr = prov_rules.get(p_upper, {}) or {}
             
+            # Debug: Show provider rules being used
+            if pr:
+                st.caption(f"🔍 Debug: Provider {p_upper} rules: {pr}")
+            
             # Check if this is an APP provider
             is_app_provider = p_upper in [ap.upper() for ap in APP_PROVIDER_INITIALS]
             
@@ -1429,11 +1433,14 @@ def render_calendar():
             all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
             app_providers = sorted(APP_PROVIDER_INITIALS)
             
+            # Filter out APP providers from the physician list
+            physician_providers = [p for p in all_providers if p not in app_providers]
+            
             # Create provider options with separators
             provider_options = ["(Select Provider)"]
-            if all_providers:
+            if physician_providers:
                 provider_options.append("--- Physicians ---")
-                provider_options.extend(all_providers)
+                provider_options.extend(physician_providers)
             if app_providers:
                 provider_options.append("--- APPs ---")
                 provider_options.extend(app_providers)
@@ -1729,7 +1736,7 @@ def provider_rules_panel():
     st.markdown(f"**Current month shifts:** {shift_count} | **Weekend shifts:** {weekend_count}")
 
     # Max shifts and nights
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.caption(f"Recommended default this month: **{base_default}**")
         max_sh = st.number_input(
@@ -1739,6 +1746,13 @@ def provider_rules_panel():
             key=f"pr_max_{sel}",
         )
     with c2:
+        min_sh = st.number_input(
+            "Min shifts (this month)",
+            1, 50,
+            value=int(curr.get("min_shifts", get_min_shifts_for_month(st.session_state.month.year, st.session_state.month.month))),
+            key=f"pr_min_{sel}",
+        )
+    with c3:
         global_rules = get_global_rules()
         default_max_n = global_rules.max_nights_per_provider if global_rules.max_nights_per_provider is not None else 0
         max_n = st.number_input(
@@ -1854,6 +1868,7 @@ def provider_rules_panel():
 
         # Always save all provider-specific rules
         new_entry["max_shifts"] = int(max_sh)
+        new_entry["min_shifts"] = int(min_sh)
         new_entry["max_nights"] = int(max_n)
         new_entry["require_weekend"] = (wk_choice == "Require at least one")
         new_entry["min_rest_days"] = float(min_rest_days)
@@ -2523,18 +2538,21 @@ def main():
                 physician_provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist())
                 app_provs = sorted(APP_PROVIDER_INITIALS)
                 
-                # Create options with separators
-                options = ["(All providers)"]
-                if physician_provs:
-                    options.append("--- Physicians ---")
-                    options.extend(physician_provs)
-                if app_provs:
-                    options.append("--- APPs ---")
-                    options.extend(app_provs)
+                # Filter out APP providers from the physician list
+                physician_providers = [p for p in physician_provs if p not in app_provs]
                 
-                default = st.session_state.highlight_provider if st.session_state.highlight_provider in options else "(All providers)"
-                idx = options.index(default) if default in options else 0
-                sel = st.selectbox("Highlight provider", options=options, index=idx)
+                # Create provider options with separators
+                provider_options = ["(Select Provider)"]
+                if physician_providers:
+                    provider_options.append("--- Physicians ---")
+                    provider_options.extend(physician_providers)
+                if app_providers:
+                    provider_options.append("--- APPs ---")
+                    provider_options.extend(app_provs)
+                
+                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provider_options else "(All providers)"
+                idx = provider_options.index(default) if default in provider_options else 0
+                sel = st.selectbox("Highlight provider", options=provider_options, index=idx)
                 st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
             else:
                 st.warning("No providers loaded. Please check the Providers tab.")
@@ -3077,11 +3095,14 @@ def provider_google_calendar_sync():
     all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
     app_providers = sorted(APP_PROVIDER_INITIALS)
     
+    # Filter out APP providers from the physician list
+    physician_providers = [p for p in all_providers if p not in app_providers]
+    
     # Create provider options with separators
     provider_options = ["(Select Provider)"]
-    if all_providers:
+    if physician_providers:
         provider_options.append("--- Physicians ---")
-        provider_options.extend(all_providers)
+        provider_options.extend(physician_providers)
     if app_providers:
         provider_options.append("--- APPs ---")
         provider_options.extend(app_providers)
