@@ -253,6 +253,7 @@ def identify_coverage_gaps(events: List[SEvent], shift_types: List[Dict], shift_
     gaps = []
     for date, day_coverage in coverage_by_day.items():
         for shift_type, providers in day_coverage.items():
+            # Get the actual expected capacity from session state
             expected_capacity = shift_capacity.get(shift_type, 1)
             
             # Special handling for APP shifts
@@ -787,25 +788,36 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
     # Validate each provider's events per month
     for p_upper, month_events in provider_month_events.items():
         for (year, month), month_evs in month_events.items():
-            # Get provider rules and adjust for vacation
+            # Get provider rules
             pr = prov_rules.get(p_upper, {}) or {}
-            eff_max = pr.get("max_shifts", recommended_max_shifts_for_month())
-            vacation_weeks = _provider_vacation_weeks_in_month(pr, year, month)
-            if vacation_weeks > 0:
-                eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
             
-            # Validate max shifts for this month
-            if eff_max is not None and len(month_evs) > eff_max:
-                violations.setdefault(p_upper, []).append(
-                    f"Month {year}-{month:02d}: {len(month_evs)} shifts exceeds max {eff_max}"
-                )
+            # Check if this is an APP provider
+            is_app_provider = p_upper in [ap.upper() for ap in APP_PROVIDER_INITIALS]
+            
+            if is_app_provider:
+                # APP providers don't have max shift requirements - they just fill available spots
+                # But we still check for other rules like rest periods
+                pass
+            else:
+                # Regular providers: check max shifts
+                eff_max = pr.get("max_shifts", recommended_max_shifts_for_month())
+                vacation_weeks = _provider_vacation_weeks_in_month(pr, year, month)
+                if vacation_weeks > 0:
+                    eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
+                
+                # Validate max shifts for this month
+                if eff_max is not None and len(month_evs) > eff_max:
+                    violations.setdefault(p_upper, []).append(
+                        f"Month {year}-{month:02d}: {len(month_evs)} shifts exceeds max {eff_max}"
+                    )
 
-            # Validate minimum shifts for this month
-            min_required = get_min_shifts_for_month(year, month)
-            if len(month_evs) < min_required:
-                violations.setdefault(p_upper, []).append(
-                    f"Month {year}-{month:02d}: {len(month_evs)} shifts below minimum {min_required}"
-                )
+            # Validate minimum shifts for this month (only for regular providers)
+            if not is_app_provider:
+                min_required = get_min_shifts_for_month(year, month)
+                if len(month_evs) < min_required:
+                    violations.setdefault(p_upper, []).append(
+                        f"Month {year}-{month:02d}: {len(month_evs)} shifts below minimum {min_required}"
+                    )
 
     # Validate rest periods and block rules
     for ev in events:
@@ -2560,29 +2572,58 @@ def main():
                             st.caption(f"📊 **Debug Info**: Analyzing {len(evs)} events across {len(set(event.start.date() for event in evs))} unique days")
                             
                             if gaps:
-                                gaps_df = pd.DataFrame(gaps)
-                                # Ensure date column is properly converted to datetime
-                                gaps_df["date"] = pd.to_datetime(gaps_df["date"])
-                                gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
-                                gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
-                                gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
-                                gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
-                                gaps_df = gaps_df.sort_values("Date")
+                                # Group gaps by date for better display
+                                gaps_by_date = {}
+                                for gap in gaps:
+                                    date_str = gap["date"].strftime("%Y-%m-%d")
+                                    if date_str not in gaps_by_date:
+                                        gaps_by_date[date_str] = []
+                                    gaps_by_date[date_str].append(gap)
                                 
-                                st.dataframe(gaps_df, use_container_width=True)
+                                # Create a summary table
+                                summary_data = []
+                                for date_str, date_gaps in gaps_by_date.items():
+                                    # Get the date object from the first gap in this date group
+                                    date_obj = date_gaps[0]["date"]
+                                    day_name = date_obj.strftime("%A")
+                                    total_shortage = sum(gap["shortage"] for gap in date_gaps)
+                                    missing_shifts = [f"{gap['shift_type']} (-{gap['shortage']})" for gap in date_gaps]
+                                    summary_data.append({
+                                        "Date": date_str,
+                                        "Day": day_name,
+                                        "Total Shortage": total_shortage,
+                                        "Missing Shifts": ", ".join(missing_shifts)
+                                    })
+                                
+                                summary_df = pd.DataFrame(summary_data)
+                                summary_df = summary_df.sort_values("Date")
+                                
+                                st.dataframe(summary_df, use_container_width=True)
                                 
                                 # Summary of gaps
-                                st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                                total_gaps = len(gaps)
+                                total_shortage = sum(gap["shortage"] for gap in gaps)
+                                st.info(f"📋 **Coverage Summary**: {len(gaps_by_date)} days have insufficient coverage ({total_shortage} total missing providers)")
                                 
                                 # Show detailed breakdown
                                 with st.expander("🔍 Detailed Coverage Analysis"):
                                     st.write("**Shift Type Breakdown:**")
-                                    shift_breakdown = gaps_df.groupby("Shift Type").agg({
-                                        "Expected": "sum",
-                                        "Actual": "sum", 
-                                        "Shortage": "sum"
+                                    shift_breakdown = pd.DataFrame(gaps).groupby("shift_type").agg({
+                                        "expected": "sum",
+                                        "actual": "sum", 
+                                        "shortage": "sum"
                                     }).reset_index()
                                     st.dataframe(shift_breakdown, use_container_width=True)
+                                    
+                                    # Show detailed gaps table
+                                    st.write("**Detailed Gaps:**")
+                                    gaps_df = pd.DataFrame(gaps)
+                                    gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
+                                    gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
+                                    gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
+                                    gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
+                                    gaps_df = gaps_df.sort_values("Date")
+                                    st.dataframe(gaps_df, use_container_width=True)
                             else:
                                 st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
                         else:
@@ -2624,29 +2665,58 @@ def main():
                         st.caption(f"📊 **Debug Info**: Analyzing {len(evs)} events across {len(set(event.start.date() for event in evs))} unique days")
                         
                         if gaps:
-                            gaps_df = pd.DataFrame(gaps)
-                            # Ensure date column is properly converted to datetime
-                            gaps_df["date"] = pd.to_datetime(gaps_df["date"])
-                            gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
-                            gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
-                            gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
-                            gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
-                            gaps_df = gaps_df.sort_values("Date")
+                            # Group gaps by date for better display
+                            gaps_by_date = {}
+                            for gap in gaps:
+                                date_str = gap["date"].strftime("%Y-%m-%d")
+                                if date_str not in gaps_by_date:
+                                    gaps_by_date[date_str] = []
+                                gaps_by_date[date_str].append(gap)
                             
-                            st.dataframe(gaps_df, use_container_width=True)
+                            # Create a summary table
+                            summary_data = []
+                            for date_str, date_gaps in gaps_by_date.items():
+                                # Get the date object from the first gap in this date group
+                                date_obj = date_gaps[0]["date"]
+                                day_name = date_obj.strftime("%A")
+                                total_shortage = sum(gap["shortage"] for gap in date_gaps)
+                                missing_shifts = [f"{gap['shift_type']} (-{gap['shortage']})" for gap in date_gaps]
+                                summary_data.append({
+                                    "Date": date_str,
+                                    "Day": day_name,
+                                    "Total Shortage": total_shortage,
+                                    "Missing Shifts": ", ".join(missing_shifts)
+                                })
+                            
+                            summary_df = pd.DataFrame(summary_data)
+                            summary_df = summary_df.sort_values("Date")
+                            
+                            st.dataframe(summary_df, use_container_width=True)
                             
                             # Summary of gaps
-                            st.info(f"📋 **Coverage Summary**: {len(gaps)} days have insufficient coverage")
+                            total_gaps = len(gaps)
+                            total_shortage = sum(gap["shortage"] for gap in gaps)
+                            st.info(f"📋 **Coverage Summary**: {len(gaps_by_date)} days have insufficient coverage ({total_shortage} total missing providers)")
                             
                             # Show detailed breakdown
                             with st.expander("🔍 Detailed Coverage Analysis"):
                                 st.write("**Shift Type Breakdown:**")
-                                shift_breakdown = gaps_df.groupby("Shift Type").agg({
-                                    "Expected": "sum",
-                                    "Actual": "sum", 
-                                    "Shortage": "sum"
+                                shift_breakdown = pd.DataFrame(gaps).groupby("shift_type").agg({
+                                    "expected": "sum",
+                                    "actual": "sum", 
+                                    "shortage": "sum"
                                 }).reset_index()
                                 st.dataframe(shift_breakdown, use_container_width=True)
+                                
+                                # Show detailed gaps table
+                                st.write("**Detailed Gaps:**")
+                                gaps_df = pd.DataFrame(gaps)
+                                gaps_df["Date"] = gaps_df["date"].dt.strftime("%Y-%m-%d")
+                                gaps_df["Day"] = gaps_df["date"].dt.strftime("%A")
+                                gaps_df = gaps_df[["Date", "Day", "shift_type", "expected", "actual", "shortage"]]
+                                gaps_df.columns = ["Date", "Day", "Shift Type", "Expected", "Actual", "Shortage"]
+                                gaps_df = gaps_df.sort_values("Date")
+                                st.dataframe(gaps_df, use_container_width=True)
                         else:
                             st.success("✅ **No coverage gaps detected!** All shifts are properly staffed.")
                     else:
