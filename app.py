@@ -70,7 +70,7 @@ DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2}
 
 
 def _normalize_initials_list(items):
-    return sorted({str(x).strip().upper() for x in items if str(x).strip()})
+    return sorted({str(x).strip().upper() for x in items if x is not None and str(x).strip()})
 
 
 
@@ -1125,8 +1125,11 @@ def _event_to_dict(e):
         return out
 
     # If it's an SEvent-like object
-    if hasattr(e, "to_json_event"):
-        return _event_to_dict(e.to_json_event())
+    try:
+        if hasattr(e, "to_json_event"):
+            return _event_to_dict(e.to_json_event())
+    except Exception:
+        pass
 
     # Best-effort generic object
     try:
