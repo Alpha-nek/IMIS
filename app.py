@@ -1549,6 +1549,8 @@ st.success("Saved provider rules.")
 
 def schedule_grid_view():
     st.subheader("Monthly Grid — Shifts × Days (one provider per cell)")
+    
+    import pandas as pd
 
     if not st.session_state.shift_types:
         st.info("No shift types configured.")
@@ -1589,11 +1591,47 @@ def schedule_grid_view():
         if 250 <= hue < 320:       return "🟣"
         return "🟤"
 
-    # month context
-    year  = st.session_state.month.year
-    month = st.session_state.month.month
-    days  = make_month_days(year, month)
+    # month context - allow viewing any month that has events
+    all_events = st.session_state.get("events", [])
+    
+    # Find all months that have events
+    months_with_events = set()
+    for e in all_events:
+        try:
+            d = pd.to_datetime(e["start"]).date()
+            months_with_events.add((d.year, d.month))
+        except Exception:
+            continue
+    
+    if not months_with_events:
+        st.info("No events found. Generate a schedule first.")
+        return
+    
+    # Default to current month, but allow selection
+    default_year, default_month = st.session_state.month.year, st.session_state.month.month
+    if (default_year, default_month) not in months_with_events:
+        # If current month has no events, pick the first available month
+        default_year, default_month = sorted(months_with_events)[0]
+    
+    # Month selector
+    col1, col2 = st.columns(2)
+    with col1:
+        year = st.selectbox("Year", options=sorted(set(y for y, m in months_with_events)), index=sorted(set(y for y, m in months_with_events)).index(default_year))
+    with col2:
+        month_options = [m for y, m in months_with_events if y == year]
+        month = st.selectbox("Month", options=month_options, index=month_options.index(default_month))
+    
+    days = make_month_days(year, month)
     day_cols = [str(d.day) for d in days]
+    
+    # Show summary of available months
+    month_names = []
+    for y, m in sorted(months_with_events):
+        month_name = date(y, m, 1).strftime('%B %Y')
+        month_names.append(month_name)
+    
+    st.caption(f"📅 Available months: {', '.join(month_names)}")
+    st.caption(f"📊 Viewing: {date(year, month, 1).strftime('%B %Y')} ({len(days)} days)")
 
     stypes  = st.session_state.shift_types
     cap_map = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
@@ -1629,6 +1667,7 @@ def schedule_grid_view():
             d = pd.to_datetime(e["start"]).date()
         except Exception:
             continue
+        # Filter to selected month
         if d.year != year or d.month != month:
             continue
         prov = (ext.get("provider") or "").strip().upper() or "UNASSIGNED"
