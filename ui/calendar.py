@@ -10,12 +10,23 @@ import json
 
 from models.data_models import SEvent
 
-def render_calendar(events: List[SEvent], height: int = 600) -> None:
+def render_calendar(events: List[Any], height: int = 600) -> None:
     """
     Render the calendar using Streamlit components.
+    Handles both SEvent objects and dictionaries.
     """
     # Convert events to JSON format
-    events_json = [event.to_json_event() for event in events]
+    events_json = []
+    for event in events:
+        if hasattr(event, 'to_json_event'):
+            # It's an SEvent object
+            events_json.append(event.to_json_event())
+        elif isinstance(event, dict):
+            # It's already a dictionary
+            events_json.append(event)
+        else:
+            # Unknown type, skip
+            continue
     
     # Calendar HTML
     calendar_html = f"""
@@ -94,4 +105,4 @@ def render_month_navigation() -> Tuple[int, int]:
             st.rerun()
     
     current_date = st.session_state.get("current_month", date.today())
-    return current_date.year, current_date.month#initial file
+    return current_date.year, current_date.month
