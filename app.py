@@ -20,10 +20,11 @@
 
 import uuid
 import json
+import os
+import calendar
 from datetime import datetime, date, timedelta, time
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
-import os
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -73,7 +74,6 @@ def _normalize_initials_list(items):
     return sorted({str(x).strip().upper() for x in items if str(x).strip()})
 
 
-
 class RuleConfig(BaseModel):
     # GLOBAL defaults
     min_shifts_per_provider: int = 15
@@ -103,55 +103,26 @@ class SEvent(BaseModel):
     title: str
     start: datetime
     end: datetime
-    allDay: bool = False
     backgroundColor: Optional[str] = None
-    borderColor: Optional[str] = None
     extendedProps: Dict[str, Any] = {}
 
-    def to_fc(self) -> Dict[str, Any]:
-        d = self.model_dump()
-        d["start"] = self.start.isoformat()
-        d["end"] = self.end.isoformat()
-        return d
+    def to_json_event(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start": self.start.isoformat(),
+            "end": self.end.isoformat(),
+            "backgroundColor": self.backgroundColor,
+            "extendedProps": self.extendedProps,
+        }
 
-import json
-from datetime import datetime
 
-def _ensure_iso(v):
-    if isinstance(v, str):
-        return v
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    if hasattr(v, "to_pydatetime"):
-        return v.to_pydatetime().isoformat()
-    return str(v) if v is not None else None
-
-def events_for_calendar(raw_events):
-    out = []
-    for e in (raw_events or []):
-        d = _event_to_dict(e)
-        if d is not None:
-            out.append(d)
-    return out
-# --- Month-aware defaults ---
-def _month_days_count() -> int:
-    m = st.session_state.month
-    import calendar
-    return calendar.monthrange(m.year, m.month)[1]
-
-def recommended_max_shifts_for_month() -> int:
-    import calendar
-    m = st.session_state.month
-    days = calendar.monthrange(m.year, m.month)[1]
-    if days == 31:
-        return 16
-    if days == 30:
-        return 15
-    return get_global_rules().max_shifts_per_provider
+# -------------------------
+# Utility Functions
+# -------------------------
 
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
-    import calendar
     days = calendar.monthrange(year, month)[1]
     if days == 31:
         return 16
@@ -164,7 +135,6 @@ def get_min_shifts_for_month(year: int, month: int) -> int:
 # --- Vacation helpers ---
 def _expand_vacation_dates(vacations: list) -> set:
     """Expand [{'start':'YYYY-MM-DD','end':'YYYY-MM-DD'}, ...] to a set of date objects."""
-    import pandas as pd
     out = set()
     for rng in vacations or []:
         try:
@@ -178,6 +148,7 @@ def _expand_vacation_dates(vacations: list) -> set:
             out.add(d.date())
     return out
 
+
 def _provider_has_vacation_in_month(pr: dict) -> bool:
     """True if any vacation day falls in the currently selected month."""
     if not pr:
@@ -190,6 +161,7 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
         if (d.year, d.month) == ym:
             return True
     return False
+
 
 def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
     """Count the number of vacation weeks a provider has in a specific month."""
@@ -235,26 +207,28 @@ def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
     
     return weeks
 
+
 def get_shift_label_maps():
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
     label_for_key = {s["key"]: s["label"] for s in stypes}
     key_for_label = {v: k for k, v in label_for_key.items()}
     return label_for_key, key_for_label
 
+
 def provider_weekend_count(p: str) -> int:
     """Count weekend shifts for a provider from current events."""
-    import pandas as pd
     events = st.session_state.get("events", [])
     return sum(1 for e in events
                if (e.get("extendedProps") or {}).get("provider") == p and 
                pd.to_datetime(e.get("start")).weekday() >= 5)
 
+
 def get_global_rules():
     return RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
 
+
 def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
     """Returns True if provider is unavailable (specific date or any vacation range) on 'day'."""
-    import pandas as pd
     pkey = (provider or "").strip().upper()
     pr = st.session_state.get("provider_rules", {}).get(pkey, {}) or {}
 
@@ -278,127 +252,159 @@ def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
             pass
     return False
 
+
 # -------------------------
 # State helpers
 # -------------------------
 
-    
 # --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
-    import pandas as pd
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
-    # --- Load persisted provider rules & caps from disk if present ---
-    try:
-        import os
-        data_dir = os.path.join(os.getcwd(), "data")
-        provider_rules_path = os.path.join(data_dir, "provider_rules.json")
-        
-        if os.path.exists(provider_rules_path):
-            with open(provider_rules_path) as _f:
-                loaded_rules = json.load(_f)
-                # Ensure we don't overwrite existing rules in session state
-                if "provider_rules" not in st.session_state:
-                    st.session_state["provider_rules"] = loaded_rules
-                else:
-                    # Merge loaded rules with existing ones
-                    st.session_state["provider_rules"].update(loaded_rules)
-            st.success(f"Loaded provider_rules.json from {data_dir} with {len(loaded_rules)} providers")
-        else:
-            st.info(f"No provider_rules.json found in {data_dir}; starting with empty map.")
-    except Exception as e:
-        st.error(f"Failed to load provider_rules.json: {e}; starting with empty map.")
-
-    try:
-        import os
-        data_dir = os.path.join(os.getcwd(), "data")
-        provider_caps_path = os.path.join(data_dir, "provider_caps.json")
-        
-        if os.path.exists(provider_caps_path):
-            with open(provider_caps_path) as _f:
-                st.session_state["provider_caps"] = json.load(_f)
-            st.success(f"Loaded provider_caps.json from {data_dir}")
-        else:
-            st.info(f"No provider_caps.json found in {data_dir}; starting with empty map.")
-    except Exception as e:
-        st.error(f"Failed to load provider_caps.json: {e}; starting with empty map.")
-
-     # Provider roster (preloaded with your list)
-    if "providers_df" not in st.session_state or st.session_state.get("providers_df") is None:
-        st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
-    else:
-        # Ensure normalization if present
-        df = st.session_state["providers_df"]
-        if df.empty:
-            st.session_state["providers_df"] = pd.DataFrame({"initials": _normalize_initials_list(PROVIDER_INITIALS_DEFAULT)})
-        else:
-            st.session_state["providers_df"] = pd.DataFrame({
-                "initials": _normalize_initials_list(df["initials"].tolist())
-            })
-    st.session_state.setdefault("rules", RuleConfig().model_dump())
-# migrate if missing/None
-    if st.session_state["rules"].get("max_block_size") is None:
-        st.session_state["rules"]["max_block_size"] = 7
-    # Migrate old hours-based field to days-based if present
-    _rules = st.session_state.get("rules", {})
-    if "min_rest_hours_between_shifts" in _rules and "min_rest_days_between_shifts" not in _rules:
+    
+    # Ensure data directory exists
+    data_dir = os.path.join(os.getcwd(), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # Load provider rules from file if it exists
+    provider_rules_path = os.path.join(data_dir, "provider_rules.json")
+    if os.path.exists(provider_rules_path):
         try:
-            _rules["min_rest_days_between_shifts"] = float(_rules.pop("min_rest_hours_between_shifts")) / 24.0
-        except Exception:
-            _rules["min_rest_days_between_shifts"] = 1.0
-    st.session_state["rules"] = _rules
+            with open(provider_rules_path, "r") as f:
+                loaded_rules = json.load(f)
+            # Merge with existing session state rules
+            existing_rules = st.session_state.get("provider_rules", {})
+            existing_rules.update(loaded_rules)
+            st.session_state["provider_rules"] = existing_rules
+        except Exception as e:
+            st.error(f"Failed to load provider_rules.json: {e}")
+    
+    # Load provider caps from file if it exists
+    provider_caps_path = os.path.join(data_dir, "provider_caps.json")
+    if os.path.exists(provider_caps_path):
+        try:
+            with open(provider_caps_path, "r") as f:
+                st.session_state["provider_caps"] = json.load(f)
+        except Exception as e:
+            st.error(f"Failed to load provider_caps.json: {e}")
 
-
+    # Initialize session state with defaults
+    st.session_state.setdefault("month", date.today().replace(day=1))
+    st.session_state.setdefault("providers_df", pd.DataFrame(columns=["initials"]))
     st.session_state.setdefault("shift_types", DEFAULT_SHIFT_TYPES.copy())
     st.session_state.setdefault("shift_capacity", DEFAULT_SHIFT_CAPACITY.copy())
-    st.session_state.setdefault(
-        "providers_df",
-        pd.DataFrame({"initials": sorted(set(PROVIDER_INITIALS_DEFAULT))})
-    )
+    st.session_state.setdefault("provider_caps", {})
+    st.session_state.setdefault("provider_rules", {})
+    st.session_state.setdefault("events", [])
+    st.session_state.setdefault("comments", {})
+    st.session_state.setdefault("highlight_provider", "")
     st.session_state.setdefault("rules", RuleConfig().model_dump())
-    st.session_state.setdefault("provider_rules", {})     # per-provider overrides & vacations
-    st.session_state.setdefault("provider_caps", {})      # per-provider allowed shift keys
-    st.session_state.setdefault("events", [])             # calendar events (JSON-safe dicts)
-    st.session_state.setdefault("comments", {})           # id -> list[str]
-    st.session_state.setdefault("month", date.today().replace(day=1))
-    st.session_state.setdefault("highlight_provider", "") # global selected provider
+
+
+def recommended_max_shifts_for_month() -> int:
+    """Recommended max shifts per provider for the current month."""
+    year = st.session_state.month.year
+    month = st.session_state.month.month
+    return get_min_shifts_for_month(year, month)
+
+
+def events_for_calendar(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert events to calendar-compatible format."""
+    return [_event_to_dict(e) for e in events]
+
+
+def _event_to_dict(e):
+    # Convert SEvent -> dict, and coerce datetimes to ISO strings
+    if isinstance(e, dict):
+        out = dict(e)
+        # start / end may be datetime or pandas Timestamp
+        for k in ("start", "end"):
+            v = out.get(k)
+            if isinstance(v, datetime):
+                out[k] = v.isoformat()
+            elif hasattr(v, "to_pydatetime"):  # pandas Timestamp
+                out[k] = v.to_pydatetime().isoformat()
+            elif isinstance(v, str):
+                # leave as-is
+                pass
+        # ensure extendedProps exists
+        out.setdefault("extendedProps", {})
+        return out
+
+    # If it's an SEvent-like object
+    if hasattr(e, "to_json_event"):
+        return _event_to_dict(e.to_json_event())
+
+    # Best-effort generic object
+    try:
+        return {
+            "id": getattr(e, "id", None),
+            "title": getattr(e, "title", None),
+            "start": getattr(getattr(e, "start", None), "isoformat", lambda: None)(),
+            "end": getattr(getattr(e, "end", None), "isoformat", lambda: None)(),
+            "backgroundColor": getattr(e, "backgroundColor", None),
+            "extendedProps": getattr(e, "extendedProps", {}) or {},
+        }
+    except Exception:
+        # last resort: string-ify
+        return {"raw": str(e)}
+
+
+def _serialize_events_for_download(events):
+    return [_event_to_dict(e) for e in (events or [])]
+
+
+@st.cache_data
+def make_month_days(year: int, month: int) -> List[date]:
+    start, end = month_start_end(year, month)
+    return list(date_range(start, end))
+
+
+def make_three_months_days(start_year: int, start_month: int) -> List[date]:
+    """Generate days for three consecutive months starting from start_month."""
+    all_days = []
+    for i in range(3):
+        year = start_year
+        month = start_month + i
+        if month > 12:
+            year += 1
+            month -= 12
+        all_days.extend(make_month_days(year, month))
+    return all_days
+
+
+# -------------------------
+# Google Calendar Integration
+# -------------------------
 
 def get_gcal_service():
-    """Return an authenticated Google Calendar API service."""
+    """Get authenticated Google Calendar service."""
     creds = None
     if os.path.exists(GCAL_TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(GCAL_TOKEN_FILE, GCAL_SCOPES)
+    
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             if not os.path.exists(GCAL_CREDENTIALS_FILE):
-                st.error("Missing credentials.json. Create an OAuth Client (Desktop) in Google Cloud and download it next to app.py.")
+                st.error(f"Missing {GCAL_CREDENTIALS_FILE}. Download from Google Cloud Console.")
                 return None
             flow = InstalledAppFlow.from_client_secrets_file(GCAL_CREDENTIALS_FILE, GCAL_SCOPES)
-            # Local server flow (best for local testing)
             creds = flow.run_local_server(port=0)
+        
         with open(GCAL_TOKEN_FILE, 'w') as token:
             token.write(creds.to_json())
-    try:
-        service = build('calendar', 'v3', credentials=creds)
-        return service
-    except Exception as e:
-        st.error(f"Google API init failed: {e}")
-        return None
+    
+    return build('calendar', 'v3', credentials=creds)
 
 
 def gcal_list_calendars(service):
-    """Return list of (id, summary) tuples for available calendars."""
-    items = []
-    page_token = None
-    while True:
-        feed = service.calendarList().list(pageToken=page_token).execute()
-        for c in feed.get('items', []):
-            items.append((c['id'], c.get('summary', c['id'])))
-        page_token = feed.get('nextPageToken')
-        if not page_token:
-            break
-    return items
+    """List available calendars."""
+    try:
+        calendars = service.calendarList().list().execute()
+        return [(c['id'], c['summary']) for c in calendars.get('items', [])]
+    except HttpError:
+        return []
 
 
 def local_event_to_gcal_body(E: dict) -> dict:
@@ -514,87 +520,40 @@ def shifts_to_events(roster: Dict[date, Dict[str, Optional[str]]], shift_types: 
     return events
 
 
-######################################################################################################## Validation Rules #############################################################################
-def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[str]]:
-    import pandas as pd
-    violations: dict[str, list[str]] = {}
+# -------------------------
+# Validation Rules
+# -------------------------
 
+def _contiguous_blocks(dates: List[date]) -> List[Tuple[date, date, int]]:
+    """Find contiguous blocks of dates and return (start, end, length) tuples."""
+    if not dates:
+        return []
+    
+    blocks = []
+    start = prev = dates[0]
+    length = 1
+    
+    for d in dates[1:]:
+        if (d - prev).days == 1:
+            prev = d
+            length += 1
+        else:
+            blocks.append((start, prev, length))
+            start = prev = d
+            length = 1
+    
+    blocks.append((start, prev, length))
+    return blocks
+
+
+def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[str]]:
+    violations: dict[str, list[str]] = {}
 
     cap_map: dict[str, int]   = st.session_state.get("shift_capacity", DEFAULT_SHIFT_CAPACITY)
     prov_caps: dict[str, list[str]] = st.session_state.get("provider_caps", {})
     prov_rules: dict[str, dict]      = st.session_state.get("provider_rules", {})
 
     # --- helpers ---
-    def _expand_vacation_dates(vacations: list) -> set[date]:
-        out: set[date] = set()
-        for rng in vacations or []:
-            try:
-                s = pd.to_datetime(rng.get("start")).date()
-                e = pd.to_datetime(rng.get("end")).date()
-            except Exception:
-                continue
-            if e < s:
-                s, e = e, s
-            for d in pd.date_range(s, e):
-                out.add(d.date())
-        return out
-
-    def _provider_has_vacation_in_month(pr: dict) -> bool:
-        if not pr:
-            return False
-        vac = pr.get("vacations", [])
-        if not vac:
-            return False
-        ym = (st.session_state.month.year, st.session_state.month.month)
-        for d in _expand_vacation_dates(vac):
-            if (d.year, d.month) == ym:
-                return True
-        return False
-
-    def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
-        """Count the number of vacation weeks a provider has in a specific month."""
-        if not pr:
-            return 0
-        vac = pr.get("vacations", [])
-        if not vac:
-            return 0
-        
-        # Get all vacation dates for this month
-        month_vacation_dates = set()
-        for d in _expand_vacation_dates(vac):
-            if (d.year, d.month) == (year, month):
-                month_vacation_dates.add(d)
-        
-        if not month_vacation_dates:
-            return 0
-        
-        # Count weeks (7 consecutive days = 1 week)
-        weeks = 0
-        sorted_dates = sorted(month_vacation_dates)
-        
-        i = 0
-        while i < len(sorted_dates):
-            # Count consecutive days starting from this date
-            consecutive_count = 1
-            current_date = sorted_dates[i]
-            
-            # Check for consecutive days
-            for j in range(i + 1, len(sorted_dates)):
-                if (sorted_dates[j] - current_date).days == consecutive_count:
-                    consecutive_count += 1
-                else:
-                    break
-            
-            # Calculate weeks (7 days = 1 week)
-            weeks += consecutive_count // 7
-            if consecutive_count % 7 > 0:  # Partial week counts as 1 week
-                weeks += 1
-            
-            # Skip the dates we've already counted
-            i += consecutive_count
-        
-        return weeks
-
     def _is_unavailable(p_upper: str, day: date) -> bool:
         """True if provider p_upper is unavailable on 'day' due to specific dates or vacation ranges."""
         pr = prov_rules.get(p_upper, {}) or {}
@@ -618,154 +577,93 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
                 return True
         return False
 
-    def _contiguous_blocks(dates_sorted: list[date]) -> list[tuple[date, date, int]]:
-        blocks: list[tuple[date, date, int]] = []
-        if not dates_sorted:
-            return blocks
-        start = prev = dates_sorted[0]
-        for d in dates_sorted[1:]:
-            if (d - prev).days == 1:
-                prev = d
-            else:
-                blocks.append((start, prev, (prev - start).days + 1))
-                start = prev = d
-        blocks.append((start, prev, (prev - start).days + 1))
-        return blocks
-
-    # --- group events ---
-    per_p: dict[str, list[SEvent]] = {}
-    day_prov_counts: dict[tuple[date, str], int] = {}
-    day_shift_counts: dict[tuple[date, str], int] = {}
-
+    # Group events by provider and month for validation
+    provider_month_events = {}
     for ev in events:
-        p = (ev.extendedProps.get("provider") or "").strip().upper()
-        skey = ev.extendedProps.get("shift_key")
-        d = ev.start.date()
-        if p:
-            per_p.setdefault(p, []).append(ev)
-            day_prov_counts[(d, p)] = day_prov_counts.get((d, p), 0) + 1
-        if skey:
-            day_shift_counts[(d, skey)] = day_shift_counts.get((d, skey), 0) + 1
+        p_upper = (ev.extendedProps.get("provider") or "").strip().upper()
+        if not p_upper:
+            continue
+        month_key = (ev.start.year, ev.start.month)
+        if p_upper not in provider_month_events:
+            provider_month_events[p_upper] = {}
+        if month_key not in provider_month_events[p_upper]:
+            provider_month_events[p_upper][month_key] = []
+        provider_month_events[p_upper][month_key].append(ev)
 
-    # month-aware defaults
-    base_default = recommended_max_shifts_for_month()
-    min_required = int(getattr(rules, "min_shifts_per_provider", 15))
-    mbs = int(getattr(rules, "min_block_size", 1) or 1)
-    mbx = getattr(rules, "max_block_size", None)
-    min_rest_days_global = float(getattr(rules, "min_rest_days_between_shifts", 1.0))
-
-
-    for p_upper, evs in per_p.items():
-        evs.sort(key=lambda e: e.start)
-        pr = prov_rules.get(p_upper, {})
-
-        # Group provider events by month for per-month validation
-        provider_events_by_month: Dict[tuple[int, int], List[SEvent]] = {}
-        for ev in evs:
-            month_key = (ev.start.year, ev.start.month)
-            provider_events_by_month.setdefault(month_key, []).append(ev)
-
-        # Validate each month separately for vacation adjustments
-        for (year, month), month_events in provider_events_by_month.items():
-            # effective max shifts (override or month default), minus 3 per vacation week in month
-            eff_max = pr.get("max_shifts", base_default)
+    # Validate each provider's events per month
+    for p_upper, month_events in provider_month_events.items():
+        for (year, month), month_evs in month_events.items():
+            # Get provider rules and adjust for vacation
+            pr = prov_rules.get(p_upper, {}) or {}
+            eff_max = pr.get("max_shifts", recommended_max_shifts_for_month())
             vacation_weeks = _provider_vacation_weeks_in_month(pr, year, month)
             if vacation_weeks > 0:
                 eff_max = max(0, (eff_max or 0) - (vacation_weeks * 3))
+            
+            # Validate max shifts for this month
+            if eff_max is not None and len(month_evs) > eff_max:
+                violations.setdefault(p_upper, []).append(
+                    f"Month {year}-{month:02d}: {len(month_evs)} shifts exceeds max {eff_max}"
+                )
 
-            # Check max shifts for this month
-            if eff_max is not None and len(month_events) > eff_max:
-                violations.setdefault(p_upper, []).append(f"{year}-{month:02d}: {len(month_events)} shifts > max {eff_max} (adjusted for {vacation_weeks} vacation weeks)")
+            # Validate minimum shifts for this month
+            min_required = get_min_shifts_for_month(year, month)
+            if len(month_evs) < min_required:
+                violations.setdefault(p_upper, []).append(
+                    f"Month {year}-{month:02d}: {len(month_evs)} shifts below minimum {min_required}"
+                )
 
-        max_nights = pr.get("max_nights", rules.max_nights_per_provider)
-        min_rest_days = float(pr.get("min_rest_days", min_rest_days_global))
-    
-        weekend_required = pr.get("require_weekend", rules.require_at_least_one_weekend)
-        if weekend_required and not any(ev.start.weekday() >= 5 for ev in evs):
-            violations.setdefault(p_upper, []).append("No weekend shifts")
+    # Validate rest periods and block rules
+    for ev in events:
+        p_upper = (ev.extendedProps.get("provider") or "").strip().upper()
+        if not p_upper:
+            continue
 
-        # 0) Min shifts per month (dynamic based on month length)
-        for (year, month), month_events in provider_events_by_month.items():
-            month_min = get_min_shifts_for_month(year, month)
-            if len(month_events) < month_min:
-                violations.setdefault(p_upper, []).append(f"{year}-{month:02d}: {len(month_events)} shifts < min {month_min} for {month}-day month")
+        # Check if provider is unavailable on this date
+        if _is_unavailable(p_upper, ev.start.date()):
+            violations.setdefault(p_upper, []).append(
+                f"Assigned on unavailable date {ev.start.date()}"
+            )
 
-        # 1) Max shifts (already handled per month above)
-
-        # 2) Rest days BETWEEN blocks (not between every consecutive shift)
-        dates_sorted = sorted([ev.start.date() for ev in evs])
-        # compute contiguous blocks of assignments
-        blocks = _contiguous_blocks(dates_sorted)
-        for i in range(len(blocks) - 1):
-
-            # Also check 12-hour rest within each block
-            evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == p_upper]
-            for block_start, block_end, _ in blocks:
-                block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
-                block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
-                for a, b in zip(block_shifts, block_shifts[1:]):
-                    rest_hours = (pd.to_datetime(b["start"]) - pd.to_datetime(a["end"])).total_seconds() / 3600.0
-                    if rest_hours < 12:
-                        violations.setdefault(p_upper, []).append(
-                            f"Rest {rest_hours:.1f}h < 12h between {a['start']} and {b['start']}"
-                        )
-                end_prev = blocks[i][1]
-                start_next = blocks[i+1][0]
-                gap_days = (start_next - end_prev).days
-                if gap_days < (min_rest_days or 0.0):
+        # Check rest periods
+        pr = prov_rules.get(p_upper, {}) or {}
+        min_rest_days = float(pr.get("min_rest_days", rules.min_rest_days_between_shifts))
+        
+        if min_rest_days > 0:
+            # Find other events for this provider
+            other_events = [e for e in events if 
+                           (e.extendedProps.get("provider") or "").strip().upper() == p_upper and 
+                           e.id != ev.id]
+            
+            for other_ev in other_events:
+                days_between = abs((ev.start.date() - other_ev.start.date()).days)
+                if days_between < min_rest_days:
                     violations.setdefault(p_upper, []).append(
-                        f"Gap {gap_days} days between {end_prev:%Y-%m-%d} and {start_next:%Y-%m-%d} < min {min_rest_days:.2f} days"
+                        f"Insufficient rest: {days_between} days between {ev.start.date()} and {other_ev.start.date()}"
                     )
 
-
-        # 3) Max nights
-        if max_nights is not None:
-            nights = sum(1 for ev in evs if ev.extendedProps.get("shift_key") == "N12")
-            if nights > max_nights:
-                violations.setdefault(p_upper, []).append(f"Nights {nights} > max {max_nights}")
-
-        # 4) Weekend requirement
-        if rules.require_at_least_one_weekend and not any(ev.start.weekday() >= 5 for ev in evs):
-            violations.setdefault(p_upper, []).append("No weekend shifts")
-
-        # 5) One shift per day
-        for (d, pp), cnt in day_prov_counts.items():
-            if pp == p_upper and cnt > 1:
-                violations.setdefault(p_upper, []).append(f"{d:%Y-%m-%d}: {cnt} shifts in one day (limit 1)")
-
-        # 6) Eligibility (allowed shift keys)
-        allowed = prov_caps.get(p_upper, [])
-        if allowed:
-            bad = [ev for ev in evs if ev.extendedProps.get("shift_key") not in allowed]
-            if bad:
-                bad_keys = sorted(set(ev.extendedProps.get("shift_key") for ev in bad))
-                violations.setdefault(p_upper, []).append(f"Not eligible for: {', '.join(bad_keys)}")
-
-        # 7) Unavailability (specific dates + vacations) — HARD CHECK
-        bad_dates = sorted({ev.start.date() for ev in evs if _is_unavailable(p_upper, ev.start.date())})
-        for d in bad_dates:
-            violations.setdefault(p_upper, []).append(f"{d:%Y-%m-%d}: provider unavailable (vacation/unavailable)")
-
-        # 8) Block analysis (min/ max block sizes)
-        dates_sorted = sorted([ev.start.date() for ev in evs])
-        blocks = _contiguous_blocks(dates_sorted)
-
-        if mbs > 1:
-            for s, e, L in blocks:
-                if L < mbs:
-                    msg = f"{s:%Y-%m-%d}: 1-day block (pref {mbs})" if L == 1 else f"{s:%Y-%m-%d}–{e:%Y-%m-%d}: {L}-day block (pref {mbs})"
-                    violations.setdefault(p_upper, []).append(msg)
-
-        if mbx and mbx > 0:
-            for s, e, L in blocks:
-                if L > mbx:
-                    violations.setdefault(p_upper, []).append(f"{s:%Y-%m-%d}–{e:%Y-%m-%d}: {L}-day block exceeds max {mbx}")
-
-    # Global per-day / per-shift capacity
-    for (d, skey), cnt in day_shift_counts.items():
-        cap = cap_map.get(skey, 1)
-        if cnt > cap:
-            violations.setdefault("GLOBAL", []).append(f"{d:%Y-%m-%d} {skey}: {cnt} assigned > capacity {cap}")
+    # Validate block rules
+    for p_upper in provider_month_events.keys():
+        p_events = [e for e in events if (e.extendedProps.get("provider") or "").strip().upper() == p_upper]
+        if not p_events:
+            continue
+            
+        # Find contiguous blocks
+        dates = sorted([e.start.date() for e in p_events])
+        blocks = _contiguous_blocks(dates)
+        
+        for block_start, block_end, block_length in blocks:
+            # Check minimum block size
+            if block_length < rules.min_block_size:
+                violations.setdefault(p_upper, []).append(
+                    f"Block {block_start} to {block_end} ({block_length} days) below minimum {rules.min_block_size}"
+                )
+            
+            # Check maximum block size
+            if rules.max_block_size and block_length > rules.max_block_size:
+                violations.setdefault(p_upper, []).append(
+                    f"Block {block_start} to {block_end} ({block_length} days) exceeds maximum {rules.max_block_size}"
+                )
 
     return violations
 
@@ -1098,70 +996,6 @@ def assign_greedy(providers: List[str], days: List[date], shift_types: List[Dict
 
 
     return events
-
-# -------------------------
-# UI
-# -------------------------
-
-def _event_to_dict(e):
-    # Convert SEvent -> dict, and coerce datetimes to ISO strings
-    from datetime import datetime
-    import pandas as pd
-
-    if isinstance(e, dict):
-        out = dict(e)
-        # start / end may be datetime or pandas Timestamp
-        for k in ("start", "end"):
-            v = out.get(k)
-            if isinstance(v, datetime):
-                out[k] = v.isoformat()
-            elif hasattr(v, "to_pydatetime"):  # pandas Timestamp
-                out[k] = v.to_pydatetime().isoformat()
-            elif isinstance(v, str):
-                # leave as-is
-                pass
-        # ensure extendedProps exists
-        out.setdefault("extendedProps", {})
-        return out
-
-    # If it's an SEvent-like object
-    if hasattr(e, "to_json_event"):
-        return _event_to_dict(e.to_json_event())
-
-    # Best-effort generic object
-    try:
-        return {
-            "id": getattr(e, "id", None),
-            "title": getattr(e, "title", None),
-            "start": getattr(getattr(e, "start", None), "isoformat", lambda: None)(),
-            "end": getattr(getattr(e, "end", None), "isoformat", lambda: None)(),
-            "backgroundColor": getattr(e, "backgroundColor", None),
-            "extendedProps": getattr(e, "extendedProps", {}) or {},
-        }
-    except Exception:
-        # last resort: string-ify
-        return {"raw": str(e)}
-
-def _serialize_events_for_download(events):
-    return [_event_to_dict(e) for e in (events or [])]
-   
-              
-@st.cache_data
-def make_month_days(year: int, month: int) -> List[date]:
-    start, end = month_start_end(year, month)
-    return list(date_range(start, end))
-
-def make_three_months_days(start_year: int, start_month: int) -> List[date]:
-    """Generate days for three consecutive months starting from start_month."""
-    all_days = []
-    for i in range(3):
-        year = start_year
-        month = start_month + i
-        if month > 12:
-            year += 1
-            month -= 12
-        all_days.extend(make_month_days(year, month))
-    return all_days
 
 
 
@@ -1880,9 +1714,7 @@ def schedule_grid_view():
 
             def total_block_len_if_assigned(provider, d0):
                 ds = provider_days(provider)
-                L = left_run_len(ds, d0)
-                R = right_run_len(ds, d0)
-                return L + 1 + R
+                return left_run_len(ds, d0) + 1 + right_run_len(ds, d0)
 
             # live counters for per-provider totals/nights in this month build
             counts = {}
