@@ -3524,6 +3524,26 @@ def shift_swap_request_form(provider_options):
     
     reason = st.text_area("Reason for swap (optional)", key="swap_reason", height=100)
     
+    # Check for violations if both providers are selected
+    if (provider1 != "(Select Provider)" and not provider1.startswith("---") and 
+        provider2 != "(Select Provider)" and not provider2.startswith("---") and
+        provider1 != provider2):
+        
+        violations = check_shift_swap_violations(
+            provider1, 
+            provider1_date.isoformat(), 
+            provider2, 
+            provider2_date.isoformat()
+        )
+        
+        if violations:
+            st.warning("⚠️ **Potential Violations Detected:**")
+            for violation in violations:
+                st.caption(violation)
+            st.info("💡 You can still submit the request, but it will be flagged for review.")
+        else:
+            st.success("✅ No violations detected for this swap")
+    
     if st.button("Submit Shift Swap Request", key="submit_swap"):
         if (provider1 == "(Select Provider)" or provider1.startswith("---") or 
             provider2 == "(Select Provider)" or provider2.startswith("---")):
@@ -3531,6 +3551,14 @@ def shift_swap_request_form(provider_options):
         elif provider1 == provider2:
             st.error("Please select different providers for the swap.")
         else:
+            # Check violations again before submitting
+            violations = check_shift_swap_violations(
+                provider1, 
+                provider1_date.isoformat(), 
+                provider2, 
+                provider2_date.isoformat()
+            )
+            
             request = {
                 "id": f"swap_{len(st.session_state.provider_requests['shift_swaps'])}",
                 "type": "shift_swap",
@@ -3540,10 +3568,15 @@ def shift_swap_request_form(provider_options):
                 "provider2_date": provider2_date.isoformat(),
                 "reason": reason,
                 "status": "pending",
-                "submitted_date": date.today().isoformat()
+                "submitted_date": date.today().isoformat(),
+                "violations": violations
             }
             st.session_state.provider_requests["shift_swaps"].append(request)
-            st.success(f"Shift swap request submitted between {provider1} ({provider1_date}) and {provider2} ({provider2_date})")
+            
+            if violations:
+                st.warning(f"⚠️ Shift swap request submitted with {len(violations)} potential violation(s). Request will be reviewed.")
+            else:
+                st.success(f"✅ Shift swap request submitted between {provider1} ({provider1_date}) and {provider2} ({provider2_date})")
 
 
 def display_existing_requests():
@@ -3560,18 +3593,40 @@ def display_existing_requests():
         for i, request in enumerate(st.session_state.provider_requests["vacations"]):
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
-                st.write(f"**{request['provider']}**: {request['start_date']} to {request['end_date']}")
+                status_color = {
+                    "pending": "🟡",
+                    "approved": "🟢",
+                    "rejected": "🔴"
+                }.get(request['status'], "⚪")
+                
+                st.write(f"{status_color} **{request['provider']}**: {request['start_date']} to {request['end_date']}")
                 if request['reason']:
                     st.caption(f"Reason: {request['reason']}")
-                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
-            with col2:
-                if st.button("Approve", key=f"approve_vacation_{i}"):
-                    st.session_state.provider_requests["vacations"][i]["status"] = "approved"
-                    st.rerun()
-            with col3:
-                if st.button("Reject", key=f"reject_vacation_{i}"):
-                    st.session_state.provider_requests["vacations"][i]["status"] = "rejected"
-                    st.rerun()
+                st.caption(f"Status: {request['status'].title()} | Submitted: {request['submitted_date']}")
+                
+                # Show decision info if processed
+                if request['status'] != "pending":
+                    decision_date = request.get('decision_date', 'Unknown')
+                    st.success(f"✅ Decision: {request['status'].title()} on {decision_date}")
+            
+            # Only show buttons if pending
+            if request['status'] == "pending":
+                with col2:
+                    if st.button("Approve", key=f"approve_vacation_{i}"):
+                        st.session_state.provider_requests["vacations"][i]["status"] = "approved"
+                        st.session_state.provider_requests["vacations"][i]["decision_date"] = date.today().isoformat()
+                        st.rerun()
+                with col3:
+                    if st.button("Reject", key=f"reject_vacation_{i}"):
+                        st.session_state.provider_requests["vacations"][i]["status"] = "rejected"
+                        st.session_state.provider_requests["vacations"][i]["decision_date"] = date.today().isoformat()
+                        st.rerun()
+            else:
+                # Show processed status
+                with col2:
+                    st.info("✅ Processed")
+                with col3:
+                    st.info("✅ Processed")
     
     # Blackout date requests
     if st.session_state.provider_requests["blackout_dates"]:
@@ -3579,18 +3634,40 @@ def display_existing_requests():
         for i, request in enumerate(st.session_state.provider_requests["blackout_dates"]):
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
-                st.write(f"**{request['provider']}**: {request['date']}")
+                status_color = {
+                    "pending": "🟡",
+                    "approved": "🟢",
+                    "rejected": "🔴"
+                }.get(request['status'], "⚪")
+                
+                st.write(f"{status_color} **{request['provider']}**: {request['date']}")
                 if request['reason']:
                     st.caption(f"Reason: {request['reason']}")
-                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
-            with col2:
-                if st.button("Approve", key=f"approve_blackout_{i}"):
-                    st.session_state.provider_requests["blackout_dates"][i]["status"] = "approved"
-                    st.rerun()
-            with col3:
-                if st.button("Reject", key=f"reject_blackout_{i}"):
-                    st.session_state.provider_requests["blackout_dates"][i]["status"] = "rejected"
-                    st.rerun()
+                st.caption(f"Status: {request['status'].title()} | Submitted: {request['submitted_date']}")
+                
+                # Show decision info if processed
+                if request['status'] != "pending":
+                    decision_date = request.get('decision_date', 'Unknown')
+                    st.success(f"✅ Decision: {request['status'].title()} on {decision_date}")
+            
+            # Only show buttons if pending
+            if request['status'] == "pending":
+                with col2:
+                    if st.button("Approve", key=f"approve_blackout_{i}"):
+                        st.session_state.provider_requests["blackout_dates"][i]["status"] = "approved"
+                        st.session_state.provider_requests["blackout_dates"][i]["decision_date"] = date.today().isoformat()
+                        st.rerun()
+                with col3:
+                    if st.button("Reject", key=f"reject_blackout_{i}"):
+                        st.session_state.provider_requests["blackout_dates"][i]["status"] = "rejected"
+                        st.session_state.provider_requests["blackout_dates"][i]["decision_date"] = date.today().isoformat()
+                        st.rerun()
+            else:
+                # Show processed status
+                with col2:
+                    st.info("✅ Processed")
+                with col3:
+                    st.info("✅ Processed")
     
     # Shift swap requests
     if st.session_state.provider_requests["shift_swaps"]:
@@ -3598,73 +3675,137 @@ def display_existing_requests():
         for i, request in enumerate(st.session_state.provider_requests["shift_swaps"]):
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
-                st.write(f"**{request['provider1']}** ({request['provider1_date']}) ↔ **{request['provider2']}** ({request['provider2_date']})")
+                status_color = {
+                    "pending": "🟡",
+                    "approved": "🟢",
+                    "rejected": "🔴"
+                }.get(request['status'], "⚪")
+                
+                st.write(f"{status_color} **{request['provider1']}** ({request['provider1_date']}) ↔ **{request['provider2']}** ({request['provider2_date']})")
                 if request['reason']:
                     st.caption(f"Reason: {request['reason']}")
-                st.caption(f"Status: {request['status']} | Submitted: {request['submitted_date']}")
-            with col2:
-                if st.button("Approve", key=f"approve_swap_{i}"):
-                    st.session_state.provider_requests["shift_swaps"][i]["status"] = "approved"
-                    # Execute the swap
-                    success = execute_shift_swap(
+                st.caption(f"Status: {request['status'].title()} | Submitted: {request['submitted_date']}")
+                
+                # Check for violations if pending
+                if request['status'] == "pending":
+                    violations = check_shift_swap_violations(
                         request['provider1'], 
-                        int(request['provider1_date'].split('-')[2]), 
+                        request['provider1_date'], 
                         request['provider2'], 
-                        int(request['provider2_date'].split('-')[2]),
-                        int(request['provider1_date'].split('-')[0]),
-                        int(request['provider1_date'].split('-')[1])
+                        request['provider2_date']
                     )
-                    if success:
-                        st.success("Shift swap executed successfully!")
-                    st.rerun()
-            with col3:
-                if st.button("Reject", key=f"reject_swap_{i}"):
-                    st.session_state.provider_requests["shift_swaps"][i]["status"] = "rejected"
-                    st.rerun()
+                    if violations:
+                        st.warning("⚠️ **Potential Violations:**")
+                        for violation in violations:
+                            st.caption(violation)
+                    else:
+                        st.success("✅ No violations detected")
+                
+                # Show decision info if processed
+                if request['status'] != "pending":
+                    decision_date = request.get('decision_date', 'Unknown')
+                    st.success(f"✅ Decision: {request['status'].title()} on {decision_date}")
+                    if request['status'] == "approved":
+                        st.info("🔄 Shift swap was executed")
+            
+            # Only show buttons if pending
+            if request['status'] == "pending":
+                with col2:
+                    if st.button("Approve", key=f"approve_swap_{i}"):
+                        st.session_state.provider_requests["shift_swaps"][i]["status"] = "approved"
+                        st.session_state.provider_requests["shift_swaps"][i]["decision_date"] = date.today().isoformat()
+                        # Execute the swap
+                        success = execute_shift_swap(
+                            request['provider1'], 
+                            int(request['provider1_date'].split('-')[2]), 
+                            request['provider2'], 
+                            int(request['provider2_date'].split('-')[2]),
+                            int(request['provider1_date'].split('-')[0]),
+                            int(request['provider1_date'].split('-')[1])
+                        )
+                        if success:
+                            st.session_state.provider_requests["shift_swaps"][i]["executed"] = True
+                            st.success("Shift swap executed successfully!")
+                        else:
+                            st.session_state.provider_requests["shift_swaps"][i]["executed"] = False
+                            st.error("Shift swap failed to execute!")
+                        st.rerun()
+                with col3:
+                    if st.button("Reject", key=f"reject_swap_{i}"):
+                        st.session_state.provider_requests["shift_swaps"][i]["status"] = "rejected"
+                        st.session_state.provider_requests["shift_swaps"][i]["decision_date"] = date.today().isoformat()
+                        st.rerun()
+            else:
+                # Show processed status
+                with col2:
+                    st.info("✅ Processed")
+                with col3:
+                    st.info("✅ Processed")
 
-
-def execute_shift_swap(provider1: str, day1: int, provider2: str, day2: int, year: int, month: int) -> bool:
-    """Execute a shift swap between two providers on different days"""
+def check_shift_swap_violations(provider1: str, date1: str, provider2: str, date2: str) -> list:
+    """Check for violations in a proposed shift swap."""
+    violations = []
+    
     try:
-        # Normalize events
-        st.session_state.events = events_for_calendar(st.session_state.get("events", []))
+        # Parse dates
+        date1_obj = pd.to_datetime(date1).date()
+        date2_obj = pd.to_datetime(date2).date()
         
-        # Find events for the specified days and providers
-        events_to_swap = []
-        target_events = []
+        # Get current events
+        current_events = st.session_state.get("events", [])
         
-        for event in st.session_state.events:
+        # Check for double assignments
+        for event in current_events:
             ext = event.get("extendedProps", {})
             event_provider = ext.get("provider", "").strip().upper()
             try:
                 event_date = pd.to_datetime(event["start"]).date()
             except Exception:
                 continue
+            
+            # Check if provider1 is already assigned on date2
+            if event_date == date2_obj and event_provider == provider1:
+                violations.append(f"⚠️ {provider1} is already assigned on {date2_obj}")
+            
+            # Check if provider2 is already assigned on date1
+            if event_date == date1_obj and event_provider == provider2:
+                violations.append(f"⚠️ {provider2} is already assigned on {date1_obj}")
+        
+        # Check for 7+ shifts in a block
+        def count_shifts_in_block(provider: str, target_date: date) -> int:
+            """Count shifts for a provider in a 7-day block around the target date."""
+            start_date = target_date - timedelta(days=3)
+            end_date = target_date + timedelta(days=3)
+            
+            shift_count = 0
+            for event in current_events:
+                ext = event.get("extendedProps", {})
+                event_provider = ext.get("provider", "").strip().upper()
+                try:
+                    event_date = pd.to_datetime(event["start"]).date()
+                except Exception:
+                    continue
                 
-            if event_date.year == year and event_date.month == month:
-                if event_date.day == day1 and event_provider == provider1:
-                    events_to_swap.append(event)
-                elif event_date.day == day2 and event_provider == provider2:
-                    target_events.append(event)
+                if event_provider == provider and start_date <= event_date <= end_date:
+                    shift_count += 1
+            
+            return shift_count
         
-        if not events_to_swap or not target_events:
-            st.error(f"No shifts found for the specified providers and days")
-            return False
+        # Check provider1's block after swap
+        provider1_shifts_after = count_shifts_in_block(provider1, date2_obj)
+        if provider1_shifts_after > 7:
+            violations.append(f"⚠️ {provider1} would have {provider1_shifts_after} shifts in 7-day block around {date2_obj}")
         
-        # Swap the providers
-        for event in events_to_swap:
-            event["extendedProps"]["provider"] = provider2
-            event["title"] = event["title"].replace(provider1, provider2)
+        # Check provider2's block after swap
+        provider2_shifts_after = count_shifts_in_block(provider2, date1_obj)
+        if provider2_shifts_after > 7:
+            violations.append(f"⚠️ {provider2} would have {provider2_shifts_after} shifts in 7-day block around {date1_obj}")
         
-        for event in target_events:
-            event["extendedProps"]["provider"] = provider1
-            event["title"] = event["title"].replace(provider2, provider1)
-        
-        return True
+        return violations
         
     except Exception as e:
-        st.error(f"Error during shift swap: {e}")
-        return False
+        violations.append(f"⚠️ Error checking violations: {e}")
+        return violations
 
 if __name__ == "__main__":
     main()
