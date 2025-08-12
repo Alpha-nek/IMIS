@@ -560,24 +560,24 @@ def validate_rules(events: list[SEvent], rules: RuleConfig) -> dict[str, list[st
         blocks = _contiguous_blocks(dates_sorted)
         for i in range(len(blocks) - 1):
 
-        # Also check 12-hour rest within each block
-        evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == provider]
-        for block_start, block_end in blocks:
-            block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
-            block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
-            for a, b in zip(block_shifts, block_shifts[1:]):
-                rest_hours = (pd.to_datetime(b["start"]) - pd.to_datetime(a["end"])).total_seconds() / 3600.0
-                if rest_hours < 12:
-                    violations.setdefault(provider, []).append(
-                        f"Rest {rest_hours:.1f}h < 12h between {a['start']} and {b['start']}"
+            # Also check 12-hour rest within each block
+            evs_provider = [ev for ev in st.session_state.get("events", []) if (ev.get("extendedProps", {}).get("provider") or "").upper() == provider]
+            for block_start, block_end in blocks:
+                block_shifts = [ev for ev in evs_provider if block_start <= pd.to_datetime(ev["start"]).date() <= block_end]
+                block_shifts.sort(key=lambda e: pd.to_datetime(e["start"]))
+                for a, b in zip(block_shifts, block_shifts[1:]):
+                    rest_hours = (pd.to_datetime(b["start"]) - pd.to_datetime(a["end"])).total_seconds() / 3600.0
+                    if rest_hours < 12:
+                        violations.setdefault(provider, []).append(
+                            f"Rest {rest_hours:.1f}h < 12h between {a['start']} and {b['start']}"
+                        )
+                end_prev = blocks[i][1]
+                start_next = blocks[i+1][0]
+                gap_days = (start_next - end_prev).days
+                if gap_days < (min_rest_days or 0.0):
+                    violations.setdefault(p_upper, []).append(
+                        f"Gap {gap_days} days between {end_prev:%Y-%m-%d} and {start_next:%Y-%m-%d} < min {min_rest_days:.2f} days"
                     )
-            end_prev = blocks[i][1]
-            start_next = blocks[i+1][0]
-            gap_days = (start_next - end_prev).days
-            if gap_days < (min_rest_days or 0.0):
-                violations.setdefault(p_upper, []).append(
-                    f"Gap {gap_days} days between {end_prev:%Y-%m-%d} and {start_next:%Y-%m-%d} < min {min_rest_days:.2f} days"
-                )
 
 
         # 3) Max nights
@@ -2142,3 +2142,4 @@ def main():
         provider_rules_panel()
 
 main()
+
