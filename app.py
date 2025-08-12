@@ -1772,10 +1772,12 @@ def schedule_grid_view():
                 # Apply changes automatically
                 apply_grid_to_calendar(edited_grid, year, month, row_meta)
                 st.success("✅ Grid changes applied automatically!")
+                st.rerun()
 
         # Manual apply button (for backup)
         if st.button("Apply grid to calendar (Manual)"):
             apply_grid_to_calendar(edited_grid, year, month, row_meta)
+            st.rerun()
         
         # Save functionality
         col1, col2 = st.columns(2)
@@ -2108,13 +2110,6 @@ def main():
         # Top controls in a clean layout
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         with col1:
-            year = st.number_input("Year", min_value=2020, max_value=2100, value=st.session_state.month.year)
-        with col2:
-            month = st.number_input("Month", min_value=1, max_value=12, value=st.session_state.month.month)
-        with col3:
-            if st.button("Go to Month"):
-                st.session_state.month = date(int(year), int(month), 1)
-        with col4:
             # Ensure providers are loaded and get the list
             if not st.session_state.providers_df.empty:
                 provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist())
@@ -2126,6 +2121,12 @@ def main():
             else:
                 st.warning("No providers loaded. Please check the Providers tab.")
                 st.session_state.highlight_provider = ""
+        with col2:
+            st.caption(f"📅 Currently viewing: {st.session_state.month.strftime('%B %Y')}")
+        with col3:
+            st.caption("💡 Use navigation buttons above calendar to change month")
+        with col4:
+            st.caption("🔄 Generate button creates schedules for the displayed month")
         
         # Generation info
         if st.session_state.get("generation_count", 0) > 0:
@@ -2134,7 +2135,7 @@ def main():
         # Action buttons
         g1, g2, g3 = st.columns(3)
         with g1:
-            if st.button("🔄 Generate Draft (3 Months)", help="Generate schedule for next 3 months from rules"):
+            if st.button("🔄 Generate Draft", help="Generate schedule for the displayed month"):
                 if st.session_state.providers_df.empty:
                     st.error("❌ No providers loaded! Please go to the Providers tab and load providers first.")
                 else:
