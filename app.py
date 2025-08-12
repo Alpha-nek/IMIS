@@ -225,6 +225,7 @@ def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
     
 # --- Session bootstrap: make sure all keys exist before anything touches them ---
 def init_session_state():
+    import pandas as pd
     st.set_page_config(page_title="Scheduling", layout="wide", initial_sidebar_state="collapsed")
     # --- Load persisted provider rules & caps from disk if present ---
     try:
@@ -1136,6 +1137,7 @@ def render_calendar():
 # provider rules section
 # make sure this version is in your codebase
 def provider_rules_panel():
+    import pandas as pd
     st.header("Provider-specific rules")
 
     # Roster
