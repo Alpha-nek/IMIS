@@ -9,12 +9,17 @@ A comprehensive Streamlit application for automating provider scheduling with cu
 - **👥 Provider Management**: Easy roster management with individual preferences
 - **📊 Grid View**: Spreadsheet-style editing for quick assignments
 - **✅ Validation**: Real-time rule violation checking
+<<<<<<< HEAD
 - **🔄 Auto-Generation**: Intelligent draft schedule creation from rules
+=======
+- **�� Auto-Generation**: Intelligent draft schedule creation from rules
+>>>>>>> 8d473f28e5648cd512b8cae2150e28bf02b1192c
 - **💬 Comments**: Add notes to individual shifts
 - **🌐 Google Calendar Sync**: Export schedules to Google Calendar
 
 ## 🚀 Quick Start
 
+<<<<<<< HEAD
 1. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
@@ -118,3 +123,27 @@ streamlit run app.py --logger.level debug
 4. Test thoroughly
 5. Submit a pull request
 
+=======
+### Local Development
+```bash
+# Clone the repository
+git clone https://github.com/Alpha-nek/IMIS.git
+cd IMIS
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the application
+streamlit run main.py
+```
+
+### Streamlit Cloud Deployment
+1. Fork this repository
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Connect your GitHub account
+4. Select this repository
+5. Set the main file path to: `main.py`
+6. Deploy!
+
+## 📁 Project Structure
+>>>>>>> 8d473f28e5648cd512b8cae2150e28bf02b1192c
