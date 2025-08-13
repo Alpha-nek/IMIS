@@ -12,33 +12,8 @@ def providers_panel():
     """Main providers management panel."""
     st.header("👥 Provider Management")
     
-    # Provider selector section
-    from ui.provider_selector import render_provider_selector
-    render_provider_selector()
-    
-    st.markdown("---")
-    
-    # Add new provider section
-    with st.expander("➕ Add New Provider", expanded=False):
-        add_new_provider()
-    
-    st.markdown("---")
-    
-    # Load providers section
-    with st.expander("📁 Load Providers from CSV", expanded=False):
-        load_providers_from_csv()
-    
-    # Clean up providers section
-    with st.expander("🧹 Clean Up Providers", expanded=False):
-        cleanup_providers()
-    
-    st.markdown("---")
-    
-    # Provider list section with improved UI
+    # Provider statistics at the top
     if not st.session_state.providers_df.empty:
-        st.subheader("📋 Current Providers")
-        
-        # Provider statistics at the top
         providers_df = st.session_state.providers_df.copy()
         providers_df["initials"] = providers_df["initials"].astype(str).str.upper()
         
@@ -67,7 +42,7 @@ def providers_panel():
         st.markdown("---")
         
         # Compact provider selection with dropdown
-        st.markdown("#### 🔍 Provider Selection")
+        st.markdown("#### 🔍 Provider Selection & Actions")
         
         col1, col2, col3 = st.columns([2, 1, 1])
         
@@ -191,6 +166,25 @@ def providers_panel():
         provider_rules_panel()
     else:
         st.info("No providers loaded. Please load a CSV file with provider data or add new providers.")
+    
+    st.markdown("---")
+    
+    # Management actions in expandable sections
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Add new provider section
+        with st.expander("➕ Add New Provider", expanded=False):
+            add_new_provider()
+    
+    with col2:
+        # Load providers section
+        with st.expander("📁 Load Providers from CSV", expanded=False):
+            load_providers_from_csv()
+    
+    # Clean up providers section (full width)
+    with st.expander("🧹 Clean Up Providers", expanded=False):
+        cleanup_providers()
 
 def add_new_provider():
     """Add a new provider with comprehensive information."""
