@@ -145,8 +145,29 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     # Create grid dataframe with proper structure
     grid_data = {}
     
-    # Add color column first
-    grid_data["Color"] = [row["color"] for row in row_meta]
+    # Add color column first with colored text instead of hex codes
+    color_labels = []
+    for row in row_meta:
+        shift_key = row["shift_key"]
+        shift_type = row["shift_type"]
+        
+        # Create colored text labels based on shift type
+        if shift_key == "R12":
+            color_labels.append("🟢 Rounder")
+        elif shift_key == "A12":
+            color_labels.append("🟡 Admitter")
+        elif shift_key == "A10":
+            color_labels.append("🔴 Admitter")
+        elif shift_key == "N12":
+            color_labels.append("🟣 Night")
+        elif shift_key == "NB":
+            color_labels.append("🔵 Bridge")
+        elif shift_key == "APP":
+            color_labels.append("🟪 APP")
+        else:
+            color_labels.append(shift_type)
+    
+    grid_data["Color"] = color_labels
     
     # Add date columns
     for date_col in date_cols:
@@ -165,7 +186,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "Shift Type",
             disabled=True,
             help="Shift type color indicator",
-            width="medium"
+            width="small"
         )
     }
     
@@ -196,7 +217,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         col_config[date_col] = st.column_config.SelectboxColumn(
             options=options,
             help=help_text,
-            width="medium"
+            width="small"
         )
     
     # Add CSS for better styling
