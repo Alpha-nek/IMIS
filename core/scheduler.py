@@ -156,7 +156,10 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
                        shift_capacity: Dict[str, int], provider_rules: Dict, 
                        global_rules: RuleConfig) -> Dict[str, List[Dict]]:
     """
-    Create shift blocks for each physician following the rules.
+    Create shift blocks for each physician following the rules:
+    - Maximum 7 shifts per block
+    - 3-day rest between blocks
+    - Rounders should end on rounding shifts
     """
     physician_blocks = {p: [] for p in physician_providers}
     
@@ -172,11 +175,12 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
         # Determine target number of shifts for this provider
         target_shifts = random.randint(min_shifts, max_shifts)
         
-        # Create blocks
+        # Create blocks with maximum 7 shifts per block
         remaining_shifts = target_shifts
         while remaining_shifts > 0:
-            # Determine block size (3-7 shifts)
-            block_size = min(random.randint(3, 7), remaining_shifts)
+            # Determine block size (3-7 shifts, but no more than remaining shifts)
+            max_block_size = min(7, remaining_shifts)
+            block_size = random.randint(3, max_block_size)
             
             # Determine shift type for this block
             shift_type = select_shift_type_for_block(provider, physician_shift_types, 
@@ -221,7 +225,7 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
 
 def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> List[SEvent]:
     """
-    Assign a specific shift block to a provider.
+    Assign a specific shift block to a provider with proper sequence rules.
     """
     events = []
     shift_type = block["shift_type"]
@@ -238,40 +242,63 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> Lis
         # If we can't find enough consecutive dates, take what we can get
         available_dates = available_dates[:block_size]
     
-    # Special handling for rounders: start with 1-2 admitting shifts
-    if shift_type == "R12" and len(available_dates) >= 2:
-        admitting_events = assign_admitting_before_rounding(provider, available_dates[:2])
+    # Special handling for rounders: start with 1-2 admitting shifts, end with rounding
+    if shift_type == "R12" and len(available_dates) >= 3:
+        # Start with 1-2 admitting shifts
+        admitting_count = min(2, len(available_dates) - 1)  # Ensure at least 1 rounding shift
+        admitting_events = assign_admitting_before_rounding(provider, available_dates[:admitting_count])
         events.extend(admitting_events)
-        available_dates = available_dates[2:]  # Remove the admitting dates
-    
-    # Assign the main shift type
-    for i, day in enumerate(available_dates):
-        if i >= block_size:
-            break
+        
+        # Assign rounding shifts for the remaining dates
+        rounding_dates = available_dates[admitting_count:]
+        for day in rounding_dates:
+            start_time = datetime.combine(day, parse_time(shift_config["start"]))
+            end_time = datetime.combine(day, parse_time(shift_config["end"]))
             
-        # Create shift event
-        start_time = datetime.combine(day, parse_time(shift_config["start"]))
-        end_time = datetime.combine(day, parse_time(shift_config["end"]))
-        
-        # Handle overnight shifts
-        if shift_config["end"] < shift_config["start"]:
-            end_time += timedelta(days=1)
-        
-        event = SEvent(
-            id=str(uuid.uuid4()),
-            title=f"{shift_config['label']} - {provider}",
-            start=start_time,
-            end=end_time,
-            backgroundColor=shift_config["color"],
-            extendedProps={
-                "provider": provider,
-                "shift_type": shift_type,
-                "shift_label": shift_config["label"]
-            }
-        )
-        
-        events.append(event)
-        provider_shifts[provider].append(event)
+            event = SEvent(
+                id=str(uuid.uuid4()),
+                title=f"{shift_config['label']} - {provider}",
+                start=start_time,
+                end=end_time,
+                backgroundColor=shift_config["color"],
+                extendedProps={
+                    "provider": provider,
+                    "shift_type": shift_type,
+                    "shift_label": shift_config["label"]
+                }
+            )
+            
+            events.append(event)
+            provider_shifts[provider].append(event)
+    else:
+        # For non-rounder shifts or insufficient dates, assign normally
+        for i, day in enumerate(available_dates):
+            if i >= block_size:
+                break
+                
+            # Create shift event
+            start_time = datetime.combine(day, parse_time(shift_config["start"]))
+            end_time = datetime.combine(day, parse_time(shift_config["end"]))
+            
+            # Handle overnight shifts
+            if shift_config["end"] < shift_config["start"]:
+                end_time += timedelta(days=1)
+            
+            event = SEvent(
+                id=str(uuid.uuid4()),
+                title=f"{shift_config['label']} - {provider}",
+                start=start_time,
+                end=end_time,
+                backgroundColor=shift_config["color"],
+                extendedProps={
+                    "provider": provider,
+                    "shift_type": shift_type,
+                    "shift_label": shift_config["label"]
+                }
+            )
+            
+            events.append(event)
+            provider_shifts[provider].append(event)
     
     return events
 
@@ -315,7 +342,7 @@ def assign_admitting_before_rounding(provider: str, dates: List[date]) -> List[S
 def find_available_dates_for_block(provider: str, shift_type: str, block_size: int, 
                                  provider_shifts: Dict) -> List[date]:
     """
-    Find available dates for a shift block, prioritizing consecutive dates.
+    Find available dates for a shift block, ensuring 3-day rest between blocks.
     """
     # Get all dates in the current month
     today = date.today()
@@ -333,7 +360,9 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
     while current_date <= month_end:
         if not is_provider_unavailable_on_date(provider, current_date):
             if not _has_shift_on_date(provider, current_date, provider_shifts[provider]):
-                available_dates.append(current_date)
+                # Check for 3-day rest requirement
+                if _has_sufficient_rest(provider, current_date, provider_shifts[provider]):
+                    available_dates.append(current_date)
         current_date += timedelta(days=1)
     
     # Try to find consecutive dates first
@@ -375,6 +404,33 @@ def get_shift_config(shift_type: str) -> Dict:
     }
     
     return shift_configs.get(shift_type, shift_configs["R12"])
+
+def _has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[SEvent]) -> bool:
+    """
+    Check if provider has at least 3 days of rest before the target date.
+    """
+    # Find the last shift date for this provider
+    last_shift_date = None
+    for event in provider_shifts:
+        if hasattr(event, 'start'):
+            event_date = event.start.date()
+        elif isinstance(event, dict) and 'start' in event:
+            try:
+                event_date = datetime.fromisoformat(event['start']).date()
+            except (ValueError, TypeError):
+                continue
+        else:
+            continue
+        
+        if last_shift_date is None or event_date > last_shift_date:
+            last_shift_date = event_date
+    
+    if last_shift_date is None:
+        return True  # No previous shifts, so rest requirement is met
+    
+    # Check if there are at least 3 days between last shift and target date
+    days_since_last = (target_date - last_shift_date).days
+    return days_since_last >= 3
 
 def _has_shift_on_date(provider: str, day: date, events: List[SEvent]) -> bool:
     """

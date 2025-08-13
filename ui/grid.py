@@ -220,7 +220,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             width="small"
         )
     
-    # Add CSS for better styling
+    # Add CSS for better styling with sticky first column
     st.markdown("""
     <style>
         .grid-container {
@@ -240,6 +240,21 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             text-align: center;
             color: #1565c0;
             font-weight: bold;
+        }
+        
+        /* Make first column sticky */
+        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+        }
+        
+        /* Ensure sticky column has proper styling */
+        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child th,
+        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child td {
+            background: white !important;
+            border-right: 2px solid #e0e0e0 !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -338,27 +353,72 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         with col3:
             st.metric("APPs", app_count)
         
-        # Show provider utilization
-        st.markdown("#### Provider Utilization")
-        provider_counts = {}
+        # Show enhanced provider utilization
+        st.markdown("#### 📊 Enhanced Provider Utilization")
+        provider_stats = {}
         
         for event in events:
             if hasattr(event, 'extendedProps'):
                 provider = event.extendedProps.get("provider", "")
+                shift_type = event.extendedProps.get("shift_type", "")
             elif isinstance(event, dict) and 'extendedProps' in event:
                 provider = event['extendedProps'].get("provider", "")
+                shift_type = event['extendedProps'].get("shift_type", "")
             else:
                 continue
             
             if provider:
-                provider_counts[provider] = provider_counts.get(provider, 0) + 1
+                if provider not in provider_stats:
+                    provider_stats[provider] = {
+                        "total_shifts": 0,
+                        "weekend_shifts": 0,
+                        "night_shifts": 0,
+                        "rounder_shifts": 0,
+                        "admitting_shifts": 0,
+                        "app_shifts": 0
+                    }
+                
+                provider_stats[provider]["total_shifts"] += 1
+                
+                # Count weekend shifts
+                if hasattr(event, 'start'):
+                    event_date = event.start.date()
+                elif isinstance(event, dict) and 'start' in event:
+                    try:
+                        event_date = datetime.fromisoformat(event['start']).date()
+                    except (ValueError, TypeError):
+                        continue
+                else:
+                    continue
+                
+                if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+                    provider_stats[provider]["weekend_shifts"] += 1
+                
+                # Count shift types
+                if shift_type in ["N12", "NB"]:
+                    provider_stats[provider]["night_shifts"] += 1
+                elif shift_type == "R12":
+                    provider_stats[provider]["rounder_shifts"] += 1
+                elif shift_type in ["A12", "A10"]:
+                    provider_stats[provider]["admitting_shifts"] += 1
+                elif shift_type == "APP":
+                    provider_stats[provider]["app_shifts"] += 1
         
-        if provider_counts:
-            # Create a DataFrame for provider utilization
-            utilization_df = pd.DataFrame([
-                {"Provider": provider, "Shifts": count}
-                for provider, count in provider_counts.items()
-            ]).sort_values("Shifts", ascending=False)
+        if provider_stats:
+            # Create a DataFrame for enhanced provider utilization
+            utilization_data = []
+            for provider, stats in provider_stats.items():
+                utilization_data.append({
+                    "Provider": provider,
+                    "Total Shifts": stats["total_shifts"],
+                    "Weekend Shifts": stats["weekend_shifts"],
+                    "Night Shifts": stats["night_shifts"],
+                    "Rounder Shifts": stats["rounder_shifts"],
+                    "Admitting Shifts": stats["admitting_shifts"],
+                    "APP Shifts": stats["app_shifts"]
+                })
+            
+            utilization_df = pd.DataFrame(utilization_data).sort_values("Total Shifts", ascending=False)
             
             st.dataframe(
                 utilization_df,
@@ -366,7 +426,12 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 hide_index=True,
                 column_config={
                     "Provider": st.column_config.TextColumn("Provider", width="medium"),
-                    "Shifts": st.column_config.NumberColumn("Shifts", width="small")
+                    "Total Shifts": st.column_config.NumberColumn("Total", width="small"),
+                    "Weekend Shifts": st.column_config.NumberColumn("Weekend", width="small"),
+                    "Night Shifts": st.column_config.NumberColumn("Night", width="small"),
+                    "Rounder Shifts": st.column_config.NumberColumn("Rounder", width="small"),
+                    "Admitting Shifts": st.column_config.NumberColumn("Admitting", width="small"),
+                    "APP Shifts": st.column_config.NumberColumn("APP", width="small")
                 }
             )
     

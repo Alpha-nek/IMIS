@@ -128,37 +128,7 @@ def providers_panel():
                     if st.button("📊 View Stats", key=f"view_stats_{selected_initials}"):
                         st.info(f"Provider statistics will be shown here for {selected_initials}.")
         
-        # Quick provider list (compact)
-        st.markdown("---")
-        st.markdown("#### 📝 Quick Provider List")
-        
-        # Show filtered providers in a compact format
-        if len(filtered_df) > 0:
-            st.markdown(f"**Showing {len(filtered_df)} of {len(providers_df)} providers**")
-            
-            # Create a compact display
-            if filter_type == "All":
-                # Group by type
-                physicians = filtered_df[filtered_df["type"] == "Physician"]
-                apps = filtered_df[filtered_df["type"] == "APP"]
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**Physicians:**")
-                    for _, row in physicians.iterrows():
-                        st.markdown(f"• {row['initials']} - {row['name']}")
-                
-                with col2:
-                    st.markdown("**APPs:**")
-                    for _, row in apps.iterrows():
-                        st.markdown(f"• {row['initials']} - {row['name']}")
-            else:
-                # Show all in one column
-                for _, row in filtered_df.iterrows():
-                    st.markdown(f"• {row['initials']} - {row['name']}")
-        else:
-            st.warning("No providers match your filter criteria.")
+
         
         # Provider rules section
         st.markdown("---")
