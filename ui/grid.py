@@ -114,16 +114,91 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     <style>
         .grid-container {
             overflow-x: auto;
-            padding: 10px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            background: #fafafa;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #f8f9fa;
+            margin: 10px 0;
+            max-width: 100%;
         }
+        
+        .grid-table {
+            border-collapse: separate;
+            border-spacing: 2px;
+            width: max-content;
+            min-width: 100%;
+        }
+        
+        .grid-header {
+            background: #1f77b4;
+            color: white;
+            font-weight: bold;
+            padding: 12px 8px;
+            text-align: center;
+            border: 1px solid #1565c0;
+            min-width: 150px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .grid-header:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 20;
+            min-width: 200px;
+            background: #1565c0;
+        }
+        
+        .grid-cell {
+            background: white;
+            border: 2px solid #dee2e6;
+            padding: 8px;
+            min-width: 150px;
+            min-height: 50px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        
+        .grid-cell:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 15;
+            background: #f8f9fa;
+            border-right: 3px solid #1f77b4;
+            font-weight: bold;
+            min-width: 200px;
+        }
+        
         .stSelectbox > div > div {
-            min-width: 120px;
+            min-width: 140px;
+            min-height: 40px;
         }
-        .stButton > button {
-            margin: 5px;
+        
+        .stSelectbox select {
+            font-size: 14px;
+            padding: 8px;
+        }
+        
+        .shift-type-label {
+            background: linear-gradient(45deg, #1f77b4, #ff7f0e);
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .scroll-hint {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 10px 0;
+            text-align: center;
+            color: #1565c0;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -131,13 +206,20 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     # Create editable grid with dropdowns
     st.markdown("#### Edit Schedule")
     
+    # Add scroll hint
+    st.markdown("""
+    <div class="scroll-hint">
+        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type column stays fixed while you scroll through the dates.
+    </div>
+    """, unsafe_allow_html=True)
+    
     # Wrap the grid in a container for better scrolling
     with st.container():
         st.markdown('<div class="grid-container">', unsafe_allow_html=True)
     
     # Create a form for the grid
     with st.form("schedule_grid_form"):
-        # Display shift type labels with color coding
+        # Define shift colors for the visual grid
         shift_colors = {
             "7am–7pm Rounder": "#16a34a",
             "7am–7pm Admitter": "#f59e0b", 
@@ -147,13 +229,23 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "APP Provider": "#8b5cf6"
         }
         
-        # Create header row with dates - use wider columns
-        header_cols = st.columns([3] + [2] * len(date_cols))
-        with header_cols[0]:
-            st.markdown("**Shift Type**")
-        for i, date_col in enumerate(date_cols):
-            with header_cols[i + 1]:
-                st.markdown(f"**{date_col}**")
+        # Create the grid using HTML table for better control
+        grid_html = """
+        <table class="grid-table">
+            <thead>
+                <tr>
+                    <th class="grid-header">Shift Type</th>
+        """
+        
+        # Add date headers
+        for date_col in date_cols:
+            grid_html += f'<th class="grid-header">{date_col}</th>'
+        
+        grid_html += """
+                </tr>
+            </thead>
+            <tbody>
+        """
         
         # Create rows for each shift type
         updated_data = {}
@@ -162,29 +254,68 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             shift_type = row["Shift Type"]
             shift_key = row["Shift Key"]
             
-            # Create columns for this row - use wider columns
-            cols = st.columns([3] + [2] * len(date_cols))
+            # Get color for this shift type
+            color = shift_colors.get(shift_type, "#ffffff")
             
-            # Shift type label with color
-            with cols[0]:
-                color = shift_colors.get(shift_type, "#ffffff")
-                st.markdown(f"""
-                <div style="background-color: {color}; color: white; padding: 8px; border-radius: 4px; text-align: center; font-weight: bold;">
-                    {shift_type}
-                </div>
-                """, unsafe_allow_html=True)
+            # Start row
+            grid_html += f"""
+                <tr>
+                    <td class="grid-cell">
+                        <div class="shift-type-label" style="background: {color};">
+                            {shift_type}
+                        </div>
+                    </td>
+            """
             
-            # Provider dropdowns for each date
+            # Add cells for each date
+            for date_col in date_cols:
+                current_provider = row[date_col] if row[date_col] else "None"
+                dropdown_key = f"grid_{shift_key}_{date_col}"
+                
+                grid_html += f'<td class="grid-cell">'
+                grid_html += f'<div style="min-height: 50px; display: flex; align-items: center; justify-content: center;">'
+                
+                # We'll add the dropdown here, but need to handle it with Streamlit
+                grid_html += f'<div id="{dropdown_key}_container"></div>'
+                grid_html += '</div></td>'
+                
+                # Store the selection for later processing
+                if current_provider != "None":
+                    updated_data[f"{shift_key}_{date_col}"] = current_provider
+                else:
+                    updated_data[f"{shift_key}_{date_col}"] = ""
+            
+            grid_html += "</tr>"
+        
+        grid_html += """
+            </tbody>
+        </table>
+        """
+        
+        # Display the HTML table
+        st.markdown(grid_html, unsafe_allow_html=True)
+        
+        # Now add the Streamlit dropdowns in a more organized way
+        st.markdown("### Provider Assignments")
+        st.markdown("Use the dropdowns below to assign providers to shifts:")
+        
+        # Create a more compact layout for the dropdowns
+        for idx, row in df.iterrows():
+            shift_type = row["Shift Type"]
+            shift_key = row["Shift Key"]
+            
+            st.markdown(f"**{shift_type}**")
+            
+            # Create columns for this shift type's dates
+            cols = st.columns(len(date_cols))
+            
             for i, date_col in enumerate(date_cols):
-                with cols[i + 1]:
+                with cols[i]:
                     current_provider = row[date_col] if row[date_col] else "None"
-                    
-                    # Create unique key for each dropdown
                     dropdown_key = f"grid_{shift_key}_{date_col}"
                     
-                    # Create dropdown with better styling
                     selected_provider = st.selectbox(
-                        "Provider",
+                        f"{date_col}",
                         options=provider_options,
                         index=provider_options.index(current_provider) if current_provider in provider_options else 0,
                         key=dropdown_key,
@@ -196,6 +327,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                         updated_data[f"{shift_key}_{date_col}"] = selected_provider
                     else:
                         updated_data[f"{shift_key}_{date_col}"] = ""
+            
+            st.markdown("---")
         
         # Submit button
         submitted = st.form_submit_button("🔄 Apply Grid Changes to Calendar", type="primary")
