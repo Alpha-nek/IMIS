@@ -38,7 +38,7 @@ except ImportError as e:
     st.stop()
 
 try:
-    from core.scheduler import generate_schedule, validate_rules
+    from core.scheduler import generate_schedule, validate_rules, NOCTURNISTS
 except ImportError as e:
     st.error(f"Failed to import scheduler: {e}")
     st.stop()
@@ -76,7 +76,7 @@ except ImportError as e:
 try:
     from core.data_manager import (
         initialize_default_data, auto_load_session_state, auto_save_session_state,
-        save_providers, save_rules, save_schedule
+        save_providers, save_rules, save_schedule, load_providers, load_rules
     )
 except ImportError as e:
     st.error(f"Failed to import data manager: {e}")
@@ -1169,6 +1169,169 @@ def render_desktop_interface():
         except Exception as e:
             st.error(f"Failed to render data status: {e}")
             st.error(f"Error details: {traceback.format_exc()}")
+    
+    # Debug Test Tab
+    with tab8:
+        st.header("🐛 Debug Test")
+        st.markdown("Run quick tests to identify scheduling issues.")
+        
+        if st.button("🔍 Run Shift Count Test", type="primary"):
+            try:
+                # Load current data
+                providers_df, _ = load_providers()
+                if providers_df.empty:
+                    providers_df = pd.read_csv('IMIS_initials.csv')
+                providers = providers_df['initials'].tolist()
+                
+                global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
+                global_rules = RuleConfig(**global_rules_dict) if global_rules_dict else RuleConfig()
+                
+                # Get current month info
+                current_date = datetime.now()
+                year, month = current_date.year, current_date.month
+                month_days = make_month_days(year, month)
+                days_in_month = len(month_days)
+                expected_min_shifts = 15 if days_in_month == 30 else 16
+                
+                st.markdown(f"**Testing {month}/{year} ({days_in_month} days)**")
+                st.markdown(f"**Expected minimum shifts: {expected_min_shifts}**")
+                
+                # Generate schedule
+                with st.spinner("Generating schedule..."):
+                    events = generate_schedule(year, month, providers, shift_types, shift_capacity, 
+                                             provider_rules, global_rules)
+                
+                st.success(f"Generated {len(events)} events")
+                
+                # Validate rules
+                validation_result = validate_rules(events, providers, global_rules, provider_rules)
+                
+                # Display results
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Events", len(events))
+                with col2:
+                    st.metric("Total Violations", validation_result['summary']['total_violations'])
+                with col3:
+                    st.metric("Schedule Valid", "✅" if validation_result['is_valid'] else "❌")
+                
+                # Provider analysis
+                st.markdown("### Provider Analysis")
+                provider_stats = validation_result['summary']['provider_stats']
+                
+                # Create analysis dataframe
+                analysis_data = []
+                for provider, stats in provider_stats.items():
+                    total_shifts = stats['total_shifts']
+                    provider_rule = provider_rules.get(provider, {})
+                    
+                    # Skip APP providers for min/max validation
+                    if provider in APP_PROVIDER_INITIALS:
+                        status = "APP Provider"
+                        min_shifts = "N/A"
+                        max_shifts = "N/A"
+                    else:
+                        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_month)
+                        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+                        
+                        if total_shifts < min_shifts:
+                            status = f"❌ Below Min ({min_shifts})"
+                        elif total_shifts > max_shifts:
+                            status = f"❌ Above Max ({max_shifts})"
+                        else:
+                            status = "✅ OK"
+                    
+                    analysis_data.append({
+                        "Provider": provider,
+                        "Total Shifts": total_shifts,
+                        "Min Required": min_shifts,
+                        "Max Allowed": max_shifts,
+                        "Status": status,
+                        "Weekend": stats['weekend_shifts'],
+                        "Night": stats['night_shifts'],
+                        "Rounder": stats['rounder_shifts'],
+                        "Admitting": stats['admitting_shifts']
+                    })
+                
+                analysis_df = pd.DataFrame(analysis_data)
+                st.dataframe(analysis_df, use_container_width=True)
+                
+                # Show violations
+                if validation_result['violations']:
+                    st.markdown("### Violations Found")
+                    violations_df = pd.DataFrame({
+                        "Violation": validation_result['violations']
+                    })
+                    st.dataframe(violations_df, use_container_width=True)
+                
+                # Shift distribution
+                st.markdown("### Shift Distribution")
+                shift_type_counts = {}
+                for event in events:
+                    shift_type = event.extendedProps.get("shift_type")
+                    if shift_type:
+                        shift_type_counts[shift_type] = shift_type_counts.get(shift_type, 0) + 1
+                
+                shift_dist_df = pd.DataFrame([
+                    {"Shift Type": k, "Count": v} for k, v in shift_type_counts.items()
+                ])
+                st.dataframe(shift_dist_df, use_container_width=True)
+                
+                # Coverage analysis
+                total_available = 0
+                for day in month_days:
+                    for shift_type, capacity in shift_capacity.items():
+                        total_available += capacity
+                
+                coverage_pct = (len(events) / total_available * 100) if total_available > 0 else 0
+                st.markdown(f"**Coverage: {len(events)}/{total_available} shifts ({coverage_pct:.1f}%)**")
+                
+            except Exception as e:
+                st.error(f"Test failed: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
+        
+        if st.button("🔧 Test Scheduler Logic", type="secondary"):
+            try:
+                st.markdown("### Scheduler Logic Analysis")
+                
+                # Load data
+                providers_df, _ = load_providers()
+                if providers_df.empty:
+                    providers_df = pd.read_csv('IMIS_initials.csv')
+                providers = providers_df['initials'].tolist()
+                global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
+                global_rules = RuleConfig(**global_rules_dict) if global_rules_dict else RuleConfig()
+                
+                # Provider analysis
+                app_providers = [p for p in providers if p in APP_PROVIDER_INITIALS]
+                nocturnists = [p for p in providers if p in NOCTURNISTS]
+                physician_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS and p not in NOCTURNISTS]
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Providers", len(providers))
+                with col2:
+                    st.metric("APP Providers", len(app_providers))
+                with col3:
+                    st.metric("Physician Providers", len(physician_providers))
+                
+                st.markdown("**Provider Types:**")
+                st.markdown(f"- APP Providers: {', '.join(app_providers)}")
+                st.markdown(f"- Nocturnists: {', '.join(nocturnists)}")
+                st.markdown(f"- Other Physicians: {', '.join(physician_providers)}")
+                
+                st.markdown("**Global Rules:**")
+                st.markdown(f"- Min shifts per month: {global_rules.min_shifts_per_month}")
+                st.markdown(f"- Max shifts per month: {global_rules.max_shifts_per_month}")
+                st.markdown(f"- Min days between shifts: {global_rules.min_days_between_shifts}")
+                
+                st.markdown("**Shift Capacity:**")
+                for shift_type, capacity in shift_capacity.items():
+                    st.markdown(f"- {shift_type}: {capacity} slots per day")
+                
+            except Exception as e:
+                st.error(f"Logic test failed: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
 
 def main():
     """Main application function."""

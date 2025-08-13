@@ -74,13 +74,13 @@ def assign_advanced(year: int, month: int, providers: List[str],
     # Step 2: Assign night shifts to nocturnists in blocks
     night_events = assign_night_shifts_to_nocturnists(month_days, nocturnists, 
                                                      shift_capacity, provider_rules, 
-                                                     global_rules, provider_shifts)
+                                                     global_rules, provider_shifts, year, month)
     events.extend(night_events)
     
     # Step 3: Assign remaining physician shifts in blocks
     physician_events = assign_physician_shifts(month_days, physician_providers, 
                                              shift_capacity, provider_rules, 
-                                             global_rules, provider_shifts)
+                                             global_rules, provider_shifts, year, month)
     events.extend(physician_events)
     
     # Step 4: Fill any remaining unfilled shifts
@@ -92,7 +92,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
 
 def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List[str], 
                                       shift_capacity: Dict[str, int], provider_rules: Dict, 
-                                      global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+                                      global_rules: RuleConfig, provider_shifts: Dict, 
+                                      year: int, month: int) -> List[SEvent]:
     """
     Assign night shifts to nocturnists in blocks of 3-7 shifts.
     """
@@ -125,7 +126,7 @@ def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List
             
             # Find available dates for this block
             available_dates = find_available_dates_for_block(nocturnist, shift_type, block_size, 
-                                                           provider_shifts)
+                                                           provider_shifts, year, month)
             
             if len(available_dates) >= block_size:
                 # Assign the block
@@ -235,7 +236,8 @@ def assign_app_shifts(month_days: List[date], app_providers: List[str],
 
 def assign_physician_shifts(month_days: List[date], physician_providers: List[str], 
                           shift_capacity: Dict[str, int], provider_rules: Dict, 
-                          global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+                          global_rules: RuleConfig, provider_shifts: Dict, 
+                          year: int, month: int) -> List[SEvent]:
     """
     Assign physician shifts following the ground rules:
     - Shift type consistency in blocks
@@ -252,7 +254,7 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     # Assign shifts based on blocks
     for provider, blocks in physician_blocks.items():
         for block in blocks:
-            block_events = assign_shift_block(provider, block, provider_shifts)
+            block_events = assign_shift_block(provider, block, provider_shifts, year, month)
             events.extend(block_events)
     
     return events
@@ -459,7 +461,10 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
             min_shifts = max_shifts
         
         # Determine target number of shifts for this provider
-        target_shifts = random.randint(min_shifts, max_shifts)
+        if min_shifts == max_shifts:
+            target_shifts = min_shifts
+        else:
+            target_shifts = random.randint(min_shifts, max_shifts)
         
         # Create blocks with maximum 7 shifts per block
         remaining_shifts = target_shifts
@@ -471,7 +476,10 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
                 # If remaining shifts is less than 3, use all remaining shifts
                 block_size = remaining_shifts
             else:
-                block_size = random.randint(3, max_block_size)
+                if max_block_size == 3:
+                    block_size = 3
+                else:
+                    block_size = random.randint(3, max_block_size)
             
             # Determine shift type for this block
             shift_type = select_shift_type_for_block(provider, physician_shift_types, 
@@ -514,7 +522,7 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
     # Otherwise, choose randomly from available types
     return random.choice(available_types)
 
-def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> List[SEvent]:
+def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: int, month: int) -> List[SEvent]:
     """
     Assign a specific shift block to a provider with proper sequence rules.
     """
@@ -527,7 +535,7 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> Lis
     
     # Find available dates for this block
     available_dates = find_available_dates_for_block(provider, shift_type, block_size, 
-                                                   provider_shifts)
+                                                   provider_shifts, year, month)
     
     if len(available_dates) < block_size:
         # If we can't find enough consecutive dates, take what we can get
@@ -631,19 +639,21 @@ def assign_admitting_before_rounding(provider: str, dates: List[date]) -> List[S
     return events
 
 def find_available_dates_for_block(provider: str, shift_type: str, block_size: int, 
-                                  provider_shifts: Dict) -> List[date]:
+                                  provider_shifts: Dict, year: int = None, month: int = None) -> List[date]:
     """
     Find available dates for a shift block, ensuring 3-day rest between blocks.
     Prioritizes consecutive dates for better block formation.
     """
-    # Get all dates in the current month
-    today = date.today()
-    month_start = today.replace(day=1)
-    if today.month == 12:
-        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    # Get all dates in the specified month
+    if year is None or month is None:
+        today = date.today()
+        year, month = today.year, today.month
+    
+    month_start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1) - timedelta(days=1)
     else:
-        next_month = today.replace(month=today.month + 1, day=1)
-    month_end = next_month - timedelta(days=1)
+        month_end = date(year, month + 1, 1) - timedelta(days=1)
     
     available_dates = []
     
