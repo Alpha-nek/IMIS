@@ -108,12 +108,15 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         
         # Main assignment loop - assign shifts day by day using scoring
         debug_logger.log("🔄 Starting main assignment loop...")
+        print(f"🔄 SCHEDULER: Starting assignment for {len(month_days)} days, {len(providers)} providers")
+        print(f"🔄 SCHEDULER: Shift types: {[st.get('key') for st in shift_types]}")
         day_count = 0
         total_days = len(month_days)
         
         for current_day in month_days:
             day_count += 1
             debug_logger.log(f"📅 Processing day {day_count}/{total_days}: {current_day}")
+            print(f"📅 Day {day_count}: {current_day}")
             
             for shift_type_dict in shift_types:
                 shift_key = shift_type_dict.get("key", shift_type_dict.get("name", ""))
@@ -122,15 +125,16 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                 # Get capacity for this shift type on this day
                 capacity = get_shift_capacity(shift_key, current_day, shift_capacity)
                 debug_logger.log(f"  📊 Capacity for {shift_key}: {capacity}")
+                print(f"  🎯 {shift_key}: capacity {capacity}")
                 
                 # Assign shifts up to capacity
                 for slot in range(capacity):
                     debug_logger.log(f"    🔸 Assigning slot {slot + 1}/{capacity} for {shift_key}")
                     
-                    # Create scorer with current events - optimize by reusing
-                    if 'scorer' not in locals() or len(events) % 10 == 0:  # Update scorer every 10 events
-                        debug_logger.log("    🧮 Creating/updating scorer...")
-                        scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
+                    # SIMPLIFIED: Skip complex scoring for now
+                    # if 'scorer' not in locals() or len(events) % 10 == 0:  # Update scorer every 10 events
+                    #     debug_logger.log("    🧮 Creating/updating scorer...")
+                    #     scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
                     
                     # Find feasible candidates
                     debug_logger.log("    🔍 Checking provider feasibility...")
@@ -147,9 +151,11 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                             candidates.append((provider, simple_score))
                     
                     debug_logger.log(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
+                    print(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
                     
                     if not candidates:
                         debug_logger.log(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
+                        print(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
                         continue  # Skip this slot if no candidates
                     
                     # Sort by score (highest first) and add some randomness for close scores
@@ -167,11 +173,22 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                     
                     # Create and add the shift event
                     debug_logger.log(f"    ✅ Assigning {shift_key} to {best_provider}")
+                    print(f"    ✅ Assigning {shift_key} to {best_provider}")
                     event = create_shift_event(best_provider, shift_key, current_day)
                     events.append(event)
                     debug_logger.log(f"    📝 Total events so far: {len(events)}")
+                    print(f"    📝 Total events so far: {len(events)}")
         
         debug_logger.log(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
+        print(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
+        
+        # Analyze what was assigned
+        shift_type_counts = {}
+        for event in events:
+            shift_type = event.extendedProps.get('shift_type', 'Unknown')
+            shift_type_counts[shift_type] = shift_type_counts.get(shift_type, 0) + 1
+        
+        print(f"📊 Shift type distribution: {shift_type_counts}")
         
         # Skip validation for speed during testing
         # events = validate_and_adjust_schedule(events, providers, provider_rules, global_rules, year, month)
@@ -201,10 +218,12 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     
     # Check basic availability
     if is_provider_unavailable_on_date(provider, day, provider_rules):
+        print(f"      ❌ {provider} unavailable on {day}")
         return False
     
     # Check if provider already has a shift on this day
     if has_shift_on_date(provider, day, events):
+        print(f"      ❌ {provider} already has shift on {day}")
         return False
     
     # Check shift type eligibility based on provider type and qualifications
@@ -213,17 +232,21 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     if provider in APP_PROVIDER_INITIALS:
         # APP providers can ONLY take APP shifts
         if shift_key != "APP":
+            print(f"      ❌ {provider} (APP) can't take {shift_key}")
             return False
     elif provider in SENIORS:
         # Seniors can ONLY take R12 shifts (7am rounding)
         if shift_key != "R12":
+            print(f"      ❌ {provider} (Senior) can't take {shift_key}")
             return False
     elif shift_key == "APP":
         # Only APP providers can take APP shifts
+        print(f"      ❌ {provider} (non-APP) can't take APP")
         return False
     elif shift_key == "NB":
         # Only bridge-qualified providers can take bridge shifts
         if provider not in BRIDGE_QUALIFIED:
+            print(f"      ❌ {provider} not bridge-qualified for NB")
             return False
     # For all other combinations, continue with preference checking
     
@@ -529,7 +552,7 @@ def validate_and_adjust_schedule(events: List[SEvent], providers: List[str],
         
         if validation_result["is_valid"]:
             logger.info("Schedule passed validation - no adjustments needed")
-            return events
+    return events
         
         logger.info(f"Schedule has {validation_result['summary']['total_violations']} violations, attempting to optimize...")
         
