@@ -52,18 +52,11 @@ def initialize_session_state():
         st.session_state.providers_loaded = False
     
     if "global_rules" not in st.session_state:
-        st.session_state.global_rules = RuleConfig(
-            max_consecutive_shifts=7,
-            min_days_between_shifts=1,
-            max_shifts_per_month=16,
-            min_shifts_per_month=8,
-            max_weekend_shifts_per_month=4,
-            min_weekend_shifts_per_month=1,
-            max_night_shifts_per_month=8,
-            min_night_shifts_per_month=2,
-            max_holiday_shifts_per_month=2,
-            min_holiday_shifts_per_month=0
-        )
+        st.session_state.global_rules = RuleConfig()
+    
+    # Ensure all required attributes exist
+    if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
+        st.session_state.global_rules = RuleConfig()
     
     if "shift_types" not in st.session_state:
         st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
@@ -365,48 +358,52 @@ def render_desktop_interface():
         # Global Rules Configuration
         st.subheader("📋 Global Scheduling Rules")
         
+        # Safety check for global_rules
+        if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
+            st.session_state.global_rules = RuleConfig()
+        
         col1, col2 = st.columns(2)
         
         with col1:
             st.session_state.global_rules.max_consecutive_shifts = st.number_input(
                 "Max Consecutive Shifts", 
-                min_value=1, max_value=14, value=st.session_state.global_rules.max_consecutive_shifts
+                min_value=1, max_value=14, value=getattr(st.session_state.global_rules, 'max_consecutive_shifts', 7)
             )
             
             st.session_state.global_rules.min_days_between_shifts = st.number_input(
                 "Min Days Between Shifts", 
-                min_value=0, max_value=7, value=st.session_state.global_rules.min_days_between_shifts
+                min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1)
             )
             
             st.session_state.global_rules.max_shifts_per_month = st.number_input(
                 "Max Shifts Per Month", 
-                min_value=1, max_value=31, value=st.session_state.global_rules.max_shifts_per_month
+                min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'max_shifts_per_month', 16)
             )
             
             st.session_state.global_rules.min_shifts_per_month = st.number_input(
                 "Min Shifts Per Month", 
-                min_value=0, max_value=31, value=st.session_state.global_rules.min_shifts_per_month
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_shifts_per_month', 8)
             )
         
         with col2:
             st.session_state.global_rules.max_weekend_shifts_per_month = st.number_input(
                 "Max Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=st.session_state.global_rules.max_weekend_shifts_per_month
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'max_weekend_shifts_per_month', 4)
             )
             
             st.session_state.global_rules.min_weekend_shifts_per_month = st.number_input(
                 "Min Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=st.session_state.global_rules.min_weekend_shifts_per_month
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'min_weekend_shifts_per_month', 1)
             )
             
             st.session_state.global_rules.max_night_shifts_per_month = st.number_input(
                 "Max Night Shifts Per Month", 
-                min_value=0, max_value=31, value=st.session_state.global_rules.max_night_shifts_per_month
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'max_night_shifts_per_month', 8)
             )
             
             st.session_state.global_rules.min_night_shifts_per_month = st.number_input(
                 "Min Night Shifts Per Month", 
-                min_value=0, max_value=31, value=st.session_state.global_rules.min_night_shifts_per_month
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_night_shifts_per_month', 2)
             )
         
         # Shift Types Configuration
