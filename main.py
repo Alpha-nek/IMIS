@@ -658,6 +658,12 @@ def render_desktop_interface():
         # Calendar display
         if st.session_state.events:
             st.markdown('<div class="calendar-container">', unsafe_allow_html=True)
+            # Debug info
+            st.write(f"Debug: Found {len(st.session_state.events)} events")
+            if st.session_state.events:
+                st.write(f"Debug: First event type: {type(st.session_state.events[0])}")
+                if hasattr(st.session_state.events[0], 'title'):
+                    st.write(f"Debug: First event title: {st.session_state.events[0].title}")
             render_calendar(st.session_state.events)
             st.markdown('</div>', unsafe_allow_html=True)
         else:
@@ -1066,6 +1072,10 @@ def render_desktop_interface():
     with tab4:
         if st.session_state.events:
             try:
+                # Debug info
+                st.write(f"Grid Debug: Found {len(st.session_state.events)} events")
+                if st.session_state.events:
+                    st.write(f"Grid Debug: First event type: {type(st.session_state.events[0])}")
                 # Render grid view (now includes editing functionality)
                 render_schedule_grid(st.session_state.events, year, month)
             except Exception as e:
