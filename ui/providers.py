@@ -66,16 +66,21 @@ def providers_panel():
         
         st.markdown("---")
         
-        # Search and filter section
-        st.markdown("#### 🔍 Search & Filter Providers")
+        # Compact provider selection with dropdown
+        st.markdown("#### 🔍 Provider Selection")
         
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            search_term = st.text_input(
-                "Search by name or initials",
-                placeholder="Enter provider name or initials...",
-                key="provider_search"
+            # Create a formatted list for the dropdown
+            provider_options = []
+            for _, row in providers_df.iterrows():
+                provider_options.append(f"{row['initials']} - {row['name']} ({row['type']})")
+            
+            selected_provider_full = st.selectbox(
+                "Select a provider for actions:",
+                options=provider_options,
+                help="Choose a provider to view details, edit rules, or perform actions"
             )
         
         with col2:
@@ -86,97 +91,99 @@ def providers_panel():
             )
         
         with col3:
-            sort_by = st.selectbox(
-                "Sort by",
-                options=["Name", "Initials", "Type"],
-                key="provider_sort"
-            )
+            if st.button("📋 View Selected Provider", type="primary"):
+                if selected_provider_full:
+                    # Extract initials from the selected option
+                    selected_initials = selected_provider_full.split(" - ")[0]
+                    st.session_state.selected_provider_for_rules = selected_initials
+                    st.rerun()
         
-        # Filter and sort providers
-        filtered_df = providers_df.copy()
-        
-        # Apply search filter
-        if search_term:
-            search_mask = (
-                filtered_df["name"].str.contains(search_term, case=False, na=False) |
-                filtered_df["initials"].str.contains(search_term.upper(), na=False)
-            )
-            filtered_df = filtered_df[search_mask]
-        
-        # Apply type filter
+        # Filter providers based on type
         if filter_type != "All":
-            filtered_df = filtered_df[filtered_df["type"] == filter_type]
+            filtered_df = providers_df[providers_df["type"] == filter_type]
+        else:
+            filtered_df = providers_df
         
-        # Apply sorting
-        if sort_by == "Name":
-            filtered_df = filtered_df.sort_values("name")
-        elif sort_by == "Initials":
-            filtered_df = filtered_df.sort_values("initials")
-        elif sort_by == "Type":
-            filtered_df = filtered_df.sort_values("type")
+        # Show selected provider details
+        if selected_provider_full:
+            selected_initials = selected_provider_full.split(" - ")[0]
+            provider_info = providers_df[providers_df["initials"] == selected_initials]
+            
+            if not provider_info.empty:
+                provider_info = provider_info.iloc[0]
+                
+                st.markdown("---")
+                st.markdown("#### 📊 Selected Provider Details")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown(f"**Provider:** {provider_info['name']}")
+                    st.markdown(f"**Initials:** {provider_info['initials']}")
+                    st.markdown(f"**Type:** {provider_info['type']}")
+                
+                with col2:
+                    # Show current schedule count for this provider
+                    if st.session_state.events:
+                        provider_events = 0
+                        for event in st.session_state.events:
+                            if isinstance(event, dict) and 'extendedProps' in event:
+                                if event['extendedProps'].get("provider", "") == selected_initials:
+                                    provider_events += 1
+                        st.metric("Current Shifts", provider_events)
+                    else:
+                        st.metric("Current Shifts", 0)
+                    
+                    # Show provider rules status
+                    if "provider_rules" in st.session_state and selected_initials in st.session_state.provider_rules:
+                        rules = st.session_state.provider_rules[selected_initials]
+                        st.markdown(f"**Min Shifts:** {rules.get('min_shifts', 'Not set')}")
+                        st.markdown(f"**Max Shifts:** {rules.get('max_shifts', 'Not set')}")
+                    else:
+                        st.markdown("**Rules:** Not configured")
+                
+                with col3:
+                    if st.button("📋 View/Edit Rules", key=f"view_rules_{selected_initials}"):
+                        st.session_state.selected_provider_for_rules = selected_initials
+                        st.rerun()
+                    
+                    if st.button("📅 View Schedule", key=f"view_schedule_{selected_initials}"):
+                        st.info(f"Go to Calendar tab and select '{selected_initials}' from the provider filter to view their schedule.")
+                    
+                    if st.button("📊 View Stats", key=f"view_stats_{selected_initials}"):
+                        st.info(f"Provider statistics will be shown here for {selected_initials}.")
         
-        # Display results with pagination
+        # Quick provider list (compact)
+        st.markdown("---")
+        st.markdown("#### 📝 Quick Provider List")
+        
+        # Show filtered providers in a compact format
         if len(filtered_df) > 0:
             st.markdown(f"**Showing {len(filtered_df)} of {len(providers_df)} providers**")
             
-            # Create tabs for different views
-            tab1, tab2 = st.tabs(["📊 Table View", "🎯 Quick Actions"])
-            
-            with tab1:
-                # Display providers in a nice table with better styling
-                st.dataframe(
-                    filtered_df,
-                    use_container_width=True,
-                    column_config={
-                        "initials": st.column_config.TextColumn("Provider Initials", width="medium"),
-                        "name": st.column_config.TextColumn("Full Name", width="large"),
-                        "type": st.column_config.SelectboxColumn("Type", options=["Physician", "APP"], width="medium")
-                    },
-                    hide_index=True
-                )
-            
-            with tab2:
-                st.markdown("#### Quick Provider Actions")
+            # Create a compact display
+            if filter_type == "All":
+                # Group by type
+                physicians = filtered_df[filtered_df["type"] == "Physician"]
+                apps = filtered_df[filtered_df["type"] == "APP"]
                 
-                # Provider selection for quick actions
-                selected_provider = st.selectbox(
-                    "Select a provider for quick actions",
-                    options=filtered_df["initials"].tolist(),
-                    format_func=lambda x: f"{x} - {filtered_df[filtered_df['initials'] == x]['name'].iloc[0]}",
-                    key="quick_action_provider"
-                )
+                col1, col2 = st.columns(2)
                 
-                if selected_provider:
-                    provider_info = filtered_df[filtered_df["initials"] == selected_provider].iloc[0]
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"**Provider:** {provider_info['name']}")
-                        st.markdown(f"**Initials:** {provider_info['initials']}")
-                        st.markdown(f"**Type:** {provider_info['type']}")
-                        
-                        # Show current schedule count for this provider
-                        if st.session_state.events:
-                            provider_events = 0
-                            for event in st.session_state.events:
-                                if isinstance(event, dict) and 'extendedProps' in event:
-                                    if event['extendedProps'].get("provider", "") == selected_provider:
-                                        provider_events += 1
-                            st.markdown(f"**Current Shifts:** {provider_events}")
-                    
-                    with col2:
-                        if st.button("📋 View Rules", key=f"view_rules_{selected_provider}"):
-                            st.session_state.selected_provider_for_rules = selected_provider
-                            st.rerun()
-                        
-                        if st.button("📅 View Schedule", key=f"view_schedule_{selected_provider}"):
-                            st.info(f"Go to Calendar tab and select '{selected_provider}' from the provider filter to view their schedule.")
-                        
-                        if st.button("📊 View Stats", key=f"view_stats_{selected_provider}"):
-                            st.info(f"Provider statistics will be shown here for {selected_provider}.")
+                with col1:
+                    st.markdown("**Physicians:**")
+                    for _, row in physicians.iterrows():
+                        st.markdown(f"• {row['initials']} - {row['name']}")
+                
+                with col2:
+                    st.markdown("**APPs:**")
+                    for _, row in apps.iterrows():
+                        st.markdown(f"• {row['initials']} - {row['name']}")
+            else:
+                # Show all in one column
+                for _, row in filtered_df.iterrows():
+                    st.markdown(f"• {row['initials']} - {row['name']}")
         else:
-            st.warning("No providers match your search criteria.")
+            st.warning("No providers match your filter criteria.")
         
         # Provider rules section
         st.markdown("---")
@@ -235,16 +242,22 @@ def add_new_provider():
         shift_types = [shift["key"] for shift in DEFAULT_SHIFT_TYPES]
         shift_labels = [shift["label"] for shift in DEFAULT_SHIFT_TYPES]
         
-        # Create shift preference checkboxes
+        # Create shift preference checkboxes with smart defaults
         shift_preferences = {}
         cols = st.columns(3)
         
         for i, (shift_key, shift_label) in enumerate(zip(shift_types, shift_labels)):
             with cols[i % 3]:
+                # Smart defaults based on provider type
+                default_value = False
+                if provider_type == "APP" and shift_key == "APP":
+                    default_value = True
+                elif provider_type == "Physician" and shift_key != "APP":
+                    default_value = True
+                
                 shift_preferences[shift_key] = st.checkbox(
                     f"{shift_label} ({shift_key})",
-                    value=True if provider_type == "APP" and shift_key == "APP" else 
-                          True if provider_type == "Physician" and shift_key != "APP" else False,
+                    value=default_value,
                     key=f"shift_pref_{shift_key}",
                     help=f"Can this provider work {shift_label} shifts?"
                 )
