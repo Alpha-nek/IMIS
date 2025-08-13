@@ -63,19 +63,19 @@ def generate_schedule(year: int, month: int, providers: List[str],
 def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -> Dict:
     """
     Ensure all providers have default rules initialized.
-    HARD RULE: Default shift preferences are False (opt-in system).
+    REASONABLE DEFAULTS: Day shifts enabled by default, night shifts opt-in.
     """
     try:
         for provider in providers:
             if provider not in provider_rules:
                 provider_rules[provider] = {
                     "shift_preferences": {
-                        "R12": False,  # HARD RULE: Default to False, must opt-in
-                        "A12": False,  # HARD RULE: Default to False, must opt-in
-                        "A10": False,  # HARD RULE: Default to False, must opt-in
-                        "N12": False,  # HARD RULE: Default to False, must opt-in
-                        "NB": False,   # HARD RULE: Default to False, must opt-in
-                        "APP": False   # HARD RULE: Default to False, must opt-in
+                        "R12": True,   # Default: Enable day shifts for all providers
+                        "A12": True,   # Default: Enable day shifts for all providers
+                        "A10": True,   # Default: Enable day shifts for all providers
+                        "N12": False,  # Opt-in: Night shifts require explicit preference
+                        "NB": False,   # Opt-in: Night shifts require explicit preference
+                        "APP": False   # Opt-in: APP shifts require explicit preference
                     },
                     "vacations": [],
                     "unavailable_dates": []
@@ -84,16 +84,35 @@ def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -
                 # If provider rules exist but are not a dict, initialize them
                 provider_rules[provider] = {
                     "shift_preferences": {
-                        "R12": False,  # HARD RULE: Default to False, must opt-in
-                        "A12": False,  # HARD RULE: Default to False, must opt-in
-                        "A10": False,  # HARD RULE: Default to False, must opt-in
-                        "N12": False,  # HARD RULE: Default to False, must opt-in
-                        "NB": False,   # HARD RULE: Default to False, must opt-in
-                        "APP": False   # HARD RULE: Default to False, must opt-in
+                        "R12": True,   # Default: Enable day shifts for all providers
+                        "A12": True,   # Default: Enable day shifts for all providers
+                        "A10": True,   # Default: Enable day shifts for all providers
+                        "N12": False,  # Opt-in: Night shifts require explicit preference
+                        "NB": False,   # Opt-in: Night shifts require explicit preference
+                        "APP": False   # Opt-in: APP shifts require explicit preference
                     },
                     "vacations": [],
                     "unavailable_dates": []
                 }
+            else:
+                # Ensure existing providers have all shift preferences defined
+                if "shift_preferences" not in provider_rules[provider]:
+                    provider_rules[provider]["shift_preferences"] = {}
+                
+                shift_prefs = provider_rules[provider]["shift_preferences"]
+                # Set defaults for missing preferences
+                if "R12" not in shift_prefs:
+                    shift_prefs["R12"] = True  # Default to True for day shifts
+                if "A12" not in shift_prefs:
+                    shift_prefs["A12"] = True  # Default to True for day shifts
+                if "A10" not in shift_prefs:
+                    shift_prefs["A10"] = True  # Default to True for day shifts
+                if "N12" not in shift_prefs:
+                    shift_prefs["N12"] = False  # Default to False for night shifts
+                if "NB" not in shift_prefs:
+                    shift_prefs["NB"] = False  # Default to False for night shifts
+                if "APP" not in shift_prefs:
+                    shift_prefs["APP"] = False  # Default to False for APP shifts
         
         return provider_rules
     except Exception as e:
@@ -195,7 +214,7 @@ def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List
             
             # Find available dates for this block
             available_dates = find_available_dates_for_block(nocturnist, shift_type, block_size, 
-                                                           provider_shifts, year, month)
+                                                           provider_shifts, year, month, global_rules)
             
             if len(available_dates) >= block_size:
                 # Assign the block
@@ -323,7 +342,7 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     # Assign shifts based on blocks
     for provider, blocks in physician_blocks.items():
         for block in blocks:
-            block_events = assign_shift_block(provider, block, provider_shifts, year, month)
+            block_events = assign_shift_block(provider, block, provider_shifts, year, month, global_rules)
             events.extend(block_events)
     
     return events
@@ -381,7 +400,7 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             
             # Get all available providers for this shift type on this day
             all_available = get_available_providers_for_shift(
-                day, shift_type, providers, provider_shifts, provider_rules
+                day, shift_type, providers, provider_shifts, provider_rules, global_rules
             )
             
             # WORKFORCE PLANNING RULE 1: Allow providers who are below or at expected shifts
@@ -506,12 +525,18 @@ def select_provider_with_fewer_shifts(available_providers: List[str],
     return selected_provider
 
 def get_available_providers_for_shift(day: date, shift_type: str, providers: List[str], 
-                                     provider_shifts: Dict, provider_rules: Dict) -> List[str]:
+                                     provider_shifts: Dict, provider_rules: Dict, 
+                                     global_rules: RuleConfig = None) -> List[str]:
     """
     Get available providers for a specific shift type on a given day.
     HARD RULES: Only providers who explicitly prefer this shift type are available.
     """
     available_providers = []
+    
+    # Get minimum rest days from global rules, default to 1
+    min_rest_days = 1
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = global_rules.min_days_between_shifts
     
     for provider in providers:
         # Skip if provider is unavailable
@@ -534,7 +559,7 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
             continue
         
         # Check rest requirements
-        if not _has_sufficient_rest(provider, day, provider_shifts[provider]):
+        if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
             continue
         
         available_providers.append(provider)
@@ -677,7 +702,8 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
             return "R12"
         return shift_types[0] if shift_types else "R12"
 
-def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: int, month: int) -> List[SEvent]:
+def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: int, month: int,
+                      global_rules: RuleConfig = None) -> List[SEvent]:
     """
     Assign a specific shift block to a provider with proper sequence rules.
     """
@@ -690,7 +716,7 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: 
     
     # Find available dates for this block
     available_dates = find_available_dates_for_block(provider, shift_type, block_size, 
-                                                   provider_shifts, year, month)
+                                                   provider_shifts, year, month, global_rules)
     
     if len(available_dates) < block_size:
         # If we can't find enough consecutive dates, take what we can get
@@ -794,15 +820,21 @@ def assign_admitting_before_rounding(provider: str, dates: List[date]) -> List[S
     return events
 
 def find_available_dates_for_block(provider: str, shift_type: str, block_size: int, 
-                                  provider_shifts: Dict, year: int = None, month: int = None) -> List[date]:
+                                  provider_shifts: Dict, year: int = None, month: int = None,
+                                  global_rules: RuleConfig = None) -> List[date]:
     """
-    Find available dates for a shift block, ensuring 3-day rest between blocks.
+    Find available dates for a shift block, ensuring sufficient rest between blocks.
     Prioritizes consecutive dates for better block formation.
     """
     # Get all dates in the specified month
     if year is None or month is None:
         today = date.today()
         year, month = today.year, today.month
+    
+    # Get minimum rest days from global rules, default to 1
+    min_rest_days = 1
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = global_rules.min_days_between_shifts
     
     month_start = date(year, month, 1)
     if month == 12:
@@ -817,8 +849,8 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
     while current_date <= month_end:
         if not is_provider_unavailable_on_date(provider, current_date):
             if not _has_shift_on_date(provider, current_date, provider_shifts[provider]):
-                # Check for 3-day rest requirement
-                if _has_sufficient_rest(provider, current_date, provider_shifts[provider]):
+                # Check for sufficient rest requirement
+                if _has_sufficient_rest(provider, current_date, provider_shifts[provider], min_rest_days):
                     available_dates.append(current_date)
         current_date += timedelta(days=1)
     
@@ -898,9 +930,11 @@ def get_shift_config(shift_type: str) -> Dict:
     
     return shift_configs.get(shift_type, shift_configs["R12"])
 
-def _has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[SEvent]) -> bool:
+def _has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[SEvent], 
+                        min_rest_days: int = 1) -> bool:
     """
-    Check if provider has at least 3 days of rest before the target date.
+    Check if provider has sufficient rest before the target date.
+    Default is 1 day rest (configurable via global rules).
     """
     # Find the last shift date for this provider
     last_shift_date = None
@@ -921,9 +955,9 @@ def _has_sufficient_rest(provider: str, target_date: date, provider_shifts: List
     if last_shift_date is None:
         return True  # No previous shifts, so rest requirement is met
     
-    # Check if there are at least 3 days between last shift and target date
+    # Check if there are sufficient days between last shift and target date
     days_since_last = (target_date - last_shift_date).days
-    return days_since_last >= 3
+    return days_since_last >= min_rest_days
 
 def _has_shift_on_date(provider: str, day: date, events: List[SEvent]) -> bool:
     """
