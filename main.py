@@ -721,18 +721,20 @@ def render_desktop_interface():
             # Test 4: Check calendar component
             st.write("**Test 4: Calendar Component Test**")
             try:
-                from ui.calendar import render_calendar
+                # Use the already imported render_calendar
                 st.write("✅ Calendar component imported successfully")
+                st.write(f"Calendar function type: {type(render_calendar)}")
             except Exception as e:
-                st.write(f"❌ Error importing calendar component: {e}")
+                st.write(f"❌ Error with calendar component: {e}")
             
             # Test 5: Check grid component
             st.write("**Test 5: Grid Component Test**")
             try:
-                from ui.grid import render_schedule_grid
+                # Use the already imported render_schedule_grid
                 st.write("✅ Grid component imported successfully")
+                st.write(f"Grid function type: {type(render_schedule_grid)}")
             except Exception as e:
-                st.write(f"❌ Error importing grid component: {e}")
+                st.write(f"❌ Error with grid component: {e}")
             
             # Test 6: Generate test events
             st.write("**Test 6: Generate Test Events**")
@@ -1263,16 +1265,19 @@ def render_desktop_interface():
             # Test grid component directly
             st.write("**Test 1: Grid Component Import**")
             try:
-                from ui.grid import render_schedule_grid, create_schedule_grid
+                # Use the already imported render_schedule_grid
                 st.write("✅ Grid components imported successfully")
+                st.write(f"Grid function type: {type(render_schedule_grid)}")
             except Exception as e:
-                st.write(f"❌ Error importing grid components: {e}")
+                st.write(f"❌ Error with grid components: {e}")
                 st.write(f"Error details: {traceback.format_exc()}")
             
             # Test grid creation with test data
             st.write("**Test 2: Grid Creation Test**")
             if st.session_state.events:
                 try:
+                    # Import create_schedule_grid for this test
+                    from ui.grid import create_schedule_grid
                     df = create_schedule_grid(st.session_state.events, year, month)
                     st.write(f"✅ Grid DataFrame created successfully")
                     st.write(f"- DataFrame shape: {df.shape}")
@@ -1314,6 +1319,7 @@ def render_desktop_interface():
                     st.write(f"✅ Created {len(sample_events)} sample events")
                     
                     # Test grid creation with sample data
+                    from ui.grid import create_schedule_grid
                     df = create_schedule_grid(sample_events, year, month)
                     st.write(f"✅ Sample grid created successfully")
                     st.write(f"- Sample grid shape: {df.shape}")
