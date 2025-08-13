@@ -1177,6 +1177,32 @@ def render_desktop_interface():
         st.header("🐛 Debug Test")
         st.markdown("Run quick tests to identify scheduling issues.")
         
+        # Scheduler Debug Output Section
+        st.markdown("### 📋 Scheduler Debug Output")
+        from core.debug_logger import debug_logger
+        debug_messages = debug_logger.get_log_text()
+        
+        if debug_messages:
+            st.text_area(
+                "Real-time Scheduler Debug Log", 
+                debug_messages, 
+                height=300,
+                help="This shows the step-by-step progress of the scheduling algorithm"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Refresh Debug Log"):
+                    st.rerun()
+            with col2:
+                if st.button("🗑️ Clear Debug Log"):
+                    debug_logger.clear()
+                    st.rerun()
+        else:
+            st.info("No debug output available. Generate a schedule to see debug information.")
+        
+        st.markdown("---")
+        
         if st.button("🔍 Run Shift Count Test", type="primary"):
             try:
                 # Load current data
