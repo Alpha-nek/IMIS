@@ -59,8 +59,6 @@ def assign_advanced(year: int, month: int, providers: List[str],
     
     # Track provider assignments
     provider_shifts = {p: [] for p in providers}
-    provider_blocks = {p: [] for p in providers}  # Track current shift blocks
-    provider_last_shift = {p: None for p in providers}
     
     # Step 1: Assign APP shifts first (they have specific rules)
     app_events = assign_app_shifts(month_days, app_providers, shift_capacity, 
@@ -72,9 +70,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
         provider = event.extendedProps.get("provider")
         if provider:
             provider_shifts[provider].append(event)
-            provider_last_shift[provider] = event.start.date()
     
-    # Step 2: Assign night shifts to nocturnists first
+    # Step 2: Assign night shifts to nocturnists in blocks
     night_events = assign_night_shifts_to_nocturnists(month_days, nocturnists, 
                                                      shift_capacity, provider_rules, 
                                                      global_rules, provider_shifts)
@@ -86,68 +83,95 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                              global_rules, provider_shifts)
     events.extend(physician_events)
     
-    # Step 4: Fill remaining shifts with any available providers
-    remaining_events = fill_remaining_shifts(month_days, providers, shift_capacity, 
-                                           provider_rules, global_rules, provider_shifts)
-    events.extend(remaining_events)
-    
     return events
 
 def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List[str], 
                                       shift_capacity: Dict[str, int], provider_rules: Dict, 
                                       global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
     """
-    Assign night shifts to nocturnists first to ensure proper coverage.
+    Assign night shifts to nocturnists in blocks of 3-7 shifts.
     """
     events = []
     night_shift_types = ["N12", "NB"]
     
-    for day in month_days:
-        for shift_type in night_shift_types:
-            capacity = shift_capacity.get(shift_type, 0)
-            if capacity <= 0:
-                continue
+    # Create night shift blocks for each nocturnist
+    for nocturnist in nocturnists:
+        # Determine target number of night shifts for this nocturnist
+        provider_rule = provider_rules.get(nocturnist, {})
+        min_shifts = provider_rule.get("min_shifts", 8)
+        max_shifts = provider_rule.get("max_shifts", 16)
+        
+        # For nocturnists, prefer more night shifts
+        target_shifts = random.randint(min_shifts, max_shifts)
+        
+        # Create blocks of 3-7 shifts
+        remaining_shifts = target_shifts
+        while remaining_shifts > 0:
+            # Determine block size (3-7 shifts, but no more than remaining shifts)
+            max_block_size = min(7, remaining_shifts)
+            if max_block_size < 3:
+                # If remaining shifts is less than 3, use all remaining shifts
+                block_size = remaining_shifts
+            else:
+                block_size = random.randint(3, max_block_size)
             
-            # Get available nocturnists for this day
-            available_nocturnists = [p for p in nocturnists 
-                                   if not is_provider_unavailable_on_date(p, day)]
+            # Choose night shift type for this block
+            shift_type = random.choice(night_shift_types)
             
-            # Filter out nocturnists who already have shifts on this day
-            available_nocturnists = [p for p in available_nocturnists 
-                                   if not _has_shift_on_date(p, day, provider_shifts[p])]
+            # Find available dates for this block
+            available_dates = find_available_dates_for_block(nocturnist, shift_type, block_size, 
+                                                           provider_shifts)
             
-            # Assign nocturnists up to capacity
-            assigned_count = 0
-            while assigned_count < capacity and available_nocturnists:
-                # Select nocturnist (with some randomness)
-                nocturnist = random.choice(available_nocturnists)
-                available_nocturnists.remove(nocturnist)
-                
-                # Create night shift event
-                shift_config = get_shift_config(shift_type)
-                start_time = datetime.combine(day, parse_time(shift_config["start"]))
-                end_time = datetime.combine(day, parse_time(shift_config["end"]))
-                
-                # Handle overnight shifts
-                if shift_config["end"] < shift_config["start"]:
-                    end_time += timedelta(days=1)
-                
-                event = SEvent(
-                    id=str(uuid.uuid4()),
-                    title=f"{shift_config['label']} - {nocturnist}",
-                    start=start_time,
-                    end=end_time,
-                    backgroundColor=shift_config["color"],
-                    extendedProps={
-                        "provider": nocturnist,
-                        "shift_type": shift_type,
-                        "shift_label": shift_config["label"]
-                    }
-                )
-                
-                events.append(event)
-                provider_shifts[nocturnist].append(event)
-                assigned_count += 1
+            if len(available_dates) >= block_size:
+                # Assign the block
+                block_events = assign_night_shift_block(nocturnist, shift_type, available_dates[:block_size], 
+                                                      provider_shifts)
+                events.extend(block_events)
+                remaining_shifts -= block_size
+            else:
+                # If we can't find enough dates, try with fewer shifts
+                if len(available_dates) >= 3:
+                    block_events = assign_night_shift_block(nocturnist, shift_type, available_dates, 
+                                                          provider_shifts)
+                    events.extend(block_events)
+                    remaining_shifts -= len(available_dates)
+                else:
+                    # Skip this nocturnist if we can't assign a proper block
+                    break
+    
+    return events
+
+def assign_night_shift_block(nocturnist: str, shift_type: str, dates: List[date], 
+                           provider_shifts: Dict) -> List[SEvent]:
+    """
+    Assign a block of night shifts to a nocturnist.
+    """
+    events = []
+    shift_config = get_shift_config(shift_type)
+    
+    for day in dates:
+        start_time = datetime.combine(day, parse_time(shift_config["start"]))
+        end_time = datetime.combine(day, parse_time(shift_config["end"]))
+        
+        # Handle overnight shifts
+        if shift_config["end"] < shift_config["start"]:
+            end_time += timedelta(days=1)
+        
+        event = SEvent(
+            id=str(uuid.uuid4()),
+            title=f"{shift_config['label']} - {nocturnist}",
+            start=start_time,
+            end=end_time,
+            backgroundColor=shift_config["color"],
+            extendedProps={
+                "provider": nocturnist,
+                "shift_type": shift_type,
+                "shift_label": shift_config["label"]
+            }
+        )
+        
+        events.append(event)
+        provider_shifts[nocturnist].append(event)
     
     return events
 
@@ -225,71 +249,6 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
         for block in blocks:
             block_events = assign_shift_block(provider, block, provider_shifts)
             events.extend(block_events)
-    
-    return events
-
-def fill_remaining_shifts(month_days: List[date], providers: List[str], 
-                         shift_capacity: Dict[str, int], provider_rules: Dict, 
-                         global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
-    """
-    Fill any remaining shifts with available providers to optimize coverage.
-    """
-    events = []
-    
-    # Define shift types and their priorities for filling
-    shift_priorities = [
-        ("N12", 4),  # Night shifts - high priority
-        ("NB", 1),   # Night bridge - high priority
-        ("R12", 13), # Rounder shifts - medium priority
-        ("A12", 1),  # Admitter shifts - medium priority
-        ("A10", 2),  # Admitter shifts - medium priority
-    ]
-    
-    for day in month_days:
-        for shift_type, capacity in shift_priorities:
-            # Check if this shift type needs more coverage
-            current_coverage = count_shifts_on_date(day, shift_type, provider_shifts)
-            if current_coverage >= capacity:
-                continue
-            
-            # Find available providers for this shift type
-            available_providers = get_available_providers_for_shift(day, shift_type, 
-                                                                  providers, provider_shifts, 
-                                                                  provider_rules)
-            
-            # Assign providers to fill remaining slots
-            remaining_slots = capacity - current_coverage
-            assigned_count = 0
-            
-            while assigned_count < remaining_slots and available_providers:
-                provider = random.choice(available_providers)
-                available_providers.remove(provider)
-                
-                # Create shift event
-                shift_config = get_shift_config(shift_type)
-                start_time = datetime.combine(day, parse_time(shift_config["start"]))
-                end_time = datetime.combine(day, parse_time(shift_config["end"]))
-                
-                # Handle overnight shifts
-                if shift_config["end"] < shift_config["start"]:
-                    end_time += timedelta(days=1)
-                
-                event = SEvent(
-                    id=str(uuid.uuid4()),
-                    title=f"{shift_config['label']} - {provider}",
-                    start=start_time,
-                    end=end_time,
-                    backgroundColor=shift_config["color"],
-                    extendedProps={
-                        "provider": provider,
-                        "shift_type": shift_type,
-                        "shift_label": shift_config["label"]
-                    }
-                )
-                
-                events.append(event)
-                provider_shifts[provider].append(event)
-                assigned_count += 1
     
     return events
 
@@ -545,6 +504,7 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
                                   provider_shifts: Dict) -> List[date]:
     """
     Find available dates for a shift block, ensuring 3-day rest between blocks.
+    Prioritizes consecutive dates for better block formation.
     """
     # Get all dates in the current month
     today = date.today()
@@ -567,13 +527,49 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
                     available_dates.append(current_date)
         current_date += timedelta(days=1)
     
-    # Try to find consecutive dates first
+    # Sort dates for better consecutive finding
+    available_dates.sort()
+    
+    # Try to find consecutive dates first (preferred)
     consecutive_dates = find_consecutive_dates(available_dates, block_size)
     if consecutive_dates:
         return consecutive_dates
     
-    # If no consecutive dates, return any available dates
+    # If no consecutive dates, try to find dates with minimal gaps
+    if len(available_dates) >= block_size:
+        # Find the best sequence with minimal gaps
+        best_sequence = find_best_date_sequence(available_dates, block_size)
+        if best_sequence:
+            return best_sequence
+    
+    # Fallback: return any available dates
     return available_dates[:block_size]
+
+def find_best_date_sequence(dates: List[date], count: int) -> List[date]:
+    """
+    Find the best sequence of dates with minimal gaps between them.
+    """
+    if len(dates) < count:
+        return []
+    
+    best_sequence = None
+    min_total_gap = float('inf')
+    
+    # Try all possible sequences of 'count' dates
+    for i in range(len(dates) - count + 1):
+        sequence = dates[i:i+count]
+        total_gap = 0
+        
+        # Calculate total gap between consecutive dates
+        for j in range(len(sequence) - 1):
+            gap = (sequence[j+1] - sequence[j]).days - 1
+            total_gap += gap
+        
+        if total_gap < min_total_gap:
+            min_total_gap = total_gap
+            best_sequence = sequence
+    
+    return best_sequence
 
 def find_consecutive_dates(dates: List[date], count: int) -> List[date]:
     """
@@ -694,30 +690,32 @@ def validate_rules(events: List[SEvent], providers: List[str],
     provider_shift_counts = {p: 0 for p in providers}
     provider_weekend_shifts = {p: 0 for p in providers}
     provider_night_shifts = {p: 0 for p in providers}
+    provider_rounder_shifts = {p: 0 for p in providers}
+    provider_admitting_shifts = {p: 0 for p in providers}
     
     for event in events:
         provider = event.extendedProps.get("provider")
         if provider:
             provider_shift_counts[provider] += 1
             
-            # Count weekend shifts
+            # Get event date
             if hasattr(event, 'start'):
                 event_date = event.start.date()
-            elif isinstance(event, dict) and 'start' in event:
-                try:
-                    event_date = datetime.fromisoformat(event['start']).date()
-                except (ValueError, TypeError):
-                    continue
             else:
                 continue
             
+            # Count weekend shifts
             if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
                 provider_weekend_shifts[provider] += 1
             
-            # Count night shifts
+            # Count shift types
             shift_type = event.extendedProps.get("shift_type")
             if shift_type in ["N12", "NB"]:
                 provider_night_shifts[provider] += 1
+            elif shift_type == "R12":
+                provider_rounder_shifts[provider] += 1
+            elif shift_type in ["A12", "A10"]:
+                provider_admitting_shifts[provider] += 1
     
     # Check violations
     for provider in providers:
@@ -734,6 +732,7 @@ def validate_rules(events: List[SEvent], providers: List[str],
         
         provider_violations[provider] = []
         
+        # Check total shift count
         if shift_count < min_shifts:
             violation = f"{provider}: {shift_count} shifts (min {min_shifts} required)"
             violations.append(violation)
@@ -769,5 +768,19 @@ def validate_rules(events: List[SEvent], providers: List[str],
     return {
         "is_valid": len(violations) == 0,
         "violations": violations,
-        "provider_violations": provider_violations
+        "provider_violations": provider_violations,
+        "summary": {
+            "total_events": len(events),
+            "providers_used": len([p for p in providers if provider_shift_counts[p] > 0]),
+            "total_violations": len(violations),
+            "provider_stats": {
+                provider: {
+                    "total_shifts": provider_shift_counts[provider],
+                    "weekend_shifts": provider_weekend_shifts[provider],
+                    "night_shifts": provider_night_shifts[provider],
+                    "rounder_shifts": provider_rounder_shifts[provider],
+                    "admitting_shifts": provider_admitting_shifts[provider]
+                } for provider in providers
+            }
+        }
     }
