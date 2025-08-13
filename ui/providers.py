@@ -287,6 +287,40 @@ def add_new_provider():
         # Show the actual percentages
         st.info(f"📊 **Distribution:** {day_percentage}% Day Shifts, {night_percentage}% Night Shifts")
         
+        # Shift Timing Preference
+        st.markdown("**Shift Timing Preference**")
+        timing_preference = st.selectbox(
+            "When should shifts be scheduled?",
+            options=["Even Distribution - No preference", "Front-Loaded - Prefer shifts in first half of month", "Back-Loaded - Prefer shifts in second half of month"],
+            help="Choose when this provider prefers to work their shifts during the month"
+        )
+        
+        # Convert to value
+        timing_values = ["even_distribution", "front_loaded", "back_loaded"]
+        timing_options = ["Even Distribution - No preference", "Front-Loaded - Prefer shifts in first half of month", "Back-Loaded - Prefer shifts in second half of month"]
+        timing_preference_value = timing_values[timing_options.index(timing_preference)]
+        
+        # Unavailable Days of the Week
+        st.markdown("**Unavailable Days of the Week**")
+        st.markdown("Select days when this provider should not be assigned shifts:")
+        
+        days_of_week = [
+            (0, "Monday"),
+            (1, "Tuesday"), 
+            (2, "Wednesday"),
+            (3, "Thursday"),
+            (4, "Friday"),
+            (5, "Saturday"),
+            (6, "Sunday")
+        ]
+        
+        unavailable_days_of_week = []
+        cols = st.columns(7)
+        for i, (day_num, day_name) in enumerate(days_of_week):
+            with cols[i]:
+                if st.checkbox(day_name, key=f"new_provider_unavailable_{day_num}"):
+                    unavailable_days_of_week.append(day_num)
+        
         # Submit button
         submitted = st.form_submit_button("➕ Add Provider", type="primary")
         
@@ -340,6 +374,8 @@ def add_new_provider():
                 "day_night_preference": day_night_preference,
                 "shift_preferences": shift_preferences,
                 "unavailable_dates": [],
+                "unavailable_days_of_week": unavailable_days_of_week,
+                "shift_timing_preference": timing_preference_value,
                 "vacations": []
             }
             
@@ -530,13 +566,15 @@ def provider_rules_panel():
                 "APP": False
             },
             "unavailable_dates": [],
+            "unavailable_days_of_week": [],
+            "shift_timing_preference": "even_distribution",
             "vacations": []
         }
     
     provider_rules = st.session_state.provider_rules[selected_provider]
     
     # Create tabs for different rule categories
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations", "⏰ Timing Preferences"])
     
     with tab1:
         st.markdown("#### FTE (Full Time Employment)")
@@ -742,6 +780,77 @@ def provider_rules_panel():
                         st.rerun()
         else:
             st.info("No vacation periods set.")
+    
+    with tab5:
+        st.markdown("#### Shift Timing Preferences")
+        st.markdown("Set preferences for when shifts should be scheduled during the month:")
+        
+        # Initialize timing preference if not exists
+        if "shift_timing_preference" not in provider_rules:
+            provider_rules["shift_timing_preference"] = "even_distribution"
+        
+        timing_options = ["Even Distribution - No preference", "Front-Loaded - Prefer shifts in first half of month", "Back-Loaded - Prefer shifts in second half of month"]
+        timing_values = ["even_distribution", "front_loaded", "back_loaded"]
+        
+        current_timing = provider_rules.get("shift_timing_preference", "even_distribution")
+        current_index = timing_values.index(current_timing) if current_timing in timing_values else 0
+        
+        timing_preference = st.selectbox(
+            "Shift Timing Preference",
+            options=timing_options,
+            index=current_index,
+            key=f"timing_pref_{selected_provider}",
+            help="Choose when this provider prefers to work their shifts during the month"
+        )
+        
+        # Convert selection back to value
+        timing_preference = timing_values[timing_options.index(timing_preference)]
+        provider_rules["shift_timing_preference"] = timing_preference
+        
+        st.info(f"📅 **Current Preference:** {dict([('even_distribution', 'Even Distribution'), ('front_loaded', 'Front-Loaded'), ('back_loaded', 'Back-Loaded')])[timing_preference]}")
+        
+        st.markdown("---")
+        
+        st.markdown("#### Unavailable Days of the Week")
+        st.markdown("Select days of the week when this provider should not be assigned shifts:")
+        
+        # Initialize unavailable days of week if not exists
+        if "unavailable_days_of_week" not in provider_rules:
+            provider_rules["unavailable_days_of_week"] = []
+        
+        days_of_week = [
+            (0, "Monday"),
+            (1, "Tuesday"), 
+            (2, "Wednesday"),
+            (3, "Thursday"),
+            (4, "Friday"),
+            (5, "Saturday"),
+            (6, "Sunday")
+        ]
+        
+        # Create checkboxes for each day of the week
+        cols = st.columns(7)
+        for i, (day_num, day_name) in enumerate(days_of_week):
+            with cols[i]:
+                is_unavailable = st.checkbox(
+                    day_name,
+                    value=day_num in provider_rules.get("unavailable_days_of_week", []),
+                    key=f"unavailable_day_{selected_provider}_{day_num}",
+                    help=f"Check if {day_name} should be unavailable"
+                )
+                
+                if is_unavailable and day_num not in provider_rules["unavailable_days_of_week"]:
+                    provider_rules["unavailable_days_of_week"].append(day_num)
+                elif not is_unavailable and day_num in provider_rules["unavailable_days_of_week"]:
+                    provider_rules["unavailable_days_of_week"].remove(day_num)
+        
+        # Display current unavailable days
+        unavailable_days = provider_rules.get("unavailable_days_of_week", [])
+        if unavailable_days:
+            unavailable_names = [day_name for day_num, day_name in days_of_week if day_num in unavailable_days]
+            st.info(f"🚫 **Unavailable Days:** {', '.join(unavailable_names)}")
+        else:
+            st.info("✅ **Available all days of the week**")
     
     # Save button
     if st.button("💾 Save Rules", type="primary", key=f"save_rules_{selected_provider}"):

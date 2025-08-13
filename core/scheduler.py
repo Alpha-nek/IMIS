@@ -242,9 +242,16 @@ def assign_night_shift_block(nocturnist: str, shift_type: str, dates: List[date]
                            provider_shifts: Dict) -> List[SEvent]:
     """
     Assign a block of night shifts to a nocturnist.
+    HARD STOP: Never exceed expected shifts.
     """
     events = []
     shift_config = get_shift_config(shift_type)
+    
+    # HARD STOP: Check if this block would exceed expected shifts
+    current_shifts = len(provider_shifts.get(nocturnist, []))
+    if current_shifts + len(dates) > 16:  # Nocturnists typically have 16 shifts max
+        logger.warning(f"HARD STOP: Nocturnist {nocturnist} would exceed 16 shifts (current: {current_shifts}, block: {len(dates)})")
+        return events
     
     for day in dates:
         start_time = datetime.combine(day, parse_time(shift_config["start"]))
@@ -290,7 +297,7 @@ def assign_app_shifts(month_days: List[date], app_providers: List[str],
         
         # Get available APP providers for this day
         available_apps = [p for p in app_providers 
-                         if not is_provider_unavailable_on_date(p, day)]
+                         if not is_provider_unavailable_on_date(p, day, provider_rules)]
         
         # Filter out APPs who already have shifts on this day
         available_apps = [p for p in available_apps 
@@ -302,6 +309,12 @@ def assign_app_shifts(month_days: List[date], app_providers: List[str],
             # Select APP (with some randomness)
             app_provider = random.choice(available_apps)
             available_apps.remove(app_provider)
+            
+            # HARD STOP: Check if this APP would exceed 12 shifts
+            current_shifts = len([e for e in events if e.extendedProps.get("provider") == app_provider])
+            if current_shifts >= 12:
+                logger.warning(f"HARD STOP: APP provider {app_provider} would exceed 12 shifts (current: {current_shifts})")
+                continue
             
             # Create APP shift event
             start_time = datetime.combine(day, parse_time("07:00"))
@@ -395,7 +408,7 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 provider_scores = []
                 for provider in all_providers:
                     score = _calculate_provider_score(provider, day, shift_type, provider_shifts, 
-                                                    provider_rules, global_rules, provider_expected_shifts)
+                                                    provider_rules, global_rules, provider_expected_shifts, year, month)
                     if score is not None:  # None means provider is not eligible
                         provider_scores.append((score, provider))
                 
@@ -453,14 +466,14 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
 
 def _calculate_provider_score(provider: str, day: date, shift_type: str, provider_shifts: Dict,
                             provider_rules: Dict, global_rules: RuleConfig, 
-                            provider_expected_shifts: Dict) -> Optional[float]:
+                            provider_expected_shifts: Dict, year: int = None, month: int = None) -> Optional[float]:
     """
     Calculate a score for a provider taking a specific shift.
     HARD STOP: Returns None if assignment would exceed expected shifts.
     Lower score = better choice.
     """
     # Basic eligibility checks
-    if is_provider_unavailable_on_date(provider, day):
+    if is_provider_unavailable_on_date(provider, day, provider_rules):
         return None
     
     if _has_shift_on_date(provider, day, provider_shifts[provider]):
@@ -499,10 +512,13 @@ def _calculate_provider_score(provider: str, day: date, shift_type: str, provide
             return None
         
         # Score based on how close to expected shifts (closer = higher score = worse)
-        # Add penalty for being close to limit
         score = current_shifts / expected_shifts
-        if current_shifts >= (expected_shifts - 1):
-            score += 10  # Heavy penalty for being close to limit
+    
+    # Add shift timing preference score
+    if year and month:
+        from core.utils import calculate_shift_timing_score
+        timing_score = calculate_shift_timing_score(provider, day, provider_rules, year, month)
+        score += timing_score
     
     return score
 
@@ -535,11 +551,6 @@ def _validate_all_hard_rules(provider: str, day: date, shift_type: str, provider
         expected_shifts = provider_expected_shifts.get(provider, 15)
         if current_shifts >= expected_shifts:
             logger.warning(f"ULTRA-STRICT: Provider {provider} at {current_shifts} shifts (expected {expected_shifts}) - BLOCKED")
-            return False
-        
-        # Additional safety: Don't assign if within 1 shift of limit
-        if current_shifts >= (expected_shifts - 1):
-            logger.info(f"ULTRA-STRICT: Provider {provider} at {current_shifts} shifts (expected {expected_shifts}) - too close to limit")
             return False
     
     # HARD RULE 4: Rest requirements
@@ -615,7 +626,7 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
     
     for provider in providers:
         # Skip if provider is unavailable
-        if is_provider_unavailable_on_date(provider, day):
+        if is_provider_unavailable_on_date(provider, day, provider_rules):
             continue
         
         # Skip if provider already has a shift on this day
@@ -798,10 +809,25 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: 
                       global_rules: RuleConfig = None) -> List[SEvent]:
     """
     Assign a specific shift block to a provider with proper sequence rules.
+    HARD STOP: Never exceed expected shifts.
     """
     events = []
     shift_type = block["shift_type"]
     block_size = block["size"]
+    
+    # HARD STOP: Check if this block would exceed expected shifts
+    current_shifts = len(provider_shifts.get(provider, []))
+    if provider in APP_PROVIDER_INITIALS:
+        if current_shifts + block_size > 12:
+            logger.warning(f"HARD STOP: APP provider {provider} would exceed 12 shifts (current: {current_shifts}, block: {block_size})")
+            return events
+    else:
+        # Get expected shifts for regular providers
+        from core.utils import get_adjusted_expected_shifts
+        expected_shifts = get_adjusted_expected_shifts(provider, year, month, {}, global_rules)
+        if current_shifts + block_size > expected_shifts:
+            logger.warning(f"HARD STOP: Provider {provider} would exceed {expected_shifts} shifts (current: {current_shifts}, block: {block_size})")
+            return events
     
     # Get shift type configuration
     shift_config = get_shift_config(shift_type)
@@ -939,7 +965,7 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
     # Find all available dates for this provider and shift type
     current_date = month_start
     while current_date <= month_end:
-        if not is_provider_unavailable_on_date(provider, current_date):
+        if not is_provider_unavailable_on_date(provider, current_date, provider_rules):
             if not _has_shift_on_date(provider, current_date, provider_shifts[provider]):
                 # Check for sufficient rest requirement
                 if _has_sufficient_rest(provider, current_date, provider_shifts[provider], min_rest_days):

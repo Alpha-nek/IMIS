@@ -8,6 +8,7 @@ from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
 import pandas as pd
 from models.constants import HOLIDAY_RULES, APP_PROVIDER_INITIALS
+from models.data_models import ShiftTimingPreference
 
 def is_holiday(check_date: date) -> Optional[Dict]:
     """Check if a date is a holiday and return holiday info if so."""
@@ -27,6 +28,91 @@ def get_holiday_adjusted_capacity(base_capacity: int, check_date: date) -> int:
     if holiday_info:
         return max(1, int(base_capacity * holiday_info["capacity_multiplier"]))
     return base_capacity
+
+def is_provider_unavailable_on_date(provider: str, check_date: date, provider_rules: Dict) -> bool:
+    """
+    Check if a provider is unavailable on a specific date.
+    Considers specific unavailable dates, unavailable days of week, and vacation periods.
+    """
+    if not provider or provider not in provider_rules:
+        return False
+    
+    provider_rule = provider_rules[provider]
+    if not isinstance(provider_rule, dict):
+        return False
+    
+    # Check specific unavailable dates
+    unavailable_dates = provider_rule.get("unavailable_dates", [])
+    date_str = check_date.strftime("%Y-%m-%d")
+    if date_str in unavailable_dates:
+        return True
+    
+    # Check unavailable days of the week (0=Monday, 6=Sunday)
+    unavailable_days_of_week = provider_rule.get("unavailable_days_of_week", [])
+    day_of_week = check_date.weekday()  # 0=Monday, 6=Sunday
+    if day_of_week in unavailable_days_of_week:
+        return True
+    
+    # Check vacation periods
+    vacations = provider_rule.get("vacations", [])
+    for vacation in vacations:
+        if isinstance(vacation, dict) and "start" in vacation and "end" in vacation:
+            try:
+                vacation_start = datetime.strptime(vacation["start"], "%Y-%m-%d").date()
+                vacation_end = datetime.strptime(vacation["end"], "%Y-%m-%d").date()
+                if vacation_start <= check_date <= vacation_end:
+                    return True
+            except (ValueError, TypeError):
+                continue
+    
+    return False
+
+def calculate_shift_timing_score(provider: str, shift_date: date, provider_rules: Dict, 
+                                year: int, month: int) -> float:
+    """
+    Calculate a score for shift timing preference.
+    Lower score = better preference match.
+    """
+    if not provider or provider not in provider_rules:
+        return 0.0  # Neutral score
+    
+    provider_rule = provider_rules[provider]
+    if not isinstance(provider_rule, dict):
+        return 0.0
+    
+    timing_preference = provider_rule.get("shift_timing_preference", ShiftTimingPreference.EVEN_DISTRIBUTION)
+    
+    if timing_preference == ShiftTimingPreference.EVEN_DISTRIBUTION:
+        return 0.0  # No preference penalty
+    
+    # Get month start and end dates
+    month_start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        month_end = date(year, month + 1, 1) - timedelta(days=1)
+    
+    # Calculate day position in month (0.0 to 1.0)
+    total_days = (month_end - month_start).days + 1
+    day_position = (shift_date - month_start).days / total_days
+    
+    if timing_preference == ShiftTimingPreference.FRONT_LOADED:
+        # Prefer first half of month (0.0 to 0.5)
+        if day_position <= 0.5:
+            return 0.0  # Perfect match
+        else:
+            # Penalty increases as we get further from first half
+            return (day_position - 0.5) * 2.0  # 0.0 to 1.0 penalty
+    
+    elif timing_preference == ShiftTimingPreference.BACK_LOADED:
+        # Prefer second half of month (0.5 to 1.0)
+        if day_position >= 0.5:
+            return 0.0  # Perfect match
+        else:
+            # Penalty increases as we get further from second half
+            return (0.5 - day_position) * 2.0  # 0.0 to 1.0 penalty
+    
+    return 0.0  # Default neutral score
 
 def _normalize_initials_list(items):
     """Normalize and clean a list of provider initials."""
@@ -290,30 +376,3 @@ def get_global_rules():
     import streamlit as st
     from models.data_models import RuleConfig
     return RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
-
-def is_provider_unavailable_on_date(provider: str, day: date) -> bool:
-    """Check if provider is unavailable on a specific date."""
-    import streamlit as st
-    pkey = (provider or "").strip().upper()
-    pr = st.session_state.get("provider_rules", {}).get(pkey, {}) or {}
-
-    # Check specific dates
-    for tok in pr.get("unavailable_dates", []):
-        try:
-            if pd.to_datetime(tok).date() == day:
-                return True
-        except Exception:
-            pass
-
-    # Check vacation ranges
-    for rng in pr.get("vacations", []) or []:
-        try:
-            s = pd.to_datetime(rng.get("start")).date()
-            e = pd.to_datetime(rng.get("end")).date()
-            if e < s: 
-                s, e = e, s
-            if s <= day <= e:
-                return True
-        except Exception:
-            pass
-    return False
