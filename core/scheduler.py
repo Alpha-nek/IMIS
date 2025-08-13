@@ -17,6 +17,9 @@ from core.utils import (
     _expand_vacation_dates, is_provider_unavailable_on_date
 )
 
+# Define nocturnists (night shift only providers)
+NOCTURNISTS = {"JT", "OI", "AT", "CM", "YD", "RS"}
+
 def generate_schedule(year: int, month: int, providers: List[str], 
                      shift_types: List[Dict], shift_capacity: Dict[str, int],
                      provider_rules: Dict, global_rules: RuleConfig) -> List[SEvent]:
@@ -26,6 +29,8 @@ def generate_schedule(year: int, month: int, providers: List[str],
     2. Providers prefer same shift type in blocks
     3. Rounders start with 1-2 admitting shifts before rounding
     4. Shift blocks of 3-7 shifts
+    5. Nocturnists only do night shifts
+    6. Optimize shift distribution to fill all slots
     """
     # Add some randomness for variety
     random.seed(datetime.now().timestamp())
@@ -49,7 +54,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
     
     # Separate providers by type
     app_providers = [p for p in providers if p in APP_PROVIDER_INITIALS]
-    physician_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS]
+    nocturnists = [p for p in providers if p in NOCTURNISTS]
+    physician_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS and p not in NOCTURNISTS]
     
     # Track provider assignments
     provider_shifts = {p: [] for p in providers}
@@ -68,11 +74,80 @@ def assign_advanced(year: int, month: int, providers: List[str],
             provider_shifts[provider].append(event)
             provider_last_shift[provider] = event.start.date()
     
-    # Step 2: Assign physician shifts in blocks
+    # Step 2: Assign night shifts to nocturnists first
+    night_events = assign_night_shifts_to_nocturnists(month_days, nocturnists, 
+                                                     shift_capacity, provider_rules, 
+                                                     global_rules, provider_shifts)
+    events.extend(night_events)
+    
+    # Step 3: Assign remaining physician shifts in blocks
     physician_events = assign_physician_shifts(month_days, physician_providers, 
                                              shift_capacity, provider_rules, 
                                              global_rules, provider_shifts)
     events.extend(physician_events)
+    
+    # Step 4: Fill remaining shifts with any available providers
+    remaining_events = fill_remaining_shifts(month_days, providers, shift_capacity, 
+                                           provider_rules, global_rules, provider_shifts)
+    events.extend(remaining_events)
+    
+    return events
+
+def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List[str], 
+                                      shift_capacity: Dict[str, int], provider_rules: Dict, 
+                                      global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+    """
+    Assign night shifts to nocturnists first to ensure proper coverage.
+    """
+    events = []
+    night_shift_types = ["N12", "NB"]
+    
+    for day in month_days:
+        for shift_type in night_shift_types:
+            capacity = shift_capacity.get(shift_type, 0)
+            if capacity <= 0:
+                continue
+            
+            # Get available nocturnists for this day
+            available_nocturnists = [p for p in nocturnists 
+                                   if not is_provider_unavailable_on_date(p, day)]
+            
+            # Filter out nocturnists who already have shifts on this day
+            available_nocturnists = [p for p in available_nocturnists 
+                                   if not _has_shift_on_date(p, day, provider_shifts[p])]
+            
+            # Assign nocturnists up to capacity
+            assigned_count = 0
+            while assigned_count < capacity and available_nocturnists:
+                # Select nocturnist (with some randomness)
+                nocturnist = random.choice(available_nocturnists)
+                available_nocturnists.remove(nocturnist)
+                
+                # Create night shift event
+                shift_config = get_shift_config(shift_type)
+                start_time = datetime.combine(day, parse_time(shift_config["start"]))
+                end_time = datetime.combine(day, parse_time(shift_config["end"]))
+                
+                # Handle overnight shifts
+                if shift_config["end"] < shift_config["start"]:
+                    end_time += timedelta(days=1)
+                
+                event = SEvent(
+                    id=str(uuid.uuid4()),
+                    title=f"{shift_config['label']} - {nocturnist}",
+                    start=start_time,
+                    end=end_time,
+                    backgroundColor=shift_config["color"],
+                    extendedProps={
+                        "provider": nocturnist,
+                        "shift_type": shift_type,
+                        "shift_label": shift_config["label"]
+                    }
+                )
+                
+                events.append(event)
+                provider_shifts[nocturnist].append(event)
+                assigned_count += 1
     
     return events
 
@@ -137,6 +212,7 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     - Shift type consistency in blocks
     - Rounders start with 1-2 admitting shifts
     - Blocks of 3-7 shifts
+    - Optimize shift distribution
     """
     events = []
     
@@ -152,6 +228,127 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     
     return events
 
+def fill_remaining_shifts(month_days: List[date], providers: List[str], 
+                         shift_capacity: Dict[str, int], provider_rules: Dict, 
+                         global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+    """
+    Fill any remaining shifts with available providers to optimize coverage.
+    """
+    events = []
+    
+    # Define shift types and their priorities for filling
+    shift_priorities = [
+        ("N12", 4),  # Night shifts - high priority
+        ("NB", 1),   # Night bridge - high priority
+        ("R12", 13), # Rounder shifts - medium priority
+        ("A12", 1),  # Admitter shifts - medium priority
+        ("A10", 2),  # Admitter shifts - medium priority
+    ]
+    
+    for day in month_days:
+        for shift_type, capacity in shift_priorities:
+            # Check if this shift type needs more coverage
+            current_coverage = count_shifts_on_date(day, shift_type, provider_shifts)
+            if current_coverage >= capacity:
+                continue
+            
+            # Find available providers for this shift type
+            available_providers = get_available_providers_for_shift(day, shift_type, 
+                                                                  providers, provider_shifts, 
+                                                                  provider_rules)
+            
+            # Assign providers to fill remaining slots
+            remaining_slots = capacity - current_coverage
+            assigned_count = 0
+            
+            while assigned_count < remaining_slots and available_providers:
+                provider = random.choice(available_providers)
+                available_providers.remove(provider)
+                
+                # Create shift event
+                shift_config = get_shift_config(shift_type)
+                start_time = datetime.combine(day, parse_time(shift_config["start"]))
+                end_time = datetime.combine(day, parse_time(shift_config["end"]))
+                
+                # Handle overnight shifts
+                if shift_config["end"] < shift_config["start"]:
+                    end_time += timedelta(days=1)
+                
+                event = SEvent(
+                    id=str(uuid.uuid4()),
+                    title=f"{shift_config['label']} - {provider}",
+                    start=start_time,
+                    end=end_time,
+                    backgroundColor=shift_config["color"],
+                    extendedProps={
+                        "provider": provider,
+                        "shift_type": shift_type,
+                        "shift_label": shift_config["label"]
+                    }
+                )
+                
+                events.append(event)
+                provider_shifts[provider].append(event)
+                assigned_count += 1
+    
+    return events
+
+def get_available_providers_for_shift(day: date, shift_type: str, providers: List[str], 
+                                     provider_shifts: Dict, provider_rules: Dict) -> List[str]:
+    """
+    Get available providers for a specific shift type on a given day.
+    """
+    available_providers = []
+    
+    for provider in providers:
+        # Skip if provider is unavailable
+        if is_provider_unavailable_on_date(provider, day):
+            continue
+        
+        # Skip if provider already has a shift on this day
+        if _has_shift_on_date(provider, day, provider_shifts[provider]):
+            continue
+        
+        # Check provider-specific restrictions
+        provider_rule = provider_rules.get(provider, {})
+        shift_preferences = provider_rule.get("shift_preferences", {})
+        
+        # Skip if provider doesn't prefer this shift type
+        if not shift_preferences.get(shift_type, True):
+            continue
+        
+        # Check rest requirements
+        if not _has_sufficient_rest(provider, day, provider_shifts[provider]):
+            continue
+        
+        available_providers.append(provider)
+    
+    return available_providers
+
+def count_shifts_on_date(day: date, shift_type: str, provider_shifts: Dict) -> int:
+    """
+    Count how many shifts of a specific type are already assigned on a given day.
+    """
+    count = 0
+    for provider, shifts in provider_shifts.items():
+        for shift in shifts:
+            if hasattr(shift, 'start'):
+                shift_date = shift.start.date()
+                shift_type_actual = shift.extendedProps.get("shift_type")
+            elif isinstance(shift, dict) and 'start' in shift:
+                try:
+                    shift_date = datetime.fromisoformat(shift['start']).date()
+                    shift_type_actual = shift.get('extendedProps', {}).get("shift_type")
+                except (ValueError, TypeError):
+                    continue
+            else:
+                continue
+            
+            if shift_date == day and shift_type_actual == shift_type:
+                count += 1
+    
+    return count
+
 def create_shift_blocks(month_days: List[date], physician_providers: List[str], 
                        shift_capacity: Dict[str, int], provider_rules: Dict, 
                        global_rules: RuleConfig) -> Dict[str, List[Dict]]:
@@ -163,8 +360,8 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
     """
     physician_blocks = {p: [] for p in physician_providers}
     
-    # Define shift types for physicians (exclude APP)
-    physician_shift_types = ["R12", "A12", "A10", "N12", "NB"]
+    # Define shift types for physicians (exclude APP and night shifts for non-nocturnists)
+    physician_shift_types = ["R12", "A12", "A10"]
     
     for provider in physician_providers:
         # Get provider preferences
@@ -249,7 +446,7 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> Lis
     
     # Special handling for rounders: start with 1-2 admitting shifts, end with rounding
     if shift_type == "R12" and len(available_dates) >= 3:
-        # Start with 1-2 admitting shifts
+        # Start with 1-2 admitting shifts (use consistent type)
         admitting_count = min(2, len(available_dates) - 1)  # Ensure at least 1 rounding shift
         admitting_events = assign_admitting_before_rounding(provider, available_dates[:admitting_count])
         events.extend(admitting_events)
@@ -310,14 +507,14 @@ def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict) -> Lis
 def assign_admitting_before_rounding(provider: str, dates: List[date]) -> List[SEvent]:
     """
     Assign 1-2 admitting shifts before rounding shifts for continuity of care.
+    Use consistent admitting shift type (either A12 or A10, not mixed).
     """
     events = []
     
-    # Choose admitting shift type (A12 or A10)
-    admitting_types = ["A12", "A10"]
+    # Choose one admitting shift type for consistency (either A12 or A10)
+    admitting_type = random.choice(["A12", "A10"])  # Pick one type for the entire block
     
-    for i, day in enumerate(dates):
-        admitting_type = admitting_types[i % len(admitting_types)]
+    for day in dates:
         shift_config = get_shift_config(admitting_type)
         
         start_time = datetime.combine(day, parse_time(shift_config["start"]))
@@ -345,7 +542,7 @@ def assign_admitting_before_rounding(provider: str, dates: List[date]) -> List[S
     return events
 
 def find_available_dates_for_block(provider: str, shift_type: str, block_size: int, 
-                                 provider_shifts: Dict) -> List[date]:
+                                  provider_shifts: Dict) -> List[date]:
     """
     Find available dates for a shift block, ensuring 3-day rest between blocks.
     """
@@ -442,7 +639,17 @@ def _has_shift_on_date(provider: str, day: date, events: List[SEvent]) -> bool:
     Check if provider already has a shift on a specific date.
     """
     for event in events:
-        if event.start.date() == day:
+        if hasattr(event, 'start'):
+            event_date = event.start.date()
+        elif isinstance(event, dict) and 'start' in event:
+            try:
+                event_date = datetime.fromisoformat(event['start']).date()
+            except (ValueError, TypeError):
+                continue
+        else:
+            continue
+        
+        if event_date == day:
             return True
     return False
 
@@ -460,7 +667,17 @@ def _can_provider_take_shift(provider: str, day: date, shift_type: str,
     
     # Check if provider already has a shift on this day
     for event in provider_events:
-        if event.start.date() == day:
+        if hasattr(event, 'start'):
+            event_date = event.start.date()
+        elif isinstance(event, dict) and 'start' in event:
+            try:
+                event_date = datetime.fromisoformat(event['start']).date()
+            except (ValueError, TypeError):
+                continue
+        else:
+            continue
+        
+        if event_date == day:
             return False
     
     return True
@@ -484,7 +701,17 @@ def validate_rules(events: List[SEvent], providers: List[str],
             provider_shift_counts[provider] += 1
             
             # Count weekend shifts
-            if event.start.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            if hasattr(event, 'start'):
+                event_date = event.start.date()
+            elif isinstance(event, dict) and 'start' in event:
+                try:
+                    event_date = datetime.fromisoformat(event['start']).date()
+                except (ValueError, TypeError):
+                    continue
+            else:
+                continue
+            
+            if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
                 provider_weekend_shifts[provider] += 1
             
             # Count night shifts
