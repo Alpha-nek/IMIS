@@ -4,205 +4,263 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, timedelta
 from typing import List, Dict, Any
-import os
-
-from models.constants import PROVIDER_INITIALS_DEFAULT, APP_PROVIDER_INITIALS
-from models.data_models import RuleConfig
-from core.utils import _normalize_initials_list
+import json
 
 def providers_panel():
     """Main providers management panel."""
     st.header("👥 Provider Management")
     
-    # Provider loading section
-    st.subheader("📥 Load Providers")
+    # Load providers section
+    with st.expander("📁 Load Providers from CSV", expanded=True):
+        load_providers_from_csv()
     
-    col1, col2 = st.columns(2)
-    with col1:
-        with st.expander("➕ Add Providers", expanded=False):
-            new_providers = st.text_area(
-                "Enter provider initials (one per line or comma-separated)",
-                placeholder="AA\nAD\nAM\nFS\n...",
-                help="Enter provider initials, one per line or separated by commas"
-            )
+    # Provider list section
+    if not st.session_state.providers_df.empty:
+        st.subheader("📋 Current Providers")
+        
+        # Display providers in a nice table
+        providers_display = st.session_state.providers_df.copy()
+        providers_display["initials"] = providers_display["initials"].astype(str).str.upper()
+        
+        st.dataframe(
+            providers_display,
+            use_container_width=True,
+            column_config={
+                "initials": st.column_config.TextColumn("Provider Initials", width="medium"),
+                "name": st.column_config.TextColumn("Full Name", width="large"),
+                "type": st.column_config.SelectboxColumn("Type", options=["Physician", "APP"], width="medium")
+            }
+        )
+        
+        # Provider statistics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Providers", len(providers_display))
+        with col2:
+            physicians = len(providers_display[providers_display["type"] == "Physician"])
+            st.metric("Physicians", physicians)
+        with col3:
+            apps = len(providers_display[providers_display["type"] == "APP"])
+            st.metric("APPs", apps)
+        
+        # Provider rules section
+        st.subheader("⚙️ Provider Rules")
+        provider_selector()
+        provider_rules_panel()
+    else:
+        st.info("No providers loaded. Please load a CSV file with provider data.")
+
+def load_providers_from_csv():
+    """Load providers from CSV file."""
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file with provider data",
+        type=['csv'],
+        help="CSV should have columns: initials, name, type (Physician/APP)"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read CSV
+            df = pd.read_csv(uploaded_file)
             
-            if st.button("Add to current list"):
-                if new_providers.strip():
-                    # Parse input
-                    lines = [line.strip() for line in new_providers.split('\n') if line.strip()]
-                    new_list = []
-                    for line in lines:
-                        new_list.extend([x.strip() for x in line.split(',') if x.strip()])
-                    
-                    # Normalize and add
-                    current_list = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-                    merged = _normalize_initials_list(current_list + new_list)
-                    st.session_state.providers_df = pd.DataFrame({"initials": merged})
-                    st.toast(f"Added {len(merged) - len(current_list)} new provider(s).", icon="✅")
-    
-    with col2:
-        with st.expander("➖ Remove Providers", expanded=False):
-            current_list = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-            to_remove = st.multiselect("Select providers to remove", options=current_list, key="rm_multi")
-            if st.button("Remove selected", key="btn_rm"):
-                if not to_remove:
-                    st.info("No providers selected.")
-                else:
-                    remaining = [p for p in current_list if p not in set(to_remove)]
-                    st.session_state.providers_df = pd.DataFrame({"initials": _normalize_initials_list(remaining)})
-                    st.session_state["provider_caps"] = {k: v for k, v in st.session_state.provider_caps.items() if k in remaining}
-                    st.toast(f"Removed {len(to_remove)} provider(s).", icon="🗑️")
-    
-    # Provider-specific rules
-    st.subheader("⚙️ Provider-Specific Rules")
-    provider_selector()
-    provider_rules_panel()
+            # Validate required columns
+            required_columns = ['initials', 'name', 'type']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                st.error(f"Missing required columns: {missing_columns}")
+                return
+            
+            # Clean and validate data
+            df = df.dropna(subset=['initials', 'name'])
+            df['initials'] = df['initials'].astype(str).str.upper().str.strip()
+            df['name'] = df['name'].astype(str).str.strip()
+            df['type'] = df['type'].astype(str).str.strip()
+            
+            # Validate provider types
+            valid_types = ['Physician', 'APP']
+            invalid_types = df[~df['type'].isin(valid_types)]['type'].unique()
+            if len(invalid_types) > 0:
+                st.warning(f"Invalid provider types found: {invalid_types}. Converting to 'Physician'.")
+                df['type'] = df['type'].apply(lambda x: 'Physician' if x not in valid_types else x)
+            
+            # Store in session state
+            st.session_state.providers_df = df
+            st.session_state.providers_loaded = True
+            
+            st.success(f"✅ Successfully loaded {len(df)} providers!")
+            
+            # Show preview
+            with st.expander("Preview loaded data"):
+                st.dataframe(df.head(10), use_container_width=True)
+                
+        except Exception as e:
+            st.error(f"Error loading CSV file: {str(e)}")
 
 def provider_selector():
-    """Provider selection for rules."""
+    """Provider selection for rules editing."""
     if st.session_state.providers_df.empty:
-        st.warning("No providers loaded.")
-        return
+        st.warning("No providers available.")
+        return None
     
-    all_providers = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().tolist())
-    app_providers = sorted(APP_PROVIDER_INITIALS)
+    providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+    selected_provider = st.selectbox(
+        "Select Provider to Edit Rules",
+        options=providers,
+        key="provider_selector"
+    )
     
-    # Create provider options with separators
-    provider_options = ["(Select Provider)"]
-    if all_providers:
-        provider_options.append("--- Physicians ---")
-        provider_options.extend(all_providers)
-    if app_providers:
-        provider_options.append("--- APPs ---")
-        provider_options.extend(app_providers)
-    
-    selected_provider = st.selectbox("Select Provider for Rules", options=provider_options, key="provider_selector")
-    
-    if selected_provider != "(Select Provider)" and not selected_provider.startswith("---"):
-        st.session_state.selected_provider = selected_provider
-    else:
-        st.session_state.selected_provider = None
+    return selected_provider
 
 def provider_rules_panel():
     """Panel for editing provider-specific rules."""
-    if not st.session_state.get("selected_provider"):
-        st.info("Please select a provider above to edit their rules.")
+    selected_provider = provider_selector()
+    
+    if not selected_provider:
         return
     
-    provider = st.session_state.selected_provider
-    st.subheader(f"⚙️ Rules for {provider}")
+    st.markdown(f"### Rules for {selected_provider}")
     
     # Initialize provider rules if not exists
-    if "provider_rules" not in st.session_state:
-        st.session_state.provider_rules = {}
-    
-    if provider not in st.session_state.provider_rules:
-        st.session_state.provider_rules[provider] = {
-            "min_shifts": 15,
+    if selected_provider not in st.session_state.provider_rules:
+        st.session_state.provider_rules[selected_provider] = {
+            "min_shifts": 8,
             "max_shifts": 16,
+            "min_weekend_shifts": 1,
+            "max_weekend_shifts": 4,
+            "min_night_shifts": 2,
+            "max_night_shifts": 8,
             "unavailable_dates": [],
-            "vacations": [],
-            "preferred_shifts": [],
-            "blackout_dates": []
+            "vacations": []
         }
     
-    rules = st.session_state.provider_rules[provider]
+    provider_rules = st.session_state.provider_rules[selected_provider]
     
     # Basic rules
     col1, col2 = st.columns(2)
+    
     with col1:
-        rules["min_shifts"] = st.number_input("Minimum Shifts", min_value=1, max_value=31, value=rules.get("min_shifts", 15), key=f"min_{provider}")
-        rules["max_shifts"] = st.number_input("Maximum Shifts", min_value=1, max_value=31, value=rules.get("max_shifts", 16), key=f"max_{provider}")
+        provider_rules["min_shifts"] = st.number_input(
+            "Min Shifts per Month",
+            min_value=0, max_value=31,
+            value=provider_rules["min_shifts"],
+            key=f"min_shifts_{selected_provider}"
+        )
+        
+        provider_rules["min_weekend_shifts"] = st.number_input(
+            "Min Weekend Shifts per Month",
+            min_value=0, max_value=10,
+            value=provider_rules["min_weekend_shifts"],
+            key=f"min_weekend_{selected_provider}"
+        )
+        
+        provider_rules["min_night_shifts"] = st.number_input(
+            "Min Night Shifts per Month",
+            min_value=0, max_value=31,
+            value=provider_rules["min_night_shifts"],
+            key=f"min_night_{selected_provider}"
+        )
     
     with col2:
-        # Unavailable dates
-        st.write("**Unavailable Dates**")
-        unavailable_dates = rules.get("unavailable_dates", [])
-        new_date = st.date_input("Add unavailable date", key=f"unavailable_{provider}")
-        if st.button("Add Date", key=f"add_unavailable_{provider}"):
-            if new_date not in unavailable_dates:
-                unavailable_dates.append(new_date.isoformat())
-                rules["unavailable_dates"] = unavailable_dates
-                st.success("Date added!")
-                st.rerun()
+        provider_rules["max_shifts"] = st.number_input(
+            "Max Shifts per Month",
+            min_value=1, max_value=31,
+            value=provider_rules["max_shifts"],
+            key=f"max_shifts_{selected_provider}"
+        )
         
-        # Show existing unavailable dates
-        if unavailable_dates:
-            st.write("Current unavailable dates:")
-            for i, date_str in enumerate(unavailable_dates):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(date_str)
-                with col2:
-                    if st.button("Remove", key=f"remove_unavailable_{provider}_{i}"):
-                        unavailable_dates.pop(i)
-                        rules["unavailable_dates"] = unavailable_dates
-                        st.success("Date removed!")
-                        st.rerun()
+        provider_rules["max_weekend_shifts"] = st.number_input(
+            "Max Weekend Shifts per Month",
+            min_value=0, max_value=10,
+            value=provider_rules["max_weekend_shifts"],
+            key=f"max_weekend_{selected_provider}"
+        )
+        
+        provider_rules["max_night_shifts"] = st.number_input(
+            "Max Night Shifts per Month",
+            min_value=0, max_value=31,
+            value=provider_rules["max_night_shifts"],
+            key=f"max_night_{selected_provider}"
+        )
+    
+    # Unavailable dates
+    st.subheader("🚫 Unavailable Dates")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        unavailable_date = st.date_input(
+            "Add Unavailable Date",
+            key=f"unavailable_date_{selected_provider}"
+        )
+    
+    with col2:
+        if st.button("Add", key=f"add_unavailable_{selected_provider}"):
+            if unavailable_date not in provider_rules["unavailable_dates"]:
+                provider_rules["unavailable_dates"].append(unavailable_date.isoformat())
+                st.success(f"Added {unavailable_date} as unavailable")
+                st.rerun()
+            else:
+                st.warning("Date already marked as unavailable")
+    
+    # Display unavailable dates
+    if provider_rules["unavailable_dates"]:
+        st.write("**Unavailable Dates:**")
+        for i, date_str in enumerate(provider_rules["unavailable_dates"]):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"• {date_str}")
+            with col2:
+                if st.button("Remove", key=f"remove_unavailable_{selected_provider}_{i}"):
+                    provider_rules["unavailable_dates"].pop(i)
+                    st.rerun()
     
     # Vacations
-    st.write("**Vacations**")
-    col1, col2 = st.columns(2)
+    st.subheader("🏖️ Vacations")
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
-        vacation_start = st.date_input("Vacation Start", key=f"vacation_start_{provider}")
-        vacation_end = st.date_input("Vacation End", key=f"vacation_end_{provider}")
+        vacation_start = st.date_input(
+            "Vacation Start",
+            key=f"vacation_start_{selected_provider}"
+        )
     
     with col2:
-        if st.button("Add Vacation", key=f"add_vacation_{provider}"):
-            if vacation_start < vacation_end:
+        vacation_end = st.date_input(
+            "Vacation End",
+            key=f"vacation_end_{selected_provider}"
+        )
+    
+    with col3:
+        if st.button("Add Vacation", key=f"add_vacation_{selected_provider}"):
+            if vacation_start <= vacation_end:
                 vacation = {
                     "start": vacation_start.isoformat(),
                     "end": vacation_end.isoformat()
                 }
-                vacations = rules.get("vacations", [])
-                vacations.append(vacation)
-                rules["vacations"] = vacations
-                st.success("Vacation added!")
-                st.rerun()
+                if vacation not in provider_rules["vacations"]:
+                    provider_rules["vacations"].append(vacation)
+                    st.success(f"Added vacation from {vacation_start} to {vacation_end}")
+                    st.rerun()
+                else:
+                    st.warning("Vacation period already exists")
             else:
-                st.error("End date must be after start date.")
+                st.error("Start date must be before end date")
     
-    # Show existing vacations
-    vacations = rules.get("vacations", [])
-    if vacations:
-        st.write("Current vacations:")
-        for i, vacation in enumerate(vacations):
+    # Display vacations
+    if provider_rules["vacations"]:
+        st.write("**Vacation Periods:**")
+        for i, vacation in enumerate(provider_rules["vacations"]):
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.write(f"{vacation['start']} to {vacation['end']}")
+                st.write(f"• {vacation['start']} to {vacation['end']}")
             with col2:
-                if st.button("Remove", key=f"remove_vacation_{provider}_{i}"):
-                    vacations.pop(i)
-                    rules["vacations"] = vacations
-                    st.success("Vacation removed!")
+                if st.button("Remove", key=f"remove_vacation_{selected_provider}_{i}"):
+                    provider_rules["vacations"].pop(i)
                     st.rerun()
     
-    # Save button
-    if st.button("Save Rules", key=f"save_rules_{provider}"):
-        st.session_state.provider_rules[provider] = rules
-        st.success(f"Rules saved for {provider}!")
-
-def load_providers_from_csv():
-    """Load providers from CSV file."""
-    try:
-        if os.path.exists("IMIS_initials.csv"):
-            providers_df = pd.read_csv("IMIS_initials.csv")
-            providers_df = providers_df.dropna()
-            providers_df["initials"] = providers_df["initials"].astype(str).str.strip().str.upper()
-            providers_df = providers_df[providers_df["initials"] != ""]
-            providers_df = providers_df[providers_df["initials"] != "nan"]
-            providers_df = providers_df[providers_df["initials"] != "NO"]
-            
-            if not providers_df.empty:
-                st.session_state["providers_df"] = providers_df
-                st.session_state["providers_loaded"] = True
-                return True
-            else:
-                return False
-        else:
-            return False
-    except Exception as e:
-        st.error(f"Failed to load providers: {e}")
-        return False
+    # Save rules
+    if st.button("💾 Save Rules", key=f"save_rules_{selected_provider}"):
+        st.session_state.provider_rules[selected_provider] = provider_rules
+        st.success(f"Rules saved for {selected_provider}!")
