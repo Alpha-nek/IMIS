@@ -332,8 +332,8 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                          global_rules: RuleConfig, provider_shifts: Dict,
                          year: int = None, month: int = None) -> List[SEvent]:
     """
-    Fill remaining unfilled shifts while respecting expected shift limits.
-    This function is more conservative to prevent over-assignment.
+    Fill remaining unfilled shifts while strictly respecting expected shift limits.
+    This function is very conservative to prevent over-assignment.
     """
     events = []
     
@@ -360,40 +360,37 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             # Count how many shifts of this type are already assigned on this day
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
             
-            # Fill remaining slots, but be more conservative
+            # Fill remaining slots, but be very conservative
             remaining_slots = capacity - assigned_count
             
-            # Limit the number of slots we try to fill to prevent over-assignment
-            # Only fill if we have enough providers who are well below their expected shifts
-            slots_to_fill = 0
-            available_providers_for_day = []
+            if remaining_slots <= 0:
+                continue
             
-            # First, get all available providers for this shift type on this day
+            # Get all available providers for this shift type on this day
             all_available = get_available_providers_for_shift(
                 day, shift_type, providers, provider_shifts, provider_rules
             )
             
             # Filter providers based on their current shift count vs expected
+            # Use the same strict logic as nocturnists
+            available_providers_for_day = []
             for provider in all_available:
                 if provider in APP_PROVIDER_INITIALS:
-                    available_providers_for_day.append(provider)
+                    # For APP providers, just check if they don't have too many shifts
+                    current_shifts = len(provider_shifts.get(provider, []))
+                    if current_shifts < 20:  # Reasonable limit for APP providers
+                        available_providers_for_day.append(provider)
                 else:
                     current_shifts = len(provider_shifts.get(provider, []))
                     expected_shifts = provider_expected_shifts.get(provider, 15)
-                    tolerance = 2
-                    max_acceptable = expected_shifts + tolerance
                     
-                    # Only include providers who are significantly below their expected shifts
-                    # This prevents over-assignment
-                    if current_shifts < expected_shifts - 1:  # More conservative threshold
+                    # Only include providers who are BELOW their expected shifts
+                    # This is the key change - we don't allow exceeding expected shifts
+                    if current_shifts < expected_shifts:
                         available_providers_for_day.append(provider)
             
-            # Only fill slots if we have enough available providers
-            if len(available_providers_for_day) >= remaining_slots:
-                slots_to_fill = remaining_slots
-            else:
-                # Only fill what we can reasonably cover
-                slots_to_fill = min(remaining_slots, len(available_providers_for_day))
+            # Only fill slots if we have available providers
+            slots_to_fill = min(remaining_slots, len(available_providers_for_day))
             
             for _ in range(slots_to_fill):
                 if not available_providers_for_day:
@@ -520,34 +517,19 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
     - Maximum 7 shifts per block
     - 3-day rest between blocks
     - Rounders should end on rounding shifts
-    - Ensure minimum shifts per provider (15-16 shifts)
+    - Ensure shifts per provider match expected (adjusted for FTE and vacation)
     """
     physician_blocks = {p: [] for p in physician_providers}
     
     # Define shift types for physicians (exclude APP and night shifts for non-nocturnists)
     physician_shift_types = ["R12", "A12", "A10"]
     
-    # Calculate total available shifts for the month
-    total_available_shifts = 0
-    for day in month_days:
-        for shift_type in physician_shift_types:
-            if shift_type in shift_capacity:
-                total_available_shifts += shift_capacity[shift_type]
-    
-    # Calculate minimum shifts per provider based on month length
-    days_in_month = len(month_days)
-    min_shifts_per_provider = 15 if days_in_month == 30 else 16
-    
     # Ensure we have enough providers to cover all shifts
     if len(physician_providers) == 0:
         return physician_blocks
     
-    # Calculate expected shifts per provider based on month length
-    from core.utils import get_expected_shifts_for_month
-    expected_shifts = get_expected_shifts_for_month(year, month)
-    
     for provider in physician_providers:
-        # Get provider preferences and expected shifts (adjusted for vacation)
+        # Get provider preferences and expected shifts (adjusted for FTE and vacation)
         from core.utils import get_adjusted_expected_shifts
         target_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
         
@@ -991,8 +973,8 @@ def validate_rules(events: List[SEvent], providers: List[str],
         
         provider_violations[provider] = []
         
-        # Check total shift count against expected (with tolerance)
-        tolerance = 2  # Allow 2 shifts deviation from expected
+        # Check total shift count against expected (with minimal tolerance)
+        tolerance = 1  # Allow only 1 shift deviation from expected
         min_acceptable = expected_shifts - tolerance
         max_acceptable = expected_shifts + tolerance
         
