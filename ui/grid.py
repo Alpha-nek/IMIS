@@ -56,8 +56,8 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 day_events = []
                 
                 for e in events:
-                    # Handle both SEvent objects and dictionaries
-                    if hasattr(e, 'start'):
+                    # Handle SEvent objects
+                    if hasattr(e, 'start') and hasattr(e, 'extendedProps'):
                         # It's an SEvent object
                         event_date = e.start.date()
                         event_shift_type = e.extendedProps.get("shift_type")
@@ -234,8 +234,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             font-weight: bold;
         }
         
-        /* Make first column sticky */
-        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child {
+        /* Make first column sticky - updated selectors for Streamlit data editor */
+        [data-testid="stDataFrame"] > div:first-child {
             position: sticky !important;
             left: 0 !important;
             z-index: 1000 !important;
@@ -244,8 +244,28 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         }
 
         /* Ensure sticky column has proper styling */
-        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child th,
-        [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child td {
+        [data-testid="stDataFrame"] > div:first-child th,
+        [data-testid="stDataFrame"] > div:first-child td {
+            background: white !important;
+            border-right: 3px solid #FF674D !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        
+        /* Alternative selectors for data editor */
+        .stDataFrame > div:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 200px !important;
+        }
+
+        .stDataFrame > div:first-child th,
+        .stDataFrame > div:first-child td {
             background: white !important;
             border-right: 3px solid #FF674D !important;
             min-width: 200px !important;
@@ -265,6 +285,29 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         [data-testid="stDataFrame"] td {
             min-width: 120px !important;
             max-width: 150px !important;
+        }
+        
+        /* Additional sticky column selectors */
+        .stDataFrame {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        
+        .stDataFrame td {
+            min-width: 120px !important;
+            max-width: 150px !important;
+        }
+        
+        /* Target the first column specifically */
+        .stDataFrame th:first-child,
+        .stDataFrame td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            border-right: 3px solid #FF674D !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -456,7 +499,8 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
     # Create a mapping of existing events by key
     existing_events = {}
     for event in original_events:
-        if hasattr(event, 'start'):
+        if hasattr(event, 'start') and hasattr(event, 'extendedProps'):
+            # It's an SEvent object
             event_date = event.start.date()
             event_shift_type = event.extendedProps.get("shift_type")
             event_provider = event.extendedProps.get("provider", "")
@@ -508,6 +552,7 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
                     # Update existing event
                     event = existing_events[key]
                     if hasattr(event, 'extendedProps'):
+                        # It's an SEvent object
                         event.extendedProps["provider"] = new_provider
                         event.title = f"{new_provider} - {shift_key}"
                     elif isinstance(event, dict):
@@ -515,18 +560,45 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
                         event['title'] = f"{new_provider} - {shift_key}"
                     updated_events.append(event)
                 else:
-                    # Create new event
-                    new_event = {
-                        "id": f"{shift_key}_{new_provider}_{event_date.isoformat()}",
-                        "title": f"{new_provider} - {shift_key}",
-                        "start": datetime.combine(event_date, datetime.min.time()).isoformat(),
-                        "end": datetime.combine(event_date, datetime.min.time()).isoformat(),
-                        "extendedProps": {
-                            "provider": new_provider,
-                            "shift_type": shift_key
-                        }
-                    }
-                    updated_events.append(new_event)
+                    # Create new event as SEvent object
+                    from models.data_models import SEvent
+                    import uuid
+                    
+                    # Get shift config
+                    shift_config = None
+                    for shift_type in [
+                        {"key": "R12", "label": "7am–7pm Rounder", "start": "07:00", "end": "19:00", "color": "#16a34a"},
+                        {"key": "A12", "label": "7am–7pm Admitter", "start": "07:00", "end": "19:00", "color": "#f59e0b"},
+                        {"key": "A10", "label": "10am–10pm Admitter", "start": "10:00", "end": "22:00", "color": "#ef4444"},
+                        {"key": "N12", "label": "7pm–7am (Night)", "start": "19:00", "end": "07:00", "color": "#7c3aed"},
+                        {"key": "NB", "label": "Night Bridge", "start": "23:00", "end": "07:00", "color": "#06b6d4"},
+                        {"key": "APP", "label": "APP Provider", "start": "07:00", "end": "19:00", "color": "#8b5cf6"},
+                    ]:
+                        if shift_type["key"] == shift_key:
+                            shift_config = shift_type
+                            break
+                    
+                    if shift_config:
+                        start_time = datetime.combine(event_date, datetime.strptime(shift_config["start"], "%H:%M").time())
+                        end_time = datetime.combine(event_date, datetime.strptime(shift_config["end"], "%H:%M").time())
+                        
+                        # Handle overnight shifts
+                        if shift_config["end"] < shift_config["start"]:
+                            end_time += timedelta(days=1)
+                        
+                        new_event = SEvent(
+                            id=str(uuid.uuid4()),
+                            title=f"{new_provider} - {shift_key}",
+                            start=start_time,
+                            end=end_time,
+                            backgroundColor=shift_config["color"],
+                            extendedProps={
+                                "provider": new_provider,
+                                "shift_type": shift_key,
+                                "shift_label": shift_config["label"]
+                            }
+                        )
+                        updated_events.append(new_event)
             else:  # No provider assigned - remove event if it exists
                 if key in existing_events:
                     # Don't add this event to updated_events (effectively removing it)
@@ -534,7 +606,8 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
     
     # Add events that weren't changed
     for event in original_events:
-        if hasattr(event, 'start'):
+        if hasattr(event, 'start') and hasattr(event, 'extendedProps'):
+            # It's an SEvent object
             event_date = event.start.date()
             event_shift_type = event.extendedProps.get("shift_type")
         elif isinstance(event, dict) and 'start' in event:
