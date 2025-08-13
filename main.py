@@ -1,7 +1,6 @@
 # =============================================================================
 # IMIS Scheduler - Main Application
 # =============================================================================
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -11,15 +10,15 @@ import os
 
 # Import our modular components
 from models.constants import (
-    DEFAULT_SHIFT_TYPES, PROVIDER_INITIALS_DEFAULT, APP_PROVIDER_INITIALS,
-    DEFAULT_SHIFT_CAPACITY, HOLIDAY_RULES
+    DEFAULT_SHIFT_TYPES, DEFAULT_SHIFT_CAPACITY, APP_PROVIDER_INITIALS,
+    PROVIDER_INITIALS_DEFAULT, HOLIDAY_RULES
 )
 from models.data_models import RuleConfig, Provider, SEvent
 from core.utils import (
     is_holiday, get_holiday_adjusted_capacity, parse_time, 
     date_range, month_start_end, make_month_days,
     _expand_vacation_dates, is_provider_unavailable_on_date,
-    get_shift_label_maps, provider_weekend_count, get_global_rules
+    get_global_rules
 )
 from core.scheduler import generate_schedule, validate_rules
 from ui.calendar import render_calendar, render_month_navigation
@@ -30,18 +29,41 @@ from ui.requests import provider_requests_panel
 # Page configuration
 st.set_page_config(
     page_title="IMIS Scheduler",
-    page_icon="",
+    page_icon="��",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 def initialize_session_state():
-    """Initialize session state variables."""
+    """Initialize Streamlit session state variables."""
     if "events" not in st.session_state:
         st.session_state.events = []
     
+    if "current_year" not in st.session_state:
+        st.session_state.current_year = datetime.now().year
+    
     if "current_month" not in st.session_state:
-        st.session_state.current_month = date.today()
+        st.session_state.current_month = datetime.now().month
+    
+    if "providers_df" not in st.session_state:
+        st.session_state.providers_df = pd.DataFrame()
+    
+    if "providers_loaded" not in st.session_state:
+        st.session_state.providers_loaded = False
+    
+    if "global_rules" not in st.session_state:
+        st.session_state.global_rules = RuleConfig(
+            max_consecutive_shifts=7,
+            min_days_between_shifts=1,
+            max_shifts_per_month=16,
+            min_shifts_per_month=8,
+            max_weekend_shifts_per_month=4,
+            min_weekend_shifts_per_month=1,
+            max_night_shifts_per_month=8,
+            min_night_shifts_per_month=2,
+            max_holiday_shifts_per_month=2,
+            min_holiday_shifts_per_month=0
+        )
     
     if "shift_types" not in st.session_state:
         st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
@@ -49,35 +71,91 @@ def initialize_session_state():
     if "shift_capacity" not in st.session_state:
         st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
     
-    if "providers" not in st.session_state:
-        st.session_state.providers = PROVIDER_INITIALS_DEFAULT.copy()
-    
     if "provider_rules" not in st.session_state:
         st.session_state.provider_rules = {}
     
-    if "rules" not in st.session_state:
-        st.session_state.rules = RuleConfig().model_dump()
-    
-    if "generation_count" not in st.session_state:
-        st.session_state.generation_count = 0
-    
-    # Load providers from CSV if not already loaded
-    if "providers_df" not in st.session_state or st.session_state.providers_df.empty:
-        if load_providers_from_csv():
-            st.session_state["providers_loaded"] = True
-        else:
-            # Fallback to default providers
-            default_providers = pd.DataFrame({"initials": PROVIDER_INITIALS_DEFAULT})
-            st.session_state["providers_df"] = default_providers
-            st.session_state["providers_loaded"] = True
+    if "mobile_view" not in st.session_state:
+        st.session_state.mobile_view = "home"
 
-def main():
-    """Main application function."""
-    initialize_session_state()
+def render_mobile_interface():
+    """Render mobile-optimized interface."""
+    try:
+        from ui.mobile_components import (
+            mobile_quick_actions, mobile_my_shifts_view, 
+            mobile_request_form, mobile_notifications_view,
+            mobile_navigation
+        )
+        from ui.responsive import mobile_calendar
+    except ImportError:
+        # Fallback if mobile components don't exist yet
+        st.error("Mobile components not available. Using desktop interface.")
+        render_desktop_interface()
+        return
     
+    # Mobile header
+    st.markdown("""
+    <div class="main-header">
+        <h1>📱 IMIS Mobile</h1>
+        <p>Hospitalist Scheduler</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Mobile navigation
+    current_view = mobile_navigation()
+    
+    # Mobile view routing
+    if current_view == "home" or current_view == "calendar":
+        st.markdown("### �� Schedule")
+        if st.session_state.events:
+            mobile_calendar(st.session_state.events, height=400)
+        else:
+            st.info("No schedule available. Generate a schedule first.")
+        
+        mobile_quick_actions()
+    
+    elif current_view == "requests":
+        st.markdown("### 📝 Requests")
+        
+        # Request form
+        mobile_request_form()
+        
+        # Show existing requests
+        if "mobile_requests" in st.session_state and st.session_state.mobile_requests:
+            st.markdown("#### My Requests")
+            for request in st.session_state.mobile_requests:
+                st.json(request)
+    
+    elif current_view == "settings":
+        st.markdown("### ⚙️ Settings")
+        st.info("Settings will be available in the next update.")
+
+def render_desktop_interface():
+    """Render desktop interface."""
     # Custom CSS for professional styling
     st.markdown("""
     <style>
+        /* Mobile-first responsive design */
+        @media (max-width: 768px) {
+            .main-header {
+                padding: 0.5rem;
+                margin-bottom: 1rem;
+            }
+            .main-header h1 {
+                font-size: 1.5rem;
+            }
+            .main-header p {
+                font-size: 0.9rem;
+            }
+            .metric-card {
+                padding: 0.75rem;
+                margin: 0.25rem 0;
+            }
+            .stButton > button {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+        }
+        
         .main-header {
             background: linear-gradient(90deg, #1f77b4 0%, #ff7f0e 100%);
             padding: 1rem;
@@ -86,44 +164,44 @@ def main():
             color: white;
             text-align: center;
         }
-        .metric-card {
-            background-color: #f8f9fa;
+        
+        .status-card {
+            background: white;
+            border-radius: 8px;
             padding: 1rem;
-            border-radius: 8px;
-            border-left: 4px solid #1f77b4;
             margin: 0.5rem 0;
+            border-left: 4px solid;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .success-card {
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-            color: #155724;
+        
+        .status-success {
+            border-left-color: #28a745;
         }
-        .warning-card {
-            background-color: #fff3cd;
-            border-color: #ffeaa7;
-            color: #856404;
+        
+        .status-error {
+            border-left-color: #dc3545;
         }
-        .error-card {
-            background-color: #f8d7da;
-            border-color: #f5c6cb;
-            color: #721c24;
-        }
+        
         .stButton > button {
-            border-radius: 8px;
+            border-radius: 6px;
             font-weight: 500;
             transition: all 0.3s ease;
         }
+        
         .stButton > button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
+        
         .stTabs [data-baseweb="tab-list"] {
             gap: 8px;
         }
+        
         .stTabs [data-baseweb="tab"] {
-            border-radius: 8px 8px 0 0;
+            border-radius: 6px 6px 0 0;
             font-weight: 500;
         }
+        
         .stTabs [aria-selected="true"] {
             background-color: #1f77b4;
             color: white;
@@ -131,220 +209,290 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Professional header
+    # Professional header and provider status indicator
     st.markdown("""
     <div class="main-header">
-        <h1>�� IMIS Scheduler</h1>
-        <p>Professional Hospitalist Scheduling System</p>
+        <h1>�� IMIS Hospitalist Scheduler</h1>
+        <p>Intelligent Medical Inpatient Scheduling System</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Provider status indicator with better styling
+    # Provider status indicator
     if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
         provider_count = len(st.session_state.providers_df)
         st.markdown(f"""
-        <div class="metric-card success-card">
-            <h4>✅ System Ready</h4>
-            <p>{provider_count} providers loaded and ready for scheduling</p>
+        <div class="status-card status-success">
+            <h4>✅ Providers Loaded Successfully</h4>
+            <p><strong>{provider_count}</strong> providers available for scheduling</p>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
-        <div class="metric-card error-card">
-            <h4>❌ System Not Ready</h4>
-            <p>No providers loaded. Please go to the Providers tab to load providers.</p>
+        <div class="status-card status-error">
+            <h4>⚠️ No Providers Loaded</h4>
+            <p>Please load providers from the Providers tab to start scheduling</p>
         </div>
         """, unsafe_allow_html=True)
     
-    # Navigation tabs for better organization
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests"])
+    # Main tabs
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests"
+    ])
     
+    # Calendar Tab
     with tab1:
-        # Calendar tab - main scheduling interface
-        st.header("Monthly Calendar")
+        st.header("📅 Schedule Calendar")
         
-        # Top controls in a clean layout
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+        # Month navigation
+        year, month = render_month_navigation()
+        st.session_state.current_year = year
+        st.session_state.current_month = month
+        
+        # Generate schedule button
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
         with col1:
-            # Ensure providers are loaded and get the list
-            if not st.session_state.providers_df.empty:
-                physician_provs = sorted(st.session_state.providers_df["initials"].astype(str).str.upper().unique().tolist())
-                app_provs = sorted(APP_PROVIDER_INITIALS)
-                
-                # Filter out APP providers from the physician list
-                physician_providers = [p for p in physician_provs if p not in app_provs]
-                
-                # Create provider options with separators
-                provider_options = ["(Select Provider)"]
-                if physician_providers:
-                    provider_options.append("--- Physicians ---")
-                    provider_options.extend(physician_providers)
-                if app_provs:
-                    provider_options.append("--- APPs ---")
-                    provider_options.extend(app_provs)
-                
-                default = st.session_state.get("highlight_provider", "(All providers)")
-                idx = provider_options.index(default) if default in provider_options else 0
-                sel = st.selectbox("Highlight provider", options=provider_options, index=idx)
-                st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
-            else:
-                st.warning("No providers loaded. Please check the Providers tab.")
-                st.session_state.highlight_provider = ""
-        
-        with col2:
-            st.caption(f"�� Currently viewing: {st.session_state.current_month.strftime('%B %Y')}")
-        
-        with col3:
-            st.caption("💡 Use navigation buttons above calendar to change month")
-        
-        with col4:
-            st.caption("🔄 Generate button creates schedules for the displayed month")
-        
-        # Generation info
-        if st.session_state.get("generation_count", 0) > 0:
-            st.caption(f"📊 Generated {st.session_state.generation_count} schedule(s) so far. Each generation creates a different schedule!")
-        
-        # Action buttons
-        g1, g2, g3 = st.columns(3)
-        with g1:
-            if st.button("🔄 Generate Draft", help="Generate schedule for the displayed month"):
+            if st.button("🔄 Generate Schedule", type="primary", use_container_width=True):
                 if st.session_state.providers_df.empty:
-                    st.error("❌ No providers loaded! Please go to the Providers tab and load providers first.")
+                    st.error("Please load providers first!")
                 else:
                     providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-                    global_rules = get_global_rules()
+                    
+                    # Generate schedule
                     events = generate_schedule(
-                        year=st.session_state.current_month.year,
-                        month=st.session_state.current_month.month,
+                        year=year,
+                        month=month,
                         providers=providers,
                         shift_types=st.session_state.shift_types,
                         shift_capacity=st.session_state.shift_capacity,
                         provider_rules=st.session_state.provider_rules,
-                        global_rules=global_rules
+                        global_rules=st.session_state.global_rules
                     )
+                    
+                    # Convert SEvent objects to dictionaries for JSON compatibility
                     st.session_state.events = [event.to_json_event() for event in events]
-                    st.session_state.generation_count += 1
-                    st.success(f"✅ Draft schedule generated for {st.session_state.current_month.strftime('%B %Y')} with {len(events)} events! (Generation #{st.session_state.generation_count})")
+                    
+                    # Validate rules
+                    validation_results = validate_rules(
+                        events=events,
+                        providers=providers,
+                        global_rules=st.session_state.global_rules,
+                        provider_rules=st.session_state.provider_rules
+                    )
+                    
+                    st.session_state.validation_results = validation_results
+                    
+                    if validation_results["is_valid"]:
+                        st.success("✅ Schedule generated successfully!")
+                    else:
+                        st.warning("⚠️ Schedule generated with violations. Check validation results.")
+                    
+                    st.rerun()
         
-        with g2:
-            if st.button("✅ Validate Schedule", help="Check for rule violations"):
+        with col2:
+            if st.button("✅ Validate Rules", type="secondary", use_container_width=True):
                 if st.session_state.events:
-                    global_rules = get_global_rules()
-                    events = [SEvent(**{**e, "start": datetime.fromisoformat(e["start"]), "end": datetime.fromisoformat(e["end"])}) for e in st.session_state.events]
+                    # Convert back to SEvent objects for validation
+                    events = []
+                    for event_dict in st.session_state.events:
+                        event = SEvent(
+                            id=event_dict["id"],
+                            title=event_dict["title"],
+                            start=datetime.fromisoformat(event_dict["start"]),
+                            end=datetime.fromisoformat(event_dict["end"]),
+                            extendedProps=event_dict["extendedProps"]
+                        )
+                        events.append(event)
+                    
                     providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
                     
-                    violations = validate_rules(events, providers, global_rules, st.session_state.provider_rules)
-                    st.session_state.validation_results = violations
+                    validation_results = validate_rules(
+                        events=events,
+                        providers=providers,
+                        global_rules=st.session_state.global_rules,
+                        provider_rules=st.session_state.provider_rules
+                    )
                     
-                    if violations:
-                        st.error("❌ Validation found issues!")
+                    st.session_state.validation_results = validation_results
+                    
+                    if validation_results["is_valid"]:
+                        st.success("✅ All rules validated successfully!")
                     else:
-                        st.success("✅ Schedule is valid!")
+                        st.warning("⚠️ Rule violations found. Check details below.")
+                    
+                    st.rerun()
                 else:
-                    st.warning("No schedule to validate. Generate a schedule first.")
+                    st.error("No schedule to validate!")
         
-        with g3:
-            if st.button("🗑️ Clear All", help="Clear all events"):
+        with col3:
+            if st.button("🗑️ Clear Schedule", type="secondary", use_container_width=True):
                 st.session_state.events = []
-                st.success("All events cleared!")
+                st.session_state.validation_results = None
+                st.success("Schedule cleared!")
+                st.rerun()
         
-        # Calendar display
+        # Display validation results if available
+        if hasattr(st.session_state, 'validation_results') and st.session_state.validation_results:
+            results = st.session_state.validation_results
+            
+            if not results["is_valid"]:
+                st.error("❌ Rule Violations Found")
+                
+                with st.expander("View Violations", expanded=True):
+                    if results["violations"]:
+                        for violation in results["violations"]:
+                            st.error(f"• {violation}")
+                    
+                    if results["provider_violations"]:
+                        st.subheader("Provider-Specific Violations")
+                        for provider, violations in results["provider_violations"].items():
+                            st.error(f"**{provider}**:")
+                            for violation in violations:
+                                st.error(f"  - {violation}")
+            else:
+                st.success("✅ All rules validated successfully!")
+        
+        # Render calendar
         if st.session_state.events:
             render_calendar(st.session_state.events)
         else:
-            st.info("No schedule generated yet. Click 'Generate Draft' to create one.")
+            st.info("No schedule available. Generate a schedule to view it here.")
     
+    # Settings Tab
     with tab2:
-        # Settings tab - global rules and shift types
-        st.header("Global Settings")
+        st.header("⚙️ Global Settings")
         
-        # Global rules section
-        st.subheader("📋 Scheduling Rules")
-        
-        # Info about dynamic minimum shifts and enhanced features
-        st.info("💡 **Enhanced Features**:\n"
-                "• **Dynamic Minimum Shifts**: Automatically enforced based on month length\n"
-                "• **Shift Consistency**: Providers stay on same shift type within blocks\n"
-                "• **Random Generation**: Each generate creates a different schedule\n"
-                "• **Smart Month Generation**: Generates for the month currently displayed in calendar")
-        
-        rc = RuleConfig(**st.session_state.get("rules", RuleConfig().model_dump()))
+        # Global Rules Configuration
+        st.subheader("📋 Global Scheduling Rules")
         
         col1, col2 = st.columns(2)
+        
         with col1:
-            rc.min_shifts_per_provider = st.number_input("Minimum shifts per provider", min_value=1, max_value=31, value=rc.min_shifts_per_provider)
-            rc.max_shifts_per_provider = st.number_input("Maximum shifts per provider", min_value=1, max_value=31, value=rc.max_shifts_per_provider)
-            rc.min_rest_days_between_shifts = st.number_input("Minimum rest days between shifts", min_value=0.0, max_value=14.0, value=rc.min_rest_days_between_shifts, step=0.5)
+            st.session_state.global_rules.max_consecutive_shifts = st.number_input(
+                "Max Consecutive Shifts", 
+                min_value=1, max_value=14, value=st.session_state.global_rules.max_consecutive_shifts
+            )
+            
+            st.session_state.global_rules.min_days_between_shifts = st.number_input(
+                "Min Days Between Shifts", 
+                min_value=0, max_value=7, value=st.session_state.global_rules.min_days_between_shifts
+            )
+            
+            st.session_state.global_rules.max_shifts_per_month = st.number_input(
+                "Max Shifts Per Month", 
+                min_value=1, max_value=31, value=st.session_state.global_rules.max_shifts_per_month
+            )
+            
+            st.session_state.global_rules.min_shifts_per_month = st.number_input(
+                "Min Shifts Per Month", 
+                min_value=0, max_value=31, value=st.session_state.global_rules.min_shifts_per_month
+            )
         
         with col2:
-            rc.min_block_size = st.number_input("Minimum block size", min_value=1, max_value=7, value=rc.min_block_size)
-            rc.max_block_size = st.number_input("Maximum block size", min_value=1, max_value=7, value=rc.max_block_size)
-            rc.require_at_least_one_weekend = st.checkbox("Require at least one weekend", value=rc.require_at_least_one_weekend)
-            rc.max_nights_per_provider = st.number_input("Maximum night shifts per provider", min_value=0, max_value=31, value=rc.max_nights_per_provider or 6)
-        
-        if st.button("Save Global Rules"):
-            st.session_state.rules = rc.model_dump()
-            st.success("Global rules saved!")
-        
-        # Shift types configuration
-        st.subheader("🕐 Shift Types")
-        for i, shift_type in enumerate(st.session_state.shift_types):
-            with st.expander(f"Edit {shift_type['label']}"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.session_state.shift_types[i]["start"] = st.text_input(
-                        "Start Time", shift_type["start"], key=f"start_{i}"
-                    )
-                with col2:
-                    st.session_state.shift_types[i]["end"] = st.text_input(
-                        "End Time", shift_type["end"], key=f"end_{i}"
-                    )
-                with col3:
-                    st.session_state.shift_types[i]["color"] = st.color_picker(
-                        "Color", shift_type["color"], key=f"color_{i}"
-                    )
-        
-        # Shift capacity configuration
-        st.subheader("📊 Shift Capacity")
-        for shift_key, capacity in st.session_state.shift_capacity.items():
-            st.session_state.shift_capacity[shift_key] = st.number_input(
-                f"Capacity for {shift_key}", 
-                min_value=1, 
-                value=capacity, 
-                key=f"capacity_{shift_key}"
+            st.session_state.global_rules.max_weekend_shifts_per_month = st.number_input(
+                "Max Weekend Shifts Per Month", 
+                min_value=0, max_value=10, value=st.session_state.global_rules.max_weekend_shifts_per_month
             )
+            
+            st.session_state.global_rules.min_weekend_shifts_per_month = st.number_input(
+                "Min Weekend Shifts Per Month", 
+                min_value=0, max_value=10, value=st.session_state.global_rules.min_weekend_shifts_per_month
+            )
+            
+            st.session_state.global_rules.max_night_shifts_per_month = st.number_input(
+                "Max Night Shifts Per Month", 
+                min_value=0, max_value=31, value=st.session_state.global_rules.max_night_shifts_per_month
+            )
+            
+            st.session_state.global_rules.min_night_shifts_per_month = st.number_input(
+                "Min Night Shifts Per Month", 
+                min_value=0, max_value=31, value=st.session_state.global_rules.min_night_shifts_per_month
+            )
+        
+        # Shift Types Configuration
+        st.subheader("🔄 Shift Types")
+        
+        for i, shift_type in enumerate(st.session_state.shift_types):
+            with st.expander(f"Shift Type: {shift_type['name']}", expanded=True):
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.session_state.shift_types[i]['name'] = st.text_input(
+                        "Name", value=shift_type['name'], key=f"shift_name_{i}"
+                    )
+                
+                with col2:
+                    st.session_state.shift_types[i]['start_time'] = st.text_input(
+                        "Start Time", value=shift_type['start_time'], key=f"shift_start_{i}"
+                    )
+                
+                with col3:
+                    st.session_state.shift_types[i]['end_time'] = st.text_input(
+                        "End Time", value=shift_type['end_time'], key=f"shift_end_{i}"
+                    )
+                
+                # Color picker for shift type
+                st.session_state.shift_types[i]['color'] = st.color_picker(
+                    "Color", value=shift_type['color'], key=f"shift_color_{i}"
+                )
+        
+        # Shift Capacity Configuration
+        st.subheader("📊 Shift Capacity")
+        
+        for shift_type in st.session_state.shift_types:
+            capacity = st.number_input(
+                f"Capacity for {shift_type['name']}", 
+                min_value=1, max_value=10, 
+                value=st.session_state.shift_capacity.get(shift_type['name'], 1),
+                key=f"capacity_{shift_type['name']}"
+            )
+            st.session_state.shift_capacity[shift_type['name']] = capacity
     
+    # Providers Tab
     with tab3:
-        # Providers tab
         providers_panel()
     
+    # Grid View Tab
     with tab4:
-        # Grid view tab
         st.header("�� Schedule Grid View")
-        st.caption("Edit assignments directly in the grid below")
+        
         if st.session_state.events:
-            grid_df = render_schedule_grid(st.session_state.events, 
-                                         st.session_state.current_month.year, 
-                                         st.session_state.current_month.month)
+            # Render grid view
+            grid_df = render_schedule_grid(st.session_state.events, year, month)
             
-            # Grid editing controls
-            if st.button("Apply Grid Changes to Calendar"):
+            # Apply changes button
+            if st.button("�� Apply Grid Changes to Calendar", type="primary"):
                 updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
                 st.session_state.events = updated_events
                 st.success("Grid changes applied to calendar!")
                 st.rerun()
         else:
-            st.info("No schedule to display in grid view.")
+            st.info("No schedule available. Generate a schedule to view it in grid format.")
     
+    # Google Calendar Sync Tab
     with tab5:
-        # Google Calendar Sync tab
         st.header("📅 Google Calendar Sync")
         st.info("Google Calendar integration will be implemented in the next phase.")
         st.write("This tab will allow providers to sync their shifts to their Google Calendar.")
     
+    # Provider Requests Tab
     with tab6:
-        # Provider Requests tab
         provider_requests_panel()
+
+def main():
+    """Main application function."""
+    initialize_session_state()
+    
+    # Mobile detection
+    try:
+        from ui.responsive import is_mobile
+        if is_mobile():
+            render_mobile_interface()
+        else:
+            render_desktop_interface()
+    except ImportError:
+        # Fallback to desktop interface if mobile components don't exist
+        render_desktop_interface()
 
 if __name__ == "__main__":
     main()
