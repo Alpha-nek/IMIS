@@ -186,7 +186,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "Shift Type",
             disabled=True,
             help="Shift type color indicator",
-            width="large"
+            width="small"  # Changed from "large" to "small" to make it narrower
         )
     }
     
@@ -212,18 +212,47 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             width="small"
         )
     
-    # Add custom CSS for sticky first column and better styling
+    # Get selected provider from calendar filter for highlighting
+    selected_provider = st.session_state.get("calendar_provider_filter", "All Providers")
+    
+    # Add visual indicator for selected provider
+    if selected_provider != "All Providers":
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(90deg, #fff3cd 0%, #ffeaa7 100%);
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+            color: #856404;
+        ">
+            🎯 <strong>Highlighting Provider:</strong> {selected_provider}
+            <br>
+            <small>All cells containing "{selected_provider}" are highlighted in yellow</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Add scroll hint
     st.markdown("""
+    <div class="scroll-hint">
+        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type column stays fixed while you scroll through the dates.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Add custom CSS for sticky column, better styling, and provider highlighting
+    st.markdown(f"""
     <style>
-        .grid-container {
+        .grid-container {{
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             padding: 10px;
             margin: 10px 0;
             background: #f8f9fa;
-        }
+        }}
         
-        .scroll-hint {
+        .scroll-hint {{
             background: #e3f2fd;
             border: 1px solid #2196f3;
             border-radius: 6px;
@@ -232,194 +261,144 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             text-align: center;
             color: #1565c0;
             font-weight: bold;
-        }
+        }}
         
         /* Comprehensive sticky column CSS for Streamlit data editor */
         /* Target the data editor container */
-        [data-testid="stDataFrame"] {
+        [data-testid="stDataFrame"] {{
             overflow-x: auto !important;
             max-width: 100% !important;
             position: relative !important;
-        }
+        }}
         
         /* Target the table element inside data editor */
-        [data-testid="stDataFrame"] table {
+        [data-testid="stDataFrame"] table {{
             border-collapse: collapse !important;
             width: 100% !important;
-        }
+        }}
         
-        /* Make the first column sticky */
+        /* Make the first column sticky and narrower */
         [data-testid="stDataFrame"] th:first-child,
-        [data-testid="stDataFrame"] td:first-child {
+        [data-testid="stDataFrame"] td:first-child {{
             position: sticky !important;
             left: 0 !important;
             z-index: 1000 !important;
             background: white !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
+            min-width: 120px !important;  /* Reduced from 200px */
+            max-width: 150px !important;  /* Reduced from 250px */
             border-right: 3px solid #FF674D !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
+        }}
         
         /* Ensure header stays on top */
-        [data-testid="stDataFrame"] thead th:first-child {
+        [data-testid="stDataFrame"] thead th:first-child {{
             position: sticky !important;
             left: 0 !important;
             z-index: 1001 !important;
             background: white !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
+            min-width: 120px !important;  /* Reduced from 200px */
+            max-width: 150px !important;  /* Reduced from 250px */
             border-right: 3px solid #FF674D !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
+        }}
         
-        /* Alternative selectors for different Streamlit versions */
-        .stDataFrame th:first-child,
-        .stDataFrame td:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
+        /* Provider highlighting styles */
+        .highlight-provider {{
+            background-color: #fff3cd !important;
+            border: 2px solid #ffc107 !important;
+            font-weight: bold !important;
+            color: #856404 !important;
+        }}
         
-        .stDataFrame thead th:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1001 !important;
-            background: white !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
+        /* Make date columns narrower for better fit */
+        [data-testid="stDataFrame"] th:not(:first-child),
+        [data-testid="stDataFrame"] td:not(:first-child) {{
+            min-width: 80px !important;
+            max-width: 100px !important;
+            text-align: center !important;
+        }}
         
-        /* Ensure proper cell sizing for other columns */
-        [data-testid="stDataFrame"] td:not(:first-child) {
-            min-width: 120px !important;
-            max-width: 150px !important;
-        }
+        /* Improve overall table styling */
+        [data-testid="stDataFrame"] table {{
+            border: 1px solid #dee2e6 !important;
+        }}
         
-        .stDataFrame td:not(:first-child) {
-            min-width: 120px !important;
-            max-width: 150px !important;
-        }
+        [data-testid="stDataFrame"] th {{
+            background-color: #f8f9fa !important;
+            border-bottom: 2px solid #dee2e6 !important;
+            font-weight: 600 !important;
+            text-align: center !important;
+        }}
         
-        /* Additional selectors for data editor specific elements */
-        [data-testid="stDataFrame"] [data-testid="stDataFrame"] th:first-child,
-        [data-testid="stDataFrame"] [data-testid="stDataFrame"] td:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
+        [data-testid="stDataFrame"] td {{
+            border: 1px solid #dee2e6 !important;
+            padding: 4px 8px !important;
+        }}
         
-        /* Force horizontal scrolling */
-        [data-testid="stDataFrame"] > div {
+        /* Hover effects */
+        [data-testid="stDataFrame"] tbody tr:hover {{
+            background-color: #f8f9fa !important;
+        }}
+        
+        /* Ensure the sticky column doesn't interfere with scrolling */
+        [data-testid="stDataFrame"] .stDataFrame {{
             overflow-x: auto !important;
-            max-width: 100% !important;
-        }
-        
-        .stDataFrame > div {
-            overflow-x: auto !important;
-            max-width: 100% !important;
-        }
-        
-        /* Additional selectors for data editor table structure */
-        [data-testid="stDataFrame"] table thead tr th:first-child,
-        [data-testid="stDataFrame"] table tbody tr td:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 250px !important;
-            max-width: 300px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
-        
-        /* Target the actual table cells more specifically */
-        [data-testid="stDataFrame"] table th:first-child,
-        [data-testid="stDataFrame"] table td:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 250px !important;
-            max-width: 300px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
-        
-        /* Ensure the table container allows horizontal scrolling */
-        [data-testid="stDataFrame"] > div > div {
-            overflow-x: auto !important;
-            max-width: 100% !important;
-        }
-        
-        /* Target any element with role="grid" (data editor uses this) */
-        [role="grid"] th:first-child,
-        [role="grid"] td:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 250px !important;
-            max-width: 300px !important;
-            border-right: 3px solid #FF674D !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-        }
-        
-        /* Force the container to be scrollable */
-        [data-testid="stDataFrame"] {
-            overflow-x: scroll !important;
-            max-width: 100% !important;
-        }
-        
-        /* Ensure the table doesn't wrap */
-        [data-testid="stDataFrame"] table {
-            white-space: nowrap !important;
-            min-width: max-content !important;
-        }
+        }}
     </style>
-    """, unsafe_allow_html=True)
     
-    # Add scroll hint
-    st.markdown("""
-    <div class="scroll-hint">
-        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type column stays fixed while you scroll through the dates.
-    </div>
+    <script>
+        // Function to highlight the selected provider in the grid
+        function highlightSelectedProvider() {{
+            const selectedProvider = "{selected_provider}";
+            
+            // Remove existing highlights
+            document.querySelectorAll('.highlight-provider').forEach(el => {{
+                el.classList.remove('highlight-provider');
+            }});
+            
+            // Don't highlight if "All Providers" is selected
+            if (selectedProvider === "All Providers") {{
+                return;
+            }}
+            
+            // Find all cells containing the selected provider and highlight them
+            const cells = document.querySelectorAll('[data-testid="stDataFrame"] td');
+            cells.forEach(cell => {{
+                if (cell.textContent.trim() === selectedProvider) {{
+                    cell.classList.add('highlight-provider');
+                }}
+            }});
+        }}
+        
+        // Run highlighting when page loads
+        document.addEventListener('DOMContentLoaded', function() {{
+            // Wait a bit for the data editor to fully load
+            setTimeout(highlightSelectedProvider, 1000);
+        }});
+        
+        // Also run highlighting when the data editor updates
+        const observer = new MutationObserver(function(mutations) {{
+            mutations.forEach(function(mutation) {{
+                if (mutation.type === 'childList') {{
+                    setTimeout(highlightSelectedProvider, 500);
+                }}
+            }});
+        }});
+        
+        // Start observing when the data editor is available
+        setTimeout(function() {{
+            const dataFrame = document.querySelector('[data-testid="stDataFrame"]');
+            if (dataFrame) {{
+                observer.observe(dataFrame, {{ childList: true, subtree: true }});
+            }}
+        }}, 1000);
+    </script>
     """, unsafe_allow_html=True)
     
     # Wrap in container
