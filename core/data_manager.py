@@ -205,9 +205,22 @@ def load_rules() -> tuple[Dict, List, Dict, Dict]:
         print(f"Error loading rules: {e}")
         return {}, [], {}, {}
 
-def save_schedule(year: int, month: int, events: List[Dict]) -> None:
+def save_schedule(year: int, month: int, events: List[Any]) -> None:
     """Save schedule for a specific month to JSON file."""
     ensure_data_directory()
+    
+    # Convert SEvent objects to dictionaries for JSON serialization
+    events_dict = []
+    for event in events:
+        if hasattr(event, 'to_json_event'):
+            # It's an SEvent object
+            events_dict.append(event.to_json_event())
+        elif isinstance(event, dict):
+            # It's already a dictionary
+            events_dict.append(event)
+        else:
+            # Convert string representation back to dict if possible
+            events_dict.append(str(event))
     
     # Load existing schedules
     schedules = load_all_schedules()
@@ -215,7 +228,7 @@ def save_schedule(year: int, month: int, events: List[Dict]) -> None:
     # Update the specific month's schedule
     month_key = f"{year}-{month:02d}"
     schedules[month_key] = {
-        "events": events,
+        "events": events_dict,
         "year": year,
         "month": month,
         "last_updated": datetime.now().isoformat()
@@ -223,9 +236,9 @@ def save_schedule(year: int, month: int, events: List[Dict]) -> None:
     
     # Save all schedules
     with open(SCHEDULES_FILE, 'w') as f:
-        json.dump(schedules, f, indent=2, default=str)
+        json.dump(schedules, f, indent=2)
 
-def load_schedule(year: int, month: int) -> List[Dict]:
+def load_schedule(year: int, month: int) -> List[Any]:
     """Load schedule for a specific month from JSON file."""
     ensure_data_directory()
     
@@ -238,7 +251,26 @@ def load_schedule(year: int, month: int) -> List[Dict]:
         
         month_key = f"{year}-{month:02d}"
         if month_key in schedules:
-            return schedules[month_key].get("events", [])
+            events_data = schedules[month_key].get("events", [])
+            
+            # Convert loaded data back to SEvent objects
+            events = []
+            for event_data in events_data:
+                if isinstance(event_data, dict):
+                    # Convert datetime strings back to datetime objects
+                    if 'start' in event_data and isinstance(event_data['start'], str):
+                        event_data['start'] = datetime.fromisoformat(event_data['start'])
+                    if 'end' in event_data and isinstance(event_data['end'], str):
+                        event_data['end'] = datetime.fromisoformat(event_data['end'])
+                    
+                    # Create SEvent object
+                    from models.data_models import SEvent
+                    events.append(SEvent(**event_data))
+                else:
+                    # Keep as is if it's not a dict
+                    events.append(event_data)
+            
+            return events
         return []
     except Exception as e:
         print(f"Error loading schedule: {e}")
