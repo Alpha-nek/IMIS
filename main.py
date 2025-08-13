@@ -38,10 +38,13 @@ except ImportError as e:
     st.stop()
 
 try:
-    from core.scheduler import generate_schedule, validate_rules, NOCTURNISTS
+    from core.scheduler import generate_schedule, validate_rules
 except ImportError as e:
     st.error(f"Failed to import scheduler: {e}")
     st.stop()
+
+# Define nocturnists locally to avoid import issues
+NOCTURNISTS = {"JT", "OI", "AT", "CM", "YD", "RS"}
 
 try:
     from ui.calendar import render_calendar, render_month_navigation
