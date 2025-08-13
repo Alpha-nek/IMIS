@@ -93,6 +93,7 @@ def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -
                     "vacations": [],
                     "unavailable_dates": []
                 }
+        
         return provider_rules
     except Exception as e:
         logger.error(f"Error ensuring default provider rules: {e}")
@@ -430,33 +431,6 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 
                 events.append(event)
                 provider_shifts[provider].append(event)
-                    # Select provider (prefer those with fewer shifts)
-                    provider = select_provider_with_fewer_shifts(filtered_providers, provider_shifts)
-                    
-                    # Create shift event
-                    shift_config = get_shift_config(shift_type)
-                    start_time = datetime.combine(day, parse_time(shift_config["start"]))
-                    end_time = datetime.combine(day, parse_time(shift_config["end"]))
-                    
-                    # Handle overnight shifts
-                    if shift_config["end"] < shift_config["start"]:
-                        end_time += timedelta(days=1)
-                    
-                    event = SEvent(
-                        id=str(uuid.uuid4()),
-                        title=f"{shift_config['label']} - {provider}",
-                        start=start_time,
-                        end=end_time,
-                        backgroundColor=shift_config["color"],
-                        extendedProps={
-                            "provider": provider,
-                            "shift_type": shift_type,
-                            "shift_label": shift_config["label"]
-                        }
-                    )
-                    
-                    events.append(event)
-                    provider_shifts[provider].append(event)
     
     return events
 
