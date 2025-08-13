@@ -71,8 +71,8 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 if event_date == day and event_shift_type == shift_key:
                     day_events.append(provider)
             
-            # Join multiple providers with commas if there are multiple
-            row[day_key] = ", ".join(day_events) if day_events else ""
+            # Take only the first provider (one provider per cell)
+            row[day_key] = day_events[0] if day_events else ""
         
         grid_data.append(row)
     
@@ -81,7 +81,7 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
 def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
     Render the schedule grid with professional styling and color coding.
-    Shows shift types as rows and dates as columns.
+    Shows shift types as rows and dates as columns with editable dropdowns.
     """
     if not events:
         st.info("No schedule to display. Generate a schedule first.")
@@ -96,55 +96,103 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     # Get the date columns (all columns except Shift Type, Shift Key, Color)
     date_cols = [col for col in df.columns if col not in ["Shift Type", "Shift Key", "Color"]]
     
-    # Create column configuration with color coding
-    column_config = {
-        "Shift Type": st.column_config.TextColumn(
-            "Shift Type", 
-            width="medium",
-            help="Type of shift"
-        )
-    }
+    # Get available providers
+    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+    else:
+        providers = []
     
-    # Add date columns
-    for date_col in date_cols:
-        column_config[date_col] = st.column_config.TextColumn(
-            date_col, 
-            width="small",
-            help=f"Providers assigned on {date_col}"
-        )
+    # Add "None" option for empty cells
+    provider_options = ["None"] + providers
     
     st.markdown("### 📊 Schedule Grid View")
     st.markdown("**Shift Types:** 7am–7pm Rounder | 7am–7pm Admitter | 10am–10pm Admitter | 7pm–7am (Night) | Night Bridge | APP Provider")
+    st.markdown("**Instructions:** Use the dropdowns below to assign providers to shifts. Changes will be applied when you click 'Apply Grid Changes to Calendar'.")
     
-    # Display the grid with styling
-    display_df = df[["Shift Type"] + date_cols]
+    # Create editable grid with dropdowns
+    st.markdown("#### Edit Schedule")
     
-    # Apply color coding to the dataframe
-    def color_shift_types(val):
-        if val in ["7am–7pm Rounder", "7am–7pm Admitter", "10am–10pm Admitter", "7pm–7am (Night)", "Night Bridge", "APP Provider"]:
-            colors = {
-                "7am–7pm Rounder": "#16a34a",
-                "7am–7pm Admitter": "#f59e0b", 
-                "10am–10pm Admitter": "#ef4444",
-                "7pm–7am (Night)": "#7c3aed",
-                "Night Bridge": "#06b6d4",
-                "APP Provider": "#8b5cf6"
-            }
-            return f'background-color: {colors.get(val, "#ffffff")}; color: white; font-weight: bold;'
-        return ''
+    # Create a form for the grid
+    with st.form("schedule_grid_form"):
+        # Display shift type labels with color coding
+        shift_colors = {
+            "7am–7pm Rounder": "#16a34a",
+            "7am–7pm Admitter": "#f59e0b", 
+            "10am–10pm Admitter": "#ef4444",
+            "7pm–7am (Night)": "#7c3aed",
+            "Night Bridge": "#06b6d4",
+            "APP Provider": "#8b5cf6"
+        }
+        
+        # Create header row with dates
+        header_cols = st.columns([2] + [1] * len(date_cols))
+        with header_cols[0]:
+            st.markdown("**Shift Type**")
+        for i, date_col in enumerate(date_cols):
+            with header_cols[i + 1]:
+                st.markdown(f"**{date_col}**")
+        
+        # Create rows for each shift type
+        updated_data = {}
+        
+        for idx, row in df.iterrows():
+            shift_type = row["Shift Type"]
+            shift_key = row["Shift Key"]
+            
+            # Create columns for this row
+            cols = st.columns([2] + [1] * len(date_cols))
+            
+            # Shift type label with color
+            with cols[0]:
+                color = shift_colors.get(shift_type, "#ffffff")
+                st.markdown(f"""
+                <div style="background-color: {color}; color: white; padding: 8px; border-radius: 4px; text-align: center; font-weight: bold;">
+                    {shift_type}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Provider dropdowns for each date
+            for i, date_col in enumerate(date_cols):
+                with cols[i + 1]:
+                    current_provider = row[date_col] if row[date_col] else "None"
+                    
+                    # Create unique key for each dropdown
+                    dropdown_key = f"grid_{shift_key}_{date_col}"
+                    
+                    # Create dropdown
+                    selected_provider = st.selectbox(
+                        "Provider",
+                        options=provider_options,
+                        index=provider_options.index(current_provider) if current_provider in provider_options else 0,
+                        key=dropdown_key,
+                        label_visibility="collapsed"
+                    )
+                    
+                    # Store the selection
+                    if selected_provider != "None":
+                        updated_data[f"{shift_key}_{date_col}"] = selected_provider
+                    else:
+                        updated_data[f"{shift_key}_{date_col}"] = ""
+        
+        # Submit button
+        submitted = st.form_submit_button("🔄 Apply Grid Changes to Calendar", type="primary")
+        
+        if submitted:
+            # Apply changes to events
+            updated_events = apply_grid_changes_to_calendar(updated_data, events, year, month)
+            st.session_state.events = updated_events
+            
+            # Auto-save the updated schedule
+            from core.data_manager import save_schedule
+            save_schedule(year, month, st.session_state.events)
+            
+            st.success("Grid changes applied to calendar and saved!")
+            st.rerun()
     
-    # Apply styling
-    styled_df = display_df.style.applymap(color_shift_types, subset=['Shift Type'])
-    
-    st.dataframe(
-        styled_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config=column_config
-    )
-    
-    # Add summary statistics
+    # Display read-only summary
     st.markdown("---")
+    st.markdown("#### 📈 Schedule Summary")
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -178,7 +226,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.metric("Coverage", f"{coverage_percent:.1f}%")
     
     # Provider statistics
-    st.markdown("### 📈 Provider Statistics")
+    st.markdown("### 📊 Provider Statistics")
     
     if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
         providers_df = st.session_state.providers_df
@@ -198,32 +246,126 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         with col3:
             st.metric("APPs", app_count)
         
-        # Debug information
-        with st.expander("🔍 Grid Debug Information", expanded=False):
-            st.write("**Grid DataFrame Shape:**", df.shape)
-            st.write("**Grid Columns:**", list(df.columns))
-            st.write("**Date Columns:**", date_cols)
-            st.write("**Sample Grid Data:**")
-            st.dataframe(df.head())
-            st.write("**Events Count:**", len(events))
-            if events:
-                st.write("**Sample Event:**")
-                st.json(events[0] if events else {})
+        # Show provider utilization
+        st.markdown("#### Provider Utilization")
+        provider_counts = {}
+        
+        for event in events:
+            if hasattr(event, 'extendedProps'):
+                provider = event.extendedProps.get("provider", "")
+            elif isinstance(event, dict) and 'extendedProps' in event:
+                provider = event['extendedProps'].get("provider", "")
+            else:
+                continue
+            
+            if provider:
+                provider_counts[provider] = provider_counts.get(provider, 0) + 1
+        
+        if provider_counts:
+            # Create a DataFrame for provider utilization
+            utilization_df = pd.DataFrame([
+                {"Provider": provider, "Shifts": count}
+                for provider, count in provider_counts.items()
+            ]).sort_values("Shifts", ascending=False)
+            
+            st.dataframe(
+                utilization_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Provider": st.column_config.TextColumn("Provider", width="medium"),
+                    "Shifts": st.column_config.NumberColumn("Shifts", width="small")
+                }
+            )
     
     return df
 
-def apply_grid_changes_to_calendar(grid_df: pd.DataFrame, original_events: List[Any]) -> List[Any]:
+def apply_grid_changes_to_calendar(updated_data: Dict[str, str], original_events: List[Any], year: int, month: int) -> List[Any]:
     """
     Apply changes from grid to calendar events.
-    Handles both SEvent objects and dictionaries.
     """
-    # This is a simplified version - you'll need to implement the full logic
-    # based on your specific grid editing requirements
+    updated_events = []
     
-    updated_events = original_events.copy()
+    # Create a mapping of existing events by key
+    existing_events = {}
+    for event in original_events:
+        if hasattr(event, 'start'):
+            event_date = event.start.date()
+            event_shift_type = event.extendedProps.get("shift_type")
+            event_provider = event.extendedProps.get("provider", "")
+        elif isinstance(event, dict) and 'start' in event:
+            try:
+                event_date = datetime.fromisoformat(event['start']).date()
+                event_shift_type = event.get('extendedProps', {}).get("shift_type")
+                event_provider = event.get('extendedProps', {}).get("provider", "")
+            except (ValueError, TypeError):
+                continue
+        else:
+            continue
+        
+        key = f"{event_shift_type}_{event_date.strftime('%m/%d')}"
+        existing_events[key] = event
     
-    # Process grid changes here
-    # This would involve comparing the grid data with the original events
-    # and updating the events accordingly
+    # Process grid changes
+    for grid_key, new_provider in updated_data.items():
+        shift_type, date_str = grid_key.split('_', 1)
+        
+        # Parse date
+        try:
+            month_str, day_str = date_str.split('/')
+            event_date = date(year, int(month_str), int(day_str))
+        except (ValueError, TypeError):
+            continue
+        
+        key = f"{shift_type}_{date_str}"
+        
+        if new_provider:  # Provider assigned
+            if key in existing_events:
+                # Update existing event
+                event = existing_events[key]
+                if hasattr(event, 'extendedProps'):
+                    event.extendedProps["provider"] = new_provider
+                    event.title = f"{new_provider} - {shift_type}"
+                elif isinstance(event, dict):
+                    event['extendedProps']['provider'] = new_provider
+                    event['title'] = f"{new_provider} - {shift_type}"
+                updated_events.append(event)
+            else:
+                # Create new event
+                new_event = {
+                    "id": f"{shift_type}_{new_provider}_{event_date.isoformat()}",
+                    "title": f"{new_provider} - {shift_type}",
+                    "start": datetime.combine(event_date, datetime.min.time()).isoformat(),
+                    "end": datetime.combine(event_date, datetime.min.time()).isoformat(),
+                    "extendedProps": {
+                        "provider": new_provider,
+                        "shift_type": shift_type
+                    }
+                }
+                updated_events.append(new_event)
+        else:  # No provider assigned - remove event if it exists
+            if key in existing_events:
+                # Don't add this event to updated_events (effectively removing it)
+                pass
+    
+    # Add events that weren't changed
+    for event in original_events:
+        if hasattr(event, 'start'):
+            event_date = event.start.date()
+            event_shift_type = event.extendedProps.get("shift_type")
+        elif isinstance(event, dict) and 'start' in event:
+            try:
+                event_date = datetime.fromisoformat(event['start']).date()
+                event_shift_type = event.get('extendedProps', {}).get("shift_type")
+            except (ValueError, TypeError):
+                continue
+        else:
+            continue
+        
+        key = f"{event_shift_type}_{event_date.strftime('%m/%d')}"
+        
+        # Only add if not already processed
+        if key not in updated_data:
+            updated_events.append(event)
     
     return updated_events

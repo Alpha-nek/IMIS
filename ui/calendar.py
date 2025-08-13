@@ -43,7 +43,7 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             
             #calendar {{
                 width: 100% !important;
-                height: 100% !important;
+                height: {height}px !important;
                 background: white;
                 margin: 0;
                 padding: 0;
@@ -54,14 +54,17 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                 line-height: 1.4;
                 width: 100% !important;
                 max-width: none !important;
+                height: 100% !important;
             }}
             
             .fc-view-harness {{
                 width: 100% !important;
+                height: calc(100% - 60px) !important;
             }}
             
             .fc-scroller {{
                 width: 100% !important;
+                height: 100% !important;
             }}
             
             .fc-header-toolbar {{
@@ -69,6 +72,8 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                 background: #f8f9fa;
                 border-bottom: 1px solid #dee2e6;
                 width: 100%;
+                height: 60px;
+                box-sizing: border-box;
             }}
             
             .fc-toolbar-title {{
@@ -156,11 +161,13 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             .fc-daygrid-day-frame {{
                 min-height: 120px;
                 width: 100%;
+                height: 100%;
             }}
             
             .fc-daygrid-day-events {{
                 margin: 2px;
                 width: 100%;
+                min-height: 80px;
             }}
             
             .fc-daygrid-event-dot {{
@@ -180,20 +187,22 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             }}
             
             .fc-daygrid-day-events {{
-                min-height: 0;
+                min-height: 80px;
             }}
             
             .fc-daygrid-day-frame {{
                 min-height: 120px;
+                height: auto;
             }}
             
             .fc-daygrid-day {{
                 min-height: 120px;
+                height: auto;
             }}
         </style>
     </head>
     <body>
-        <div id='calendar' style="width: 100%; height: 100%;"></div>
+        <div id='calendar' style="width: 100%; height: {height}px;"></div>
         <script>
             var calendarEl = document.getElementById('calendar');
             var calendar = new FullCalendar.Calendar(calendarEl, {{
@@ -250,7 +259,7 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             }});
             calendar.render();
             
-            // Force calendar to use full width
+            // Force calendar to use full width and height
             setTimeout(function() {{
                 calendar.updateSize();
             }}, 100);

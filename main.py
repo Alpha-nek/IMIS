@@ -622,27 +622,10 @@ def render_desktop_interface():
     
     # Grid View Tab
     with tab4:
-        st.header("📊 Schedule Grid View")
-        
         if st.session_state.events:
             try:
-                # Render grid view
-                grid_df = render_schedule_grid(st.session_state.events, year, month)
-                
-                # Apply changes button
-                if st.button("🔄 Apply Grid Changes to Calendar", type="primary"):
-                    try:
-                        updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
-                        st.session_state.events = updated_events
-                        
-                        # Auto-save the updated schedule
-                        save_schedule(year, month, st.session_state.events)
-                        
-                        st.success("Grid changes applied to calendar and saved!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to apply grid changes: {e}")
-                        st.error(f"Error details: {traceback.format_exc()}")
+                # Render grid view (now includes editing functionality)
+                render_schedule_grid(st.session_state.events, year, month)
             except Exception as e:
                 st.error(f"Failed to render grid view: {e}")
                 st.error(f"Error details: {traceback.format_exc()}")
