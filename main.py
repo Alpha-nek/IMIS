@@ -1012,14 +1012,10 @@ def render_desktop_interface():
                 min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1)
             )
             
-            st.session_state.global_rules.max_shifts_per_month = st.number_input(
-                "Max Shifts Per Month", 
-                min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'max_shifts_per_month', 16)
-            )
-            
-            st.session_state.global_rules.min_shifts_per_month = st.number_input(
-                "Min Shifts Per Month", 
-                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_shifts_per_month', 8)
+            st.session_state.global_rules.expected_shifts_per_month = st.number_input(
+                "Expected Shifts Per Month", 
+                min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'expected_shifts_per_month', 15),
+                help="Expected shifts per month (15 for 30-day months, 16 for 31-day months)"
             )
         
         with col2:
@@ -1191,10 +1187,11 @@ def render_desktop_interface():
                 year, month = current_date.year, current_date.month
                 month_days = make_month_days(year, month)
                 days_in_month = len(month_days)
-                expected_min_shifts = 15 if days_in_month == 30 else 16
+                from core.utils import get_expected_shifts_for_month
+                expected_shifts = get_expected_shifts_for_month(year, month)
                 
                 st.markdown(f"**Testing {month}/{year} ({days_in_month} days)**")
-                st.markdown(f"**Expected minimum shifts: {expected_min_shifts}**")
+                st.markdown(f"**Expected shifts: {expected_shifts}**")
                 
                 # Generate schedule
                 with st.spinner("Generating schedule..."):
@@ -1225,27 +1222,30 @@ def render_desktop_interface():
                     total_shifts = stats['total_shifts']
                     provider_rule = provider_rules.get(provider, {})
                     
-                    # Skip APP providers for min/max validation
+                    # Skip APP providers for expected shifts validation
                     if provider in APP_PROVIDER_INITIALS:
                         status = "APP Provider"
-                        min_shifts = "N/A"
-                        max_shifts = "N/A"
+                        expected_shifts = "N/A"
+                        min_acceptable = "N/A"
+                        max_acceptable = "N/A"
                     else:
-                        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_month)
-                        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+                        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+                        tolerance = 2
+                        min_acceptable = expected_shifts - tolerance
+                        max_acceptable = expected_shifts + tolerance
                         
-                        if total_shifts < min_shifts:
-                            status = f"❌ Below Min ({min_shifts})"
-                        elif total_shifts > max_shifts:
-                            status = f"❌ Above Max ({max_shifts})"
+                        if total_shifts < min_acceptable:
+                            status = f"❌ Below Expected ({expected_shifts}±{tolerance})"
+                        elif total_shifts > max_acceptable:
+                            status = f"❌ Above Expected ({expected_shifts}±{tolerance})"
                         else:
                             status = "✅ OK"
                     
                     analysis_data.append({
                         "Provider": provider,
                         "Total Shifts": total_shifts,
-                        "Min Required": min_shifts,
-                        "Max Allowed": max_shifts,
+                        "Expected": expected_shifts,
+                        "Acceptable Range": f"{min_acceptable}-{max_acceptable}",
                         "Status": status,
                         "Weekend": stats['weekend_shifts'],
                         "Night": stats['night_shifts'],
@@ -1321,8 +1321,7 @@ def render_desktop_interface():
                 st.markdown(f"- Other Physicians: {', '.join(physician_providers)}")
                 
                 st.markdown("**Global Rules:**")
-                st.markdown(f"- Min shifts per month: {global_rules.min_shifts_per_month}")
-                st.markdown(f"- Max shifts per month: {global_rules.max_shifts_per_month}")
+                st.markdown(f"- Expected shifts per month: {global_rules.expected_shifts_per_month}")
                 st.markdown(f"- Min days between shifts: {global_rules.min_days_between_shifts}")
                 
                 st.markdown("**Shift Capacity:**")

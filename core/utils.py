@@ -50,6 +50,16 @@ def month_start_end(year: int, month: int):
     end = (start + relativedelta(months=1)) - timedelta(days=1)
     return start, end
 
+def get_expected_shifts_for_month(year: int, month: int) -> int:
+    """Get expected shifts for a specific month based on number of days."""
+    days = cal.monthrange(year, month)[1]
+    if days == 31:
+        return 16
+    if days == 30:
+        return 15
+    # For February (28/29 days), use a reasonable expected value
+    return 14
+
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
     days = cal.monthrange(year, month)[1]

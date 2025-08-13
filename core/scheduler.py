@@ -104,11 +104,10 @@ def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List
     for nocturnist in nocturnists:
         # Determine target number of night shifts for this nocturnist
         provider_rule = provider_rules.get(nocturnist, {})
-        min_shifts = provider_rule.get("min_shifts", 8)
-        max_shifts = provider_rule.get("max_shifts", 16)
+        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
         
-        # For nocturnists, prefer more night shifts
-        target_shifts = random.randint(min_shifts, max_shifts)
+        # For nocturnists, use expected shifts with some variation
+        target_shifts = expected_shifts
         
         # Create blocks of 3-7 shifts
         remaining_shifts = target_shifts
@@ -442,29 +441,17 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
     if len(physician_providers) == 0:
         return physician_blocks
     
-    # Calculate target shifts per provider to fill all slots
-    target_shifts_per_provider = max(min_shifts_per_provider, 
-                                   total_available_shifts // len(physician_providers))
+    # Calculate expected shifts per provider based on month length
+    from core.utils import get_expected_shifts_for_month
+    expected_shifts = get_expected_shifts_for_month(year, month)
     
     for provider in physician_providers:
         # Get provider preferences
         provider_rule = provider_rules.get(provider, {})
-        provider_min_shifts = provider_rule.get("min_shifts", min_shifts_per_provider)
-        provider_max_shifts = provider_rule.get("max_shifts", target_shifts_per_provider + 4)
+        provider_expected_shifts = provider_rule.get("expected_shifts", expected_shifts)
         
-        # Ensure minimum shifts requirement (15 for 30-day months, 16 for 31-day months)
-        min_shifts = max(provider_min_shifts, min_shifts_per_provider)
-        max_shifts = min(provider_max_shifts, 16)  # Cap at 16 maximum
-        
-        # Ensure we don't exceed the maximum
-        if min_shifts > max_shifts:
-            min_shifts = max_shifts
-        
-        # Determine target number of shifts for this provider
-        if min_shifts == max_shifts:
-            target_shifts = min_shifts
-        else:
-            target_shifts = random.randint(min_shifts, max_shifts)
+        # Use expected shifts for the provider
+        target_shifts = provider_expected_shifts
         
         # Create blocks with maximum 7 shifts per block
         remaining_shifts = target_shifts
@@ -866,20 +853,23 @@ def validate_rules(events: List[SEvent], providers: List[str],
         if provider in APP_PROVIDER_INITIALS:
             continue
         
-        # Get min/max from provider-specific rules or global rules
-        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_month)
-        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+        # Get expected shifts from provider-specific rules or global rules
+        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
         
         provider_violations[provider] = []
         
-        # Check total shift count
-        if shift_count < min_shifts:
-            violation = f"{provider}: {shift_count} shifts (min {min_shifts} required)"
+        # Check total shift count against expected (with tolerance)
+        tolerance = 2  # Allow 2 shifts deviation from expected
+        min_acceptable = expected_shifts - tolerance
+        max_acceptable = expected_shifts + tolerance
+        
+        if shift_count < min_acceptable:
+            violation = f"{provider}: {shift_count} shifts (expected {expected_shifts}, min acceptable {min_acceptable})"
             violations.append(violation)
             provider_violations[provider].append(violation)
         
-        if shift_count > max_shifts:
-            violation = f"{provider}: {shift_count} shifts (max {max_shifts} allowed)"
+        if shift_count > max_acceptable:
+            violation = f"{provider}: {shift_count} shifts (expected {expected_shifts}, max acceptable {max_acceptable})"
             violations.append(violation)
             provider_violations[provider].append(violation)
         

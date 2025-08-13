@@ -84,24 +84,26 @@ def test_shift_count_validation(year: int = 2024, month: int = 12):
             print(f"{provider} (APP): {total_shifts} shifts - APP providers have different rules")
             continue
         
-        # Get min/max from provider-specific rules or global rules
-        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_month)
-        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+        # Get expected shifts from provider-specific rules or global rules
+        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+        tolerance = 2
+        min_acceptable = expected_shifts - tolerance
+        max_acceptable = expected_shifts + tolerance
         
-        print(f"{provider}: {total_shifts} shifts (min: {min_shifts}, max: {max_shifts})")
+        print(f"{provider}: {total_shifts} shifts (expected: {expected_shifts}, acceptable: {min_acceptable}-{max_acceptable})")
         
-        if total_shifts < min_shifts:
-            violations_by_type['below_min'].append((provider, total_shifts, min_shifts))
-        elif total_shifts > max_shifts:
-            violations_by_type['above_max'].append((provider, total_shifts, max_shifts))
+        if total_shifts < min_acceptable:
+            violations_by_type['below_min'].append((provider, total_shifts, min_acceptable))
+        elif total_shifts > max_acceptable:
+            violations_by_type['above_max'].append((provider, total_shifts, max_acceptable))
     
     # Summary of violations
     print("\n=== Violation Summary ===")
-    print(f"Providers below minimum: {len(violations_by_type['below_min'])}")
+    print(f"Providers below acceptable range: {len(violations_by_type['below_min'])}")
     for provider, actual, expected in violations_by_type['below_min']:
-        print(f"  {provider}: {actual} shifts (need {expected})")
+        print(f"  {provider}: {actual} shifts (need at least {expected})")
     
-    print(f"\nProviders above maximum: {len(violations_by_type['above_max'])}")
+    print(f"\nProviders above acceptable range: {len(violations_by_type['above_max'])}")
     for provider, actual, expected in violations_by_type['above_max']:
         print(f"  {provider}: {actual} shifts (max {expected})")
     
@@ -153,16 +155,14 @@ def analyze_scheduler_logic():
     if isinstance(provider_rules, dict):
         for provider, rules in provider_rules.items():
             if provider in providers:  # Only show current providers
-                min_shifts = rules.get("min_shifts", "default")
-                max_shifts = rules.get("max_shifts", "default")
-                print(f"  {provider}: min={min_shifts}, max={max_shifts}")
+                expected_shifts = rules.get("expected_shifts", "default")
+                print(f"  {provider}: expected={expected_shifts}")
     else:
         print(f"  Provider rules is not a dict: {type(provider_rules)}")
     
     # Analyze global rules
     print(f"\nGlobal rules:")
-    print(f"  min_shifts_per_month: {global_rules.min_shifts_per_month}")
-    print(f"  max_shifts_per_month: {global_rules.max_shifts_per_month}")
+    print(f"  expected_shifts_per_month: {global_rules.expected_shifts_per_month}")
     print(f"  min_days_between_shifts: {global_rules.min_days_between_shifts}")
     
     # Analyze shift capacity

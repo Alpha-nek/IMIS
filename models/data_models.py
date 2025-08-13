@@ -10,8 +10,7 @@ class RuleConfig(BaseModel):
     """Global scheduling rules configuration."""
     max_consecutive_shifts: int = Field(7, ge=1, le=14)
     min_days_between_shifts: int = Field(1, ge=0, le=7)
-    max_shifts_per_month: int = Field(16, ge=1, le=31)
-    min_shifts_per_month: int = Field(15, ge=0, le=31)
+    expected_shifts_per_month: int = Field(15, ge=1, le=31, description="Expected shifts per month (15 for 30-day months, 16 for 31-day months)")
     max_weekend_shifts_per_month: int = Field(4, ge=0, le=10)
     min_weekend_shifts_per_month: int = Field(1, ge=0, le=10)
     max_night_shifts_per_month: int = Field(8, ge=0, le=31)
