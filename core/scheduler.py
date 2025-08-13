@@ -355,17 +355,17 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                          global_rules: RuleConfig, provider_shifts: Dict,
                          year: int = None, month: int = None) -> List[SEvent]:
     """
-    Fill remaining unfilled shifts with ULTRA-CONSERVATIVE HARD RULES:
-    1. NO provider exceeds expected shifts - PERIOD
-    2. NO provider gets assigned to shift types against their preferences - PERIOD
-    3. NO provider gets assigned to inappropriate shift types for their role - PERIOD
-    4. NO provider gets assigned without sufficient rest - PERIOD
-    5. PREFER GAPS OVER RULE VIOLATIONS - PERIOD
+    GREEDY ALGORITHM: Fill remaining shifts one by one, always choosing the best available provider.
+    HARD RULES ARE NEVER BROKEN - gaps are preferred over violations.
+    
+    Algorithm:
+    1. For each day and shift type, find all available providers
+    2. Score each provider based on: (fewer shifts = better score)
+    3. Choose the provider with the best score who meets ALL hard rules
+    4. If no provider meets all rules, leave the gap
+    5. Repeat until all slots are filled or no more valid assignments possible
     """
     events = []
-    
-    # Define all shift types - prioritize rounder shifts to avoid gaps
-    priority_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
     
     # Pre-calculate expected shifts for all providers
     provider_expected_shifts = {}
@@ -376,11 +376,9 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 provider, year, month, provider_rules, global_rules
             )
     
-    # Track how many additional shifts each provider gets from this function
-    additional_shifts_count = {p: 0 for p in providers}
-    
+    # GREEDY ALGORITHM: Process each day and shift type
     for day in month_days:
-        for shift_type in priority_shift_types:
+        for shift_type in ["R12", "A12", "A10", "N12", "NB", "APP"]:
             if shift_type not in shift_capacity:
                 continue
                 
@@ -388,140 +386,152 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
             remaining_slots = capacity - assigned_count
             
-            if remaining_slots <= 0:
-                continue
-            
-            # ULTRA-CONSERVATIVE APPROACH: Only fill if we have PERFECT candidates
-            # Get all available providers for this shift type on this day
-            all_available = get_available_providers_for_shift(
-                day, shift_type, providers, provider_shifts, provider_rules, global_rules
-            )
-            
-            # HARD RULE 1: Ultra-strict filtering - only providers who are SIGNIFICANTLY under expected shifts
-            strictly_available_providers = []
-            for provider in all_available:
-                if provider in APP_PROVIDER_INITIALS:
-                    # For APP providers, be very conservative
-                    current_shifts = len(provider_shifts.get(provider, []))
-                    if current_shifts < 12:  # Much lower limit for APP providers
-                        strictly_available_providers.append(provider)
-                else:
-                    current_shifts = len(provider_shifts.get(provider, []))
-                    expected_shifts = provider_expected_shifts.get(provider, 15)
-                    
-                    # ULTRA-CONSERVATIVE: Only assign if provider is SIGNIFICANTLY under expected shifts
-                    # This ensures we never exceed expected shifts
-                    if current_shifts < (expected_shifts - 2):  # Must be at least 2 shifts under expected
-                        strictly_available_providers.append(provider)
-            
-            # HARD RULE 2: Double-check shift type preferences using validation function
-            preference_validated_providers = []
-            for provider in strictly_available_providers:
-                # HARD RULE: Use validation function to check shift type preference
-                if _validate_shift_type_preference(provider, shift_type, provider_rules):
-                    preference_validated_providers.append(provider)
-            
-            strictly_available_providers = preference_validated_providers
-            
-            # HARD RULE 3: Double-check provider role validation
-            role_validated_providers = []
-            for provider in strictly_available_providers:
-                # HARD RULE: Validate that provider role matches shift type
-                if _validate_provider_role_shift_type(provider, shift_type):
-                    role_validated_providers.append(provider)
-            
-            strictly_available_providers = role_validated_providers
-            
-            # HARD RULE 4: Require at least one available provider
-            # If no providers meet ALL criteria, leave the gap
-            if len(strictly_available_providers) < 1:
-                logger.info(f"Leaving gap for {shift_type} on {day} - no providers meet all hard rules")
-                continue  # Skip this slot - let the gap be visible
-            
-            # Sort providers by total shifts (current + additional from this function)
-            # This ensures we prioritize those with the fewest shifts
-            def get_total_shifts(provider):
-                current = len(provider_shifts.get(provider, []))
-                additional = additional_shifts_count.get(provider, 0)
-                return current + additional
-            
-            strictly_available_providers.sort(key=get_total_shifts)
-            
-            # ULTRA-CONSERVATIVE RULE 5: Fill only ONE slot at a time to be extra careful
-            # This prevents over-assignment and ensures we can stop immediately if rules are violated
-            slots_to_fill = 1  # Only fill ONE slot at a time - ultra-conservative
-            
-            for _ in range(slots_to_fill):
-                if not strictly_available_providers:
-                    break
+            # Fill each remaining slot with the best available provider
+            for slot in range(remaining_slots):
+                # Get all providers who could potentially take this shift
+                all_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS or shift_type == "APP"]
                 
-                # Take the provider with the fewest total shifts
-                provider = strictly_available_providers[0]
-                strictly_available_providers.remove(provider)
+                # Score each provider (lower score = better choice)
+                provider_scores = []
+                for provider in all_providers:
+                    score = _calculate_provider_score(provider, day, shift_type, provider_shifts, 
+                                                    provider_rules, global_rules, provider_expected_shifts)
+                    if score is not None:  # None means provider is not eligible
+                        provider_scores.append((score, provider))
                 
-                # FINAL HARD RULE CHECK: Triple-check that this assignment won't exceed expected shifts
-                current_shifts = len(provider_shifts.get(provider, []))
-                additional_shifts = additional_shifts_count.get(provider, 0)
+                # Sort by score (best first)
+                provider_scores.sort()
                 
-                if provider in APP_PROVIDER_INITIALS:
-                    # APP providers have a hard limit of 12 shifts (reduced from 18)
-                    if not _validate_expected_shifts_limit(provider, current_shifts, 12, additional_shifts):
-                        logger.warning(f"Skipping assignment for {provider} - would exceed APP limit")
-                        continue
-                else:
-                    expected_shifts = provider_expected_shifts.get(provider, 15)
-                    if not _validate_expected_shifts_limit(provider, current_shifts, expected_shifts, additional_shifts):
-                        logger.warning(f"Skipping assignment for {provider} - would exceed expected shifts ({expected_shifts})")
-                        continue
+                # Choose the best provider who meets ALL hard rules
+                best_provider = None
+                for score, provider in provider_scores:
+                    if _validate_all_hard_rules(provider, day, shift_type, provider_shifts, 
+                                              provider_rules, global_rules, provider_expected_shifts):
+                        best_provider = provider
+                        break
                 
-                # FINAL HARD RULE CHECK: Triple-check shift type preference
-                if not _validate_shift_type_preference(provider, shift_type, provider_rules):
-                    logger.warning(f"Skipping assignment for {provider} - does not prefer {shift_type}")
-                    continue
+                if best_provider is None:
+                    logger.info(f"Leaving gap for {shift_type} on {day} - no providers meet all hard rules")
+                    continue  # Leave the gap
                 
-                # FINAL HARD RULE CHECK: Triple-check provider role
-                if not _validate_provider_role_shift_type(provider, shift_type):
-                    logger.warning(f"Skipping assignment for {provider} - role does not match {shift_type}")
-                    continue
-                
-                # FINAL HARD RULE CHECK: Triple-check rest requirements
-                min_rest_days = 2
-                if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
-                    min_rest_days = max(2, global_rules.min_days_between_shifts)
-                
-                if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
-                    logger.warning(f"Skipping assignment for {provider} - insufficient rest")
-                    continue
-                
-                # If we get here, ALL hard rules are satisfied - create the shift
-                shift_config = get_shift_config(shift_type)
-                start_time = datetime.combine(day, parse_time(shift_config["start"]))
-                end_time = datetime.combine(day, parse_time(shift_config["end"]))
-                
-                # Handle overnight shifts
-                if shift_config["end"] < shift_config["start"]:
-                    end_time += timedelta(days=1)
-                
-                event = SEvent(
-                    id=str(uuid.uuid4()),
-                    title=f"{shift_config['label']} - {provider}",
-                    start=start_time,
-                    end=end_time,
-                    backgroundColor=shift_config["color"],
-                    extendedProps={
-                        "provider": provider,
-                        "shift_type": shift_type,
-                        "shift_label": shift_config["label"]
-                    }
-                )
-                
+                # Assign the shift to the best provider
+                event = _create_shift_event(best_provider, shift_type, day)
                 events.append(event)
-                provider_shifts[provider].append(event)
-                additional_shifts_count[provider] += 1
+                provider_shifts[best_provider].append(event)
                 
-                logger.info(f"✅ Assigned {shift_type} to {provider} on {day} - ALL hard rules satisfied")
+                logger.info(f"✅ GREEDY: Assigned {shift_type} to {best_provider} on {day} (score: {score})")
     
     return events
+
+def _calculate_provider_score(provider: str, day: date, shift_type: str, provider_shifts: Dict,
+                            provider_rules: Dict, global_rules: RuleConfig, 
+                            provider_expected_shifts: Dict) -> Optional[float]:
+    """
+    Calculate a score for a provider taking a specific shift.
+    Lower score = better choice.
+    Returns None if provider is not eligible for this shift.
+    """
+    # Basic eligibility checks
+    if is_provider_unavailable_on_date(provider, day):
+        return None
+    
+    if _has_shift_on_date(provider, day, provider_shifts[provider]):
+        return None
+    
+    # HARD RULE: Check shift type preference
+    if not _validate_shift_type_preference(provider, shift_type, provider_rules):
+        return None
+    
+    # HARD RULE: Check provider role
+    if not _validate_provider_role_shift_type(provider, shift_type):
+        return None
+    
+    # HARD RULE: Check rest requirements
+    min_rest_days = 2
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = max(2, global_rules.min_days_between_shifts)
+    
+    if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
+        return None
+    
+    # Calculate score based on current shift count
+    current_shifts = len(provider_shifts.get(provider, []))
+    
+    if provider in APP_PROVIDER_INITIALS:
+        # APP providers: prefer those with fewer shifts (max 12)
+        if current_shifts >= 12:
+            return None  # Not eligible
+        score = current_shifts  # Lower is better
+    else:
+        # Regular providers: prefer those with fewer shifts relative to expected
+        expected_shifts = provider_expected_shifts.get(provider, 15)
+        if current_shifts >= expected_shifts:
+            return None  # Not eligible
+        
+        # Score based on how close to expected shifts (closer = higher score = worse)
+        score = current_shifts / expected_shifts
+    
+    return score
+
+def _validate_all_hard_rules(provider: str, day: date, shift_type: str, provider_shifts: Dict,
+                           provider_rules: Dict, global_rules: RuleConfig, 
+                           provider_expected_shifts: Dict) -> bool:
+    """
+    Validate ALL hard rules for a provider taking a specific shift.
+    Returns True only if ALL rules are satisfied.
+    """
+    # HARD RULE 1: Shift type preference
+    if not _validate_shift_type_preference(provider, shift_type, provider_rules):
+        return False
+    
+    # HARD RULE 2: Provider role validation
+    if not _validate_provider_role_shift_type(provider, shift_type):
+        return False
+    
+    # HARD RULE 3: Expected shifts limit
+    current_shifts = len(provider_shifts.get(provider, []))
+    if provider in APP_PROVIDER_INITIALS:
+        if not _validate_expected_shifts_limit(provider, current_shifts, 12, 0):
+            return False
+    else:
+        expected_shifts = provider_expected_shifts.get(provider, 15)
+        if not _validate_expected_shifts_limit(provider, current_shifts, expected_shifts, 0):
+            return False
+    
+    # HARD RULE 4: Rest requirements
+    min_rest_days = 2
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = max(2, global_rules.min_days_between_shifts)
+    
+    if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
+        return False
+    
+    return True
+
+def _create_shift_event(provider: str, shift_type: str, day: date) -> SEvent:
+    """
+    Create a shift event for a provider.
+    """
+    shift_config = get_shift_config(shift_type)
+    start_time = datetime.combine(day, parse_time(shift_config["start"]))
+    end_time = datetime.combine(day, parse_time(shift_config["end"]))
+    
+    # Handle overnight shifts
+    if shift_config["end"] < shift_config["start"]:
+        end_time += timedelta(days=1)
+    
+    return SEvent(
+        id=str(uuid.uuid4()),
+        title=f"{shift_config['label']} - {provider}",
+        start=start_time,
+        end=end_time,
+        backgroundColor=shift_config["color"],
+        extendedProps={
+            "provider": provider,
+            "shift_type": shift_type,
+            "shift_label": shift_config["label"]
+        }
+    )
 
 def select_provider_with_fewer_shifts(available_providers: List[str], 
                                     provider_shifts: Dict) -> str:
