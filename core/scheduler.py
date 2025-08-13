@@ -15,7 +15,7 @@ from models.data_models import RuleConfig, Provider, SEvent
 from core.utils import (
     is_holiday, get_holiday_adjusted_capacity, parse_time, 
     date_range, month_start_end, make_month_days,
-    _expand_vacation_dates, is_provider_unavailable_on_date
+    _expand_vacation_dates, is_provider_unavailable_on_date, count_shifts_on_date
 )
 from core.exceptions import (
     ScheduleGenerationError, ProviderError, RuleValidationError, 
@@ -673,29 +673,7 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
     
     return available_providers
 
-def count_shifts_on_date(day: date, shift_type: str, provider_shifts: Dict) -> int:
-    """
-    Count how many shifts of a specific type are already assigned on a given day.
-    """
-    count = 0
-    for provider, shifts in provider_shifts.items():
-        for shift in shifts:
-            if hasattr(shift, 'start'):
-                shift_date = shift.start.date()
-                shift_type_actual = shift.extendedProps.get("shift_type")
-            elif isinstance(shift, dict) and 'start' in shift:
-                try:
-                    shift_date = datetime.fromisoformat(shift['start']).date()
-                    shift_type_actual = shift.get('extendedProps', {}).get("shift_type")
-                except (ValueError, TypeError):
-                    continue
-            else:
-                continue
-            
-            if shift_date == day and shift_type_actual == shift_type:
-                count += 1
-    
-    return count
+
 
 def create_shift_blocks(month_days: List[date], physician_providers: List[str], 
                        shift_capacity: Dict[str, int], provider_rules: Dict, 
