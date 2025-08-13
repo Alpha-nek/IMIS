@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 Data Manager for IMIS Scheduler
 Handles automatic saving and loading of app data
@@ -253,3 +254,6 @@ def auto_load_session_state():
             
     except Exception as e:
         print(f"Error in auto load: {e}")
+=======
+#placeholder
+>>>>>>> 688115275780d875a519276c05565fdf07cb61b6

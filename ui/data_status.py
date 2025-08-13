@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 Data Status Display Component for IMIS Scheduler
 Shows the status of saved data and provides data management options
@@ -117,3 +118,6 @@ def render_data_status():
                             st.rerun()
                     with col3:
                         st.caption(f"Updated: {last_updated[:10]}")
+=======
+#placeholder
+>>>>>>> 688115275780d875a519276c05565fdf07cb61b6
