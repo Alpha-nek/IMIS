@@ -52,13 +52,40 @@ def month_start_end(year: int, month: int):
 
 def get_expected_shifts_for_month(year: int, month: int) -> int:
     """Get expected shifts for a specific month based on number of days."""
-    days = cal.monthrange(year, month)[1]
-    if days == 31:
-        return 16
-    if days == 30:
+    # Validate inputs
+    if year is None or month is None:
+        # Fallback to current date
+        from datetime import date
+        today = date.today()
+        year = today.year
+        month = today.month
+    
+    # Ensure month is within valid range
+    if not isinstance(month, int) or month < 1 or month > 12:
+        # Fallback to current month
+        from datetime import date
+        today = date.today()
+        month = today.month
+    
+    # Ensure year is reasonable
+    if not isinstance(year, int) or year < 2000 or year > 2100:
+        # Fallback to current year
+        from datetime import date
+        today = date.today()
+        year = today.year
+    
+    try:
+        days = cal.monthrange(year, month)[1]
+        if days == 31:
+            return 16
+        if days == 30:
+            return 15
+        # For February (28/29 days), use a reasonable expected value
+        return 14
+    except Exception as e:
+        # Fallback to default value
+        print(f"Error calculating expected shifts for {year}-{month}: {e}")
         return 15
-    # For February (28/29 days), use a reasonable expected value
-    return 14
 
 def get_adjusted_expected_shifts(provider: str, year: int, month: int, 
                                provider_rules: Dict, global_rules) -> int:
@@ -66,27 +93,40 @@ def get_adjusted_expected_shifts(provider: str, year: int, month: int,
     Get expected shifts for a provider adjusted for vacation time.
     Reduces expected shifts by 3-4 shifts per week of vacation.
     """
-    # Get base expected shifts
-    base_expected = get_expected_shifts_for_month(year, month)
-    
-    # Get provider-specific expected shifts if available
-    provider_rule = provider_rules.get(provider, {})
-    provider_expected = provider_rule.get("expected_shifts", base_expected)
-    
-    # Calculate vacation weeks for this month
-    vacation_weeks = _provider_vacation_weeks_in_month(provider_rule, year, month)
-    
-    if vacation_weeks == 0:
-        return provider_expected
-    
-    # Reduce expected shifts based on vacation weeks
-    # Most providers take 1 week (reduce by 3-4 shifts), some take 2 weeks (reduce by 6-8 shifts)
-    reduction_per_week = 3.5  # Average reduction per week of vacation
-    total_reduction = int(vacation_weeks * reduction_per_week)
-    
-    adjusted_expected = max(0, provider_expected - total_reduction)
-    
-    return adjusted_expected
+    try:
+        # Validate inputs
+        if not provider or not isinstance(provider, str):
+            return 15  # Default fallback
+        
+        if not isinstance(provider_rules, dict):
+            provider_rules = {}
+        
+        # Get base expected shifts
+        base_expected = get_expected_shifts_for_month(year, month)
+        
+        # Get provider-specific expected shifts if available
+        provider_rule = provider_rules.get(provider, {})
+        if not isinstance(provider_rule, dict):
+            provider_rule = {}
+        provider_expected = provider_rule.get("expected_shifts", base_expected)
+        
+        # Calculate vacation weeks for this month
+        vacation_weeks = _provider_vacation_weeks_in_month(provider_rule, year, month)
+        
+        if vacation_weeks == 0:
+            return provider_expected
+        
+        # Reduce expected shifts based on vacation weeks
+        # Most providers take 1 week (reduce by 3-4 shifts), some take 2 weeks (reduce by 6-8 shifts)
+        reduction_per_week = 3.5  # Average reduction per week of vacation
+        total_reduction = int(vacation_weeks * reduction_per_week)
+        
+        adjusted_expected = max(0, provider_expected - total_reduction)
+        
+        return adjusted_expected
+    except Exception as e:
+        print(f"Error calculating adjusted expected shifts for {provider}: {e}")
+        return 15  # Default fallback
 
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
@@ -155,47 +195,68 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
 
 def _provider_vacation_weeks_in_month(pr: dict, year: int, month: int) -> int:
     """Count vacation weeks a provider has in a specific month."""
-    if not pr:
-        return 0
-    vac = pr.get("vacations", [])
-    if not vac:
-        return 0
-    
-    # Get all vacation dates for this month
-    month_vacation_dates = set()
-    for d in _expand_vacation_dates(vac):
-        if (d.year, d.month) == (year, month):
-            month_vacation_dates.add(d)
-    
-    if not month_vacation_dates:
-        return 0
-    
-    # Count weeks (7 consecutive days = 1 week)
-    weeks = 0
-    sorted_dates = sorted(month_vacation_dates)
-    
-    i = 0
-    while i < len(sorted_dates):
-        # Count consecutive days starting from this date
-        consecutive_count = 1
-        current_date = sorted_dates[i]
+    try:
+        # Validate inputs
+        if not pr or not isinstance(pr, dict):
+            return 0
         
-        # Check for consecutive days
-        for j in range(i + 1, len(sorted_dates)):
-            if (sorted_dates[j] - current_date).days == consecutive_count:
-                consecutive_count += 1
-            else:
-                break
+        if year is None or month is None:
+            return 0
         
-        # Calculate weeks (7 days = 1 week)
-        weeks += consecutive_count // 7
-        if consecutive_count % 7 > 0:  # Partial week counts as 1 week
-            weeks += 1
+        # Ensure month is within valid range
+        if not isinstance(month, int) or month < 1 or month > 12:
+            return 0
         
-        # Skip the dates we've already counted
-        i += consecutive_count
-    
-    return weeks
+        # Ensure year is reasonable
+        if not isinstance(year, int) or year < 2000 or year > 2100:
+            return 0
+        
+        vac = pr.get("vacations", [])
+        if not vac or not isinstance(vac, list):
+            return 0
+        
+        # Get all vacation dates for this month
+        month_vacation_dates = set()
+        try:
+            for d in _expand_vacation_dates(vac):
+                if (d.year, d.month) == (year, month):
+                    month_vacation_dates.add(d)
+        except Exception as e:
+            print(f"Error expanding vacation dates: {e}")
+            return 0
+        
+        if not month_vacation_dates:
+            return 0
+        
+        # Count weeks (7 consecutive days = 1 week)
+        weeks = 0
+        sorted_dates = sorted(month_vacation_dates)
+        
+        i = 0
+        while i < len(sorted_dates):
+            # Count consecutive days starting from this date
+            consecutive_count = 1
+            current_date = sorted_dates[i]
+            
+            # Check for consecutive days
+            for j in range(i + 1, len(sorted_dates)):
+                if (sorted_dates[j] - current_date).days == consecutive_count:
+                    consecutive_count += 1
+                else:
+                    break
+            
+            # Calculate weeks (7 days = 1 week)
+            weeks += consecutive_count // 7
+            if consecutive_count % 7 > 0:  # Partial week counts as 1 week
+                weeks += 1
+            
+            # Skip the dates we've already counted
+            i += consecutive_count
+        
+        return weeks
+    except Exception as e:
+        print(f"Error calculating vacation weeks: {e}")
+        return 0
 
 def get_shift_label_maps():
     """Get mapping between shift keys and labels."""

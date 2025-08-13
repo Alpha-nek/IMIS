@@ -41,13 +41,62 @@ def generate_schedule(year: int, month: int, providers: List[str],
     5. Nocturnists only do night shifts
     6. Optimize shift distribution to fill all slots
     """
-    # Add some randomness for variety
-    random.seed(datetime.now().timestamp())
-    
-    events = assign_advanced(year, month, providers, shift_types, shift_capacity, 
-                           provider_rules, global_rules)
-    
-    return events
+    try:
+        # Ensure provider_rules is a dictionary
+        if not isinstance(provider_rules, dict):
+            provider_rules = {}
+        
+        # Initialize default rules for any missing providers
+        provider_rules = _ensure_default_provider_rules(providers, provider_rules)
+        
+        # Add some randomness for variety
+        random.seed(datetime.now().timestamp())
+        
+        events = assign_advanced(year, month, providers, shift_types, shift_capacity, 
+                               provider_rules, global_rules)
+        
+        return events
+    except Exception as e:
+        logger.error(f"Error generating schedule: {e}")
+        raise ScheduleGenerationError(f"Failed to generate schedule: {e}")
+
+def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -> Dict:
+    """
+    Ensure all providers have default rules initialized.
+    """
+    try:
+        for provider in providers:
+            if provider not in provider_rules:
+                provider_rules[provider] = {
+                    "shift_preferences": {
+                        "R12": True,
+                        "A12": True,
+                        "A10": True,
+                        "N12": True,
+                        "NB": True,
+                        "APP": True
+                    },
+                    "vacations": [],
+                    "unavailable_dates": []
+                }
+            elif not isinstance(provider_rules[provider], dict):
+                # If provider rules exist but are not a dict, initialize them
+                provider_rules[provider] = {
+                    "shift_preferences": {
+                        "R12": True,
+                        "A12": True,
+                        "A10": True,
+                        "N12": True,
+                        "NB": True,
+                        "APP": True
+                    },
+                    "vacations": [],
+                    "unavailable_dates": []
+                }
+        return provider_rules
+    except Exception as e:
+        logger.error(f"Error ensuring default provider rules: {e}")
+        return provider_rules
 
 def assign_advanced(year: int, month: int, providers: List[str], 
                    shift_types: List[Dict], shift_capacity: Dict[str, int],
@@ -55,49 +104,62 @@ def assign_advanced(year: int, month: int, providers: List[str],
     """
     Advanced assignment algorithm following ground rules.
     """
-    import streamlit as st
-    
-    # Initialize
-    events = []
-    month_days = make_month_days(year, month)
-    
-    # Separate providers by type
-    app_providers = [p for p in providers if p in APP_PROVIDER_INITIALS]
-    nocturnists = [p for p in providers if p in NOCTURNISTS]
-    physician_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS and p not in NOCTURNISTS]
-    
-    # Track provider assignments
-    provider_shifts = {p: [] for p in providers}
-    
-    # Step 1: Assign APP shifts first (they have specific rules)
-    app_events = assign_app_shifts(month_days, app_providers, shift_capacity, 
-                                  provider_rules, global_rules)
-    events.extend(app_events)
-    
-    # Update provider tracking
-    for event in app_events:
-        provider = event.extendedProps.get("provider")
-        if provider:
-            provider_shifts[provider].append(event)
-    
-    # Step 2: Assign night shifts to nocturnists in blocks
-    night_events = assign_night_shifts_to_nocturnists(month_days, nocturnists, 
-                                                     shift_capacity, provider_rules, 
-                                                     global_rules, provider_shifts, year, month)
-    events.extend(night_events)
-    
-    # Step 3: Assign remaining physician shifts in blocks
-    physician_events = assign_physician_shifts(month_days, physician_providers, 
-                                             shift_capacity, provider_rules, 
-                                             global_rules, provider_shifts, year, month)
-    events.extend(physician_events)
-    
-    # Step 4: Fill any remaining unfilled shifts
-    fill_events = fill_remaining_shifts(month_days, providers, shift_capacity, 
-                                       provider_rules, global_rules, provider_shifts)
-    events.extend(fill_events)
-    
-    return events
+    try:
+        import streamlit as st
+        
+        # Validate inputs
+        if not providers:
+            logger.warning("No providers provided for schedule generation")
+            return []
+        
+        if not isinstance(provider_rules, dict):
+            logger.warning("Provider rules is not a dictionary, initializing empty dict")
+            provider_rules = {}
+        
+        # Initialize
+        events = []
+        month_days = make_month_days(year, month)
+        
+        # Separate providers by type
+        app_providers = [p for p in providers if p in APP_PROVIDER_INITIALS]
+        nocturnists = [p for p in providers if p in NOCTURNISTS]
+        physician_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS and p not in NOCTURNISTS]
+        
+        # Track provider assignments
+        provider_shifts = {p: [] for p in providers}
+        
+        # Step 1: Assign APP shifts first (they have specific rules)
+        app_events = assign_app_shifts(month_days, app_providers, shift_capacity, 
+                                      provider_rules, global_rules)
+        events.extend(app_events)
+        
+        # Update provider tracking
+        for event in app_events:
+            provider = event.extendedProps.get("provider")
+            if provider:
+                provider_shifts[provider].append(event)
+        
+        # Step 2: Assign night shifts to nocturnists in blocks
+        night_events = assign_night_shifts_to_nocturnists(month_days, nocturnists, 
+                                                         shift_capacity, provider_rules, 
+                                                         global_rules, provider_shifts, year, month)
+        events.extend(night_events)
+        
+        # Step 3: Assign remaining physician shifts in blocks
+        physician_events = assign_physician_shifts(month_days, physician_providers, 
+                                                 shift_capacity, provider_rules, 
+                                                 global_rules, provider_shifts, year, month)
+        events.extend(physician_events)
+        
+        # Step 4: Fill any remaining unfilled shifts
+        fill_events = fill_remaining_shifts(month_days, providers, shift_capacity, 
+                                           provider_rules, global_rules, provider_shifts, year, month)
+        events.extend(fill_events)
+        
+        return events
+    except Exception as e:
+        logger.error(f"Error in assign_advanced: {e}")
+        raise ScheduleGenerationError(f"Failed to assign shifts: {e}")
 
 def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List[str], 
                                       shift_capacity: Dict[str, int], provider_rules: Dict, 
@@ -383,6 +445,8 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
         
         # Check provider-specific restrictions
         provider_rule = provider_rules.get(provider, {})
+        if not isinstance(provider_rule, dict):
+            provider_rule = {}
         shift_preferences = provider_rule.get("shift_preferences", {})
         
         # Skip if provider doesn't prefer this shift type
@@ -499,24 +563,35 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
     """
     Select appropriate shift type for a block based on provider preferences.
     """
-    # Get provider's shift preferences
-    shift_preferences = provider_rule.get("shift_preferences", {})
-    
-    # Filter available shift types based on preferences
-    available_types = []
-    for shift_type in shift_types:
-        if shift_preferences.get(shift_type, True):  # Default to True if not specified
-            available_types.append(shift_type)
-    
-    if not available_types:
-        available_types = shift_types  # Fallback to all types
-    
-    # Prefer rounder shifts (R12) as they're most common
-    if "R12" in available_types:
-        return "R12"
-    
-    # Otherwise, choose randomly from available types
-    return random.choice(available_types)
+    try:
+        # Ensure provider_rule is a dictionary
+        if not isinstance(provider_rule, dict):
+            provider_rule = {}
+        
+        # Get provider's shift preferences
+        shift_preferences = provider_rule.get("shift_preferences", {})
+        
+        # Filter available shift types based on preferences
+        available_types = []
+        for shift_type in shift_types:
+            if shift_preferences.get(shift_type, True):  # Default to True if not specified
+                available_types.append(shift_type)
+        
+        if not available_types:
+            available_types = shift_types  # Fallback to all types
+        
+        # Prefer rounder shifts (R12) as they're most common
+        if "R12" in available_types:
+            return "R12"
+        
+        # Otherwise, choose randomly from available types
+        return random.choice(available_types)
+    except Exception as e:
+        logger.warning(f"Error selecting shift type for provider {provider}: {e}")
+        # Fallback to R12 if available, otherwise first shift type
+        if "R12" in shift_types:
+            return "R12"
+        return shift_types[0] if shift_types else "R12"
 
 def assign_shift_block(provider: str, block: Dict, provider_shifts: Dict, year: int, month: int) -> List[SEvent]:
     """

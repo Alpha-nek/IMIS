@@ -137,16 +137,20 @@ def get_default_providers() -> pd.DataFrame:
 
 def save_providers(providers_df: pd.DataFrame, provider_rules: Dict) -> None:
     """Save providers and their rules to JSON file."""
-    ensure_data_directory()
-    
-    data = {
-        "providers": providers_df.to_dict('records') if not providers_df.empty else [],
-        "provider_rules": provider_rules,
-        "last_updated": datetime.now().isoformat()
-    }
-    
-    with open(PROVIDERS_FILE, 'w') as f:
-        json.dump(data, f, indent=2, default=str)
+    try:
+        ensure_data_directory()
+        
+        data = {
+            "providers": providers_df.to_dict('records') if not providers_df.empty else [],
+            "provider_rules": provider_rules,
+            "last_updated": datetime.now().isoformat()
+        }
+        
+        with open(PROVIDERS_FILE, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Failed to save providers: {e}")
+        raise FileOperationError(f"Failed to save providers: {e}")
 
 def load_providers() -> tuple[pd.DataFrame, Dict]:
     """Load providers and their rules from JSON file."""
