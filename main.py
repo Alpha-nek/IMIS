@@ -25,6 +25,11 @@ from ui.calendar import render_calendar, render_month_navigation
 from ui.grid import render_schedule_grid, apply_grid_changes_to_calendar
 from ui.providers import providers_panel, load_providers_from_csv
 from ui.requests import provider_requests_panel
+from ui.data_status import render_data_status
+from core.data_manager import (
+    initialize_default_data, auto_load_session_state, auto_save_session_state,
+    save_providers, save_rules, save_schedule
+)
 
 # Page configuration
 st.set_page_config(
@@ -35,7 +40,11 @@ st.set_page_config(
 )
 
 def initialize_session_state():
-    """Initialize Streamlit session state variables."""
+    """Initialize Streamlit session state variables with automatic data loading."""
+    # Initialize default data files if they don't exist
+    initialize_default_data()
+    
+    # Basic session state initialization
     if "events" not in st.session_state:
         st.session_state.events = []
     
@@ -54,12 +63,24 @@ def initialize_session_state():
     if "global_rules" not in st.session_state:
         st.session_state.global_rules = RuleConfig()
     
-    # Ensure all required attributes exist
-    if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
-        st.session_state.global_rules = RuleConfig()
-    
     if "shift_types" not in st.session_state:
         st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
+    
+    if "shift_capacity" not in st.session_state:
+        st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
+    
+    if "provider_rules" not in st.session_state:
+        st.session_state.provider_rules = {}
+    
+    if "mobile_view" not in st.session_state:
+        st.session_state.mobile_view = "home"
+    
+    # Auto-load data from saved files
+    auto_load_session_state()
+    
+    # Ensure all required attributes exist after loading
+    if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
+        st.session_state.global_rules = RuleConfig()
     
     # Ensure shift_types is properly structured
     if not isinstance(st.session_state.shift_types, list):
@@ -74,15 +95,6 @@ def initialize_session_state():
                     'end_time': '16:00',
                     'color': '#1f77b4'
                 }
-    
-    if "shift_capacity" not in st.session_state:
-        st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
-    
-    if "provider_rules" not in st.session_state:
-        st.session_state.provider_rules = {}
-    
-    if "mobile_view" not in st.session_state:
-        st.session_state.mobile_view = "home"
 
 def render_mobile_interface():
     """Render mobile-optimized interface."""
@@ -227,23 +239,27 @@ def render_desktop_interface():
     # Provider status indicator
     if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
         provider_count = len(st.session_state.providers_df)
+        physicians = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "Physician"])
+        apps = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "APP"])
+        
         st.markdown(f"""
         <div class="status-card status-success">
             <h4>✅ Providers Loaded Successfully</h4>
-            <p><strong>{provider_count}</strong> providers available for scheduling</p>
+            <p><strong>{provider_count}</strong> providers available ({physicians} Physicians, {apps} APPs)</p>
+            <p><small>Data automatically saved and will persist between sessions</small></p>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="status-card status-error">
             <h4>⚠️ No Providers Loaded</h4>
-            <p>Please load providers from the Providers tab to start scheduling</p>
+            <p>Default providers are available. Load additional providers from the Providers tab.</p>
         </div>
         """, unsafe_allow_html=True)
     
     # Main tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests", "💾 Data"
     ])
     
     # Calendar Tab
@@ -279,6 +295,9 @@ def render_desktop_interface():
                     # Convert SEvent objects to dictionaries for JSON compatibility
                     st.session_state.events = [event.to_json_event() for event in events]
                     
+                    # Auto-save the generated schedule
+                    save_schedule(year, month, st.session_state.events)
+                    
                     # Validate rules
                     validation_results = validate_rules(
                         events=events,
@@ -290,7 +309,7 @@ def render_desktop_interface():
                     st.session_state.validation_results = validation_results
                     
                     if validation_results["is_valid"]:
-                        st.success("✅ Schedule generated successfully!")
+                        st.success("✅ Schedule generated and saved successfully!")
                     else:
                         st.warning("⚠️ Schedule generated with violations. Check validation results.")
                     
@@ -474,6 +493,16 @@ def render_desktop_interface():
                 key=f"capacity_{shift_name}"
             )
             st.session_state.shift_capacity[shift_name] = capacity
+        
+        # Auto-save settings when changed
+        if st.button("💾 Save Settings", type="primary"):
+            save_rules(
+                st.session_state.global_rules,
+                st.session_state.shift_types,
+                st.session_state.shift_capacity
+            )
+            st.success("Settings saved successfully!")
+            st.rerun()
     
     # Providers Tab
     with tab3:
@@ -491,7 +520,11 @@ def render_desktop_interface():
             if st.button("🔄 Apply Grid Changes to Calendar", type="primary"):
                 updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
                 st.session_state.events = updated_events
-                st.success("Grid changes applied to calendar!")
+                
+                # Auto-save the updated schedule
+                save_schedule(year, month, st.session_state.events)
+                
+                st.success("Grid changes applied to calendar and saved!")
                 st.rerun()
         else:
             st.info("No schedule available. Generate a schedule to view it in grid format.")
@@ -505,6 +538,10 @@ def render_desktop_interface():
     # Provider Requests Tab
     with tab6:
         provider_requests_panel()
+    
+    # Data Management Tab
+    with tab7:
+        render_data_status()
 
 def main():
     """Main application function."""
