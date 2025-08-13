@@ -785,16 +785,17 @@ def render_desktop_interface():
                 else:
                     st.metric("👥 Providers Used", 0)
             
-            # Detailed violations - redesigned with tabs
+            # Detailed violations - redesigned with tabs and columns
             if not validation["is_valid"]:
                 st.markdown("### 🔍 Violation Details")
                 
-                # Categorize violations
-                general_violations = []
-                provider_violations = []
+                # Categorize violations by type
                 block_violations = []
                 rest_violations = []
                 capacity_violations = []
+                weekend_violations = []
+                night_violations = []
+                general_violations = []
                 
                 # Categorize general violations
                 for violation in validation["violations"]:
@@ -805,6 +806,10 @@ def render_desktop_interface():
                         rest_violations.append(violation)
                     elif "capacity" in violation_lower or "over" in violation_lower:
                         capacity_violations.append(violation)
+                    elif "weekend" in violation_lower:
+                        weekend_violations.append(violation)
+                    elif "night" in violation_lower:
+                        night_violations.append(violation)
                     else:
                         general_violations.append(violation)
                 
@@ -819,60 +824,127 @@ def render_desktop_interface():
                                 rest_violations.append(f"**{provider}:** {violation}")
                             elif "capacity" in violation_lower or "over" in violation_lower:
                                 capacity_violations.append(f"**{provider}:** {violation}")
+                            elif "weekend" in violation_lower:
+                                weekend_violations.append(f"**{provider}:** {violation}")
+                            elif "night" in violation_lower:
+                                night_violations.append(f"**{provider}:** {violation}")
                             else:
-                                provider_violations.append(f"**{provider}:** {violation}")
+                                general_violations.append(f"**{provider}:** {violation}")
                 
                 # Create tabs for different violation types
                 tab_names = []
-                if general_violations:
-                    tab_names.append("General")
-                if provider_violations:
-                    tab_names.append("Provider")
                 if block_violations:
                     tab_names.append("Block Issues")
                 if rest_violations:
                     tab_names.append("Rest Periods")
                 if capacity_violations:
                     tab_names.append("Capacity")
+                if weekend_violations:
+                    tab_names.append("Weekend")
+                if night_violations:
+                    tab_names.append("Night Shifts")
+                if general_violations:
+                    tab_names.append("General")
                 
                 if tab_names:
                     violation_tabs = st.tabs(tab_names)
                     
                     tab_index = 0
                     
-                    if general_violations:
-                        with violation_tabs[tab_index]:
-                            st.markdown("#### General Schedule Issues")
-                            for violation in general_violations:
-                                st.markdown(f"• {violation}")
-                        tab_index += 1
-                    
-                    if provider_violations:
-                        with violation_tabs[tab_index]:
-                            st.markdown("#### Provider-Specific Issues")
-                            for violation in provider_violations:
-                                st.markdown(f"• {violation}")
-                        tab_index += 1
-                    
                     if block_violations:
                         with violation_tabs[tab_index]:
                             st.markdown("#### Block & Consecutive Shift Issues")
-                            for violation in block_violations:
-                                st.markdown(f"• {violation}")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(block_violations) // 2 + len(block_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in block_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in block_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
                         tab_index += 1
                     
                     if rest_violations:
                         with violation_tabs[tab_index]:
                             st.markdown("#### Rest Period Violations")
-                            for violation in rest_violations:
-                                st.markdown(f"• {violation}")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(rest_violations) // 2 + len(rest_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in rest_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in rest_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
                         tab_index += 1
                     
                     if capacity_violations:
                         with violation_tabs[tab_index]:
                             st.markdown("#### Capacity & Over-Assignment Issues")
-                            for violation in capacity_violations:
-                                st.markdown(f"• {violation}")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(capacity_violations) // 2 + len(capacity_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in capacity_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in capacity_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if weekend_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Weekend Shift Issues")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(weekend_violations) // 2 + len(weekend_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in weekend_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in weekend_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if night_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Night Shift Issues")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(night_violations) // 2 + len(night_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in night_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in night_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if general_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### General Schedule Issues")
+                            # Use columns for better layout
+                            cols = st.columns(2)
+                            mid_point = len(general_violations) // 2 + len(general_violations) % 2
+                            
+                            with cols[0]:
+                                for violation in general_violations[:mid_point]:
+                                    st.markdown(f"• {violation}")
+                            
+                            with cols[1]:
+                                for violation in general_violations[mid_point:]:
+                                    st.markdown(f"• {violation}")
                         tab_index += 1
                 else:
                     # Fallback if no violations to categorize
