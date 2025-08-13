@@ -7,7 +7,7 @@ from typing import Dict, Any
 
 # Google Calendar API Configuration
 GCAL_SCOPES = ['https://www.googleapis.com/auth/calendar']
-GCAL_TOKEN_FILE = 'token.json'          # Created on first successful auth
+GCAL_TOKEN_FILE = 'token.json'          # Created on first successful authQ
 GCAL_CREDENTIALS_FILE = 'credentials.json'  # Download from Google Cloud
 APP_TIMEZONE = 'America/New_York'       # Application timezone
 
