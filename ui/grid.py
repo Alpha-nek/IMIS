@@ -13,15 +13,23 @@ from models.constants import DEFAULT_SHIFT_TYPES
 
 def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
-    Create a grid view of the schedule. Handles both SEvent objects and dictionaries.
+    Create a grid view of the schedule with proper shift type columns.
+    Handles both SEvent objects and dictionaries.
     """
     # Get month days
     month_days = []
     for day in range(1, calendar.monthrange(year, month)[1] + 1):
         month_days.append(date(year, month, day))
     
-    # Get shift types
-    shift_types = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES)
+    # Define the correct order of shift types for the grid
+    shift_type_order = [
+        {"key": "R12", "label": "7am Rounders", "color": "#16a34a"},
+        {"key": "A12", "label": "7am Admitter", "color": "#f59e0b"},
+        {"key": "A10", "label": "10am Admitter", "color": "#ef4444"},
+        {"key": "N12", "label": "Night Shift", "color": "#7c3aed"},
+        {"key": "NB", "label": "Bridge", "color": "#06b6d4"},
+        {"key": "APP", "label": "APP", "color": "#8b5cf6"},
+    ]
     
     # Create grid data
     grid_data = []
@@ -51,8 +59,8 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "Day_Short": day.strftime("%a")
         }
         
-        # Group events by shift type
-        for shift_type in shift_types:
+        # Add shift type columns in the correct order
+        for shift_type in shift_type_order:
             shift_key = shift_type["key"]
             shift_events = []
             for e in day_events:
@@ -84,7 +92,7 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 if provider:
                     providers.append(provider)
             
-            # Use shift label instead of key for better readability
+            # Use shift label for column name
             column_name = shift_type["label"]
             row[column_name] = ", ".join(providers) if providers else ""
         
@@ -94,7 +102,7 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
 
 def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
-    Render the schedule grid with professional styling.
+    Render the schedule grid with professional styling and color coding.
     Handles both SEvent objects and dictionaries.
     """
     if not events:
@@ -107,24 +115,51 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.info("No events found for this month.")
         return df
     
-    # Reorder columns for better display
+    # Define column order and styling
     date_cols = ["Date", "Day", "Day_Short"]
-    shift_cols = [col for col in df.columns if col not in date_cols]
+    shift_cols = [
+        "7am Rounders",
+        "7am Admitter", 
+        "10am Admitter",
+        "Night Shift",
+        "Bridge",
+        "APP"
+    ]
     
-    # Create a styled dataframe
+    # Create column configuration with color coding
+    column_config = {
+        "Date": st.column_config.DateColumn("Date", format="MM/DD/YYYY", width="medium"),
+        "Day": st.column_config.TextColumn("Day", width="medium"),
+        "Day_Short": st.column_config.TextColumn("Day", width="small"),
+    }
+    
+    # Add shift type columns with color coding
+    shift_colors = {
+        "7am Rounders": "#16a34a",
+        "7am Admitter": "#f59e0b", 
+        "10am Admitter": "#ef4444",
+        "Night Shift": "#7c3aed",
+        "Bridge": "#06b6d4",
+        "APP": "#8b5cf6"
+    }
+    
+    for shift_col in shift_cols:
+        if shift_col in df.columns:
+            column_config[shift_col] = st.column_config.TextColumn(
+                shift_col, 
+                width="medium",
+                help=f"Providers assigned to {shift_col}"
+            )
+    
     st.markdown("### 📊 Schedule Grid View")
-    st.markdown("Edit assignments directly in the grid below")
+    st.markdown("**Shift Types:** 7am Rounders | 7am Admitter | 10am Admitter | Night Shift | Bridge | APP")
     
     # Display the grid with styling
     st.dataframe(
         df[date_cols + shift_cols],
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "Date": st.column_config.DateColumn("Date", format="MM/DD/YYYY"),
-            "Day": st.column_config.TextColumn("Day", width="medium"),
-            "Day_Short": st.column_config.TextColumn("Day", width="small"),
-        }
+        column_config=column_config
     )
     
     # Add summary statistics
