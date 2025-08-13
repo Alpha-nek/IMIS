@@ -47,10 +47,15 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             if event_date == day:
                 day_events.append(e)
         
-        row = {"Date": day.strftime("%Y-%m-%d"), "Day": day.strftime("%A")}
+        row = {
+            "Date": day.strftime("%Y-%m-%d"), 
+            "Day": day.strftime("%A"),
+            "Day_Short": day.strftime("%a")
+        }
         
         # Group events by shift type
-        for shift_key in shift_keys:
+        for shift_type in shift_types:
+            shift_key = shift_type["key"]
             shift_events = []
             for e in day_events:
                 # Handle both SEvent objects and dictionaries
@@ -81,7 +86,9 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 if provider:
                     providers.append(provider)
             
-            row[shift_key] = ", ".join(providers) if providers else ""
+            # Use shift label instead of key for better readability
+            column_name = shift_type["label"]
+            row[column_name] = ", ".join(providers) if providers else ""
         
         grid_data.append(row)
     
@@ -89,13 +96,68 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
 
 def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
-    Render the schedule grid.
+    Render the schedule grid with professional styling.
     Handles both SEvent objects and dictionaries.
     """
+    if not events:
+        st.info("No schedule to display. Generate a schedule first.")
+        return pd.DataFrame()
+    
     df = create_schedule_grid(events, year, month)
     
-    # Display grid
-    st.dataframe(df, use_container_width=True)
+    if df.empty:
+        st.info("No events found for this month.")
+        return df
+    
+    # Reorder columns for better display
+    date_cols = ["Date", "Day", "Day_Short"]
+    shift_cols = [col for col in df.columns if col not in date_cols]
+    
+    # Create a styled dataframe
+    st.markdown("### �� Schedule Grid View")
+    st.markdown("Edit assignments directly in the grid below")
+    
+    # Display the grid with styling
+    st.dataframe(
+        df[date_cols + shift_cols],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Date": st.column_config.DateColumn("Date", format="MM/DD/YYYY"),
+            "Day": st.column_config.TextColumn("Day", width="medium"),
+            "Day_Short": st.column_config.TextColumn("Day", width="small"),
+        }
+    )
+    
+    # Add summary statistics
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_events = len(events)
+        st.metric("Total Events", total_events)
+    
+    with col2:
+        unique_providers = set()
+        for event in events:
+            if hasattr(event, 'extendedProps'):
+                provider = event.extendedProps.get("provider", "")
+            elif isinstance(event, dict) and 'extendedProps' in event:
+                provider = event['extendedProps'].get("provider", "")
+            else:
+                continue
+            if provider:
+                unique_providers.add(provider)
+        st.metric("Providers Used", len(unique_providers))
+    
+    with col3:
+        days_with_events = len([row for _, row in df.iterrows() if any(row[col] != "" for col in shift_cols)])
+        st.metric("Days with Events", days_with_events)
+    
+    with col4:
+        total_days = len(df)
+        coverage_percent = (days_with_events / total_days * 100) if total_days > 0 else 0
+        st.metric("Coverage", f"{coverage_percent:.1f}%")
     
     return df
 
