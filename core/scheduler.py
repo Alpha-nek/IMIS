@@ -467,7 +467,7 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
             
             # Determine shift type for this block
             shift_type = select_shift_type_for_block(provider, physician_shift_types, 
-                                                    provider_rule)
+                                                    provider_rules[provider])
             
             # Create block
             block = {
