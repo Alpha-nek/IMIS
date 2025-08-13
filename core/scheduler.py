@@ -32,11 +32,7 @@ from core.block_assignment import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Define nocturnists (night shift only providers)
-NOCTURNISTS = {"JT", "OI", "AT", "CM", "YD", "RS"}
 
-# Define senior providers (rounding shift only providers)
-SENIORS = {"DR", "MS", "AB", "CD"}  # Add your senior providers here
 
 def generate_schedule(year: int, month: int, providers: List[str], 
                      shift_types: List[Dict], shift_capacity: Dict[str, int],
@@ -83,7 +79,7 @@ def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -
                         "A12": True,   # Default: Enable day shifts for all providers
                         "A10": True,   # Default: Enable day shifts for all providers
                         "N12": False,  # Opt-in: Night shifts require explicit preference
-                        "NB": False,   # Opt-in: Night shifts require explicit preference
+                        "NB": False,   # Bridge shifts are not available to regular providers
                         "APP": False   # Opt-in: APP shifts require explicit preference
                     },
                     "vacations": [],
@@ -97,7 +93,7 @@ def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -
                         "A12": True,   # Default: Enable day shifts for all providers
                         "A10": True,   # Default: Enable day shifts for all providers
                         "N12": False,  # Opt-in: Night shifts require explicit preference
-                        "NB": False,   # Opt-in: Night shifts require explicit preference
+                        "NB": False,   # Bridge shifts are not available to regular providers
                         "APP": False   # Opt-in: APP shifts require explicit preference
                     },
                     "vacations": [],

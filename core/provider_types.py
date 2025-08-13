@@ -35,7 +35,7 @@ def get_allowed_shift_types(provider: str) -> List[str]:
     elif provider_type == "SENIOR":
         return ["R12"]  # Seniors only do 7am rounding shifts
     else:
-        return ["R12", "A12", "A10", "N12", "NB"]  # Regular providers can do all shifts
+        return ["R12", "A12", "A10", "N12"]  # Regular providers can do all shifts except bridge shifts
 
 def is_senior_provider(provider: str) -> bool:
     """

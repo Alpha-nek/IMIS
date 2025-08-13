@@ -3,7 +3,7 @@
 # =============================================================================
 
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import uuid
 import logging
 
