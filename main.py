@@ -754,7 +754,7 @@ def render_desktop_interface():
             # Summary metrics
             col1, col2, col3, col4 = st.columns(4)
             
-                        with col1:
+            with col1:
                 # Check if validation has violations
                 has_violations = len(validation.get("violations", [])) > 0 or len(validation.get("provider_violations", {})) > 0
                 
@@ -961,7 +961,7 @@ def render_desktop_interface():
                                         st.markdown(f"  - {violation}")
             
             # Quick action buttons
-            if not validation["is_valid"]:
+            if has_violations:
                 st.markdown("### 🔧 Quick Actions")
                 col1, col2 = st.columns(2)
                 
