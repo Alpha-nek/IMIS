@@ -4,6 +4,7 @@
 
 import random
 import uuid
+import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
 import pandas as pd
@@ -16,6 +17,14 @@ from core.utils import (
     date_range, month_start_end, make_month_days,
     _expand_vacation_dates, is_provider_unavailable_on_date
 )
+from core.exceptions import (
+    ScheduleGenerationError, ProviderError, RuleValidationError, 
+    ShiftAssignmentError, ValidationError, DataValidationError
+)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Define nocturnists (night shift only providers)
 NOCTURNISTS = {"JT", "OI", "AT", "CM", "YD", "RS"}
@@ -257,7 +266,8 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
 
 def fill_remaining_shifts(month_days: List[date], providers: List[str], 
                          shift_capacity: Dict[str, int], provider_rules: Dict, 
-                         global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+                         global_rules: RuleConfig, provider_shifts: Dict,
+                         year: int = None, month: int = None) -> List[SEvent]:
     """
     Fill any remaining unfilled shifts to ensure maximum coverage.
     This ensures all shift slots are filled when possible.
@@ -466,8 +476,10 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
                     block_size = random.randint(3, max_block_size)
             
             # Determine shift type for this block
+            # Get provider rules with fallback to empty dict if not found
+            provider_rule = provider_rules.get(provider, {})
             shift_type = select_shift_type_for_block(provider, physician_shift_types, 
-                                                    provider_rules[provider])
+                                                    provider_rule)
             
             # Create block
             block = {
