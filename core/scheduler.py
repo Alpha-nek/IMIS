@@ -87,8 +87,15 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         shift_type_keys = [st.get("key", st.get("name", "")) for st in shift_types]
         
         logger.info(f"Starting scoring-based assignment for {len(providers)} providers")
+        logger.info(f"Providers: {providers}")
         logger.info(f"Shift types: {shift_type_keys}")
+        logger.info(f"Shift capacity: {shift_capacity}")
         logger.info(f"Month days: {len(month_days)}")
+        
+        # Ensure provider rules are set up
+        from core.provider_rules import ensure_default_provider_rules
+        provider_rules = ensure_default_provider_rules(providers, provider_rules)
+        logger.info(f"Provider rules initialized for {len(provider_rules)} providers")
         
         # Add randomness for variety while maintaining deterministic scoring
         random.seed(year * 100 + month)
@@ -110,14 +117,20 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                     
                     # Find feasible candidates
                     candidates = []
+                    feasibility_debug = []
+                    
                     for provider in providers_shuffled:
-                        if is_provider_feasible(provider, current_day, shift_key, events, 
-                                              provider_rules, global_rules, year, month):
+                        is_feasible = is_provider_feasible(provider, current_day, shift_key, events, 
+                                                         provider_rules, global_rules, year, month)
+                        feasibility_debug.append(f"{provider}: {'✓' if is_feasible else '✗'}")
+                        
+                        if is_feasible:
                             score = scorer.score_assignment(provider, current_day, shift_key)
                             candidates.append((provider, score))
                     
                     if not candidates:
-                        logger.debug(f"No feasible candidates for {shift_key} on {current_day}")
+                        logger.warning(f"No feasible candidates for {shift_key} on {current_day}")
+                        logger.warning(f"Provider feasibility: {', '.join(feasibility_debug[:10])}")  # Log first 10
                         continue
                     
                     # Sort by score (highest first) and add some randomness for close scores
@@ -175,27 +188,38 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     if has_shift_on_date(provider, day, events):
         return False
     
-    # Check shift type eligibility based on provider type
+    # Check shift type eligibility based on provider type and qualifications
+    from core.provider_types import BRIDGE_QUALIFIED
+    
     if provider in APP_PROVIDER_INITIALS:
-        # APP providers can only take APP shifts
+        # APP providers can ONLY take APP shifts
         if shift_key != "APP":
             return False
-    elif provider in NOCTURNISTS:
-        # Nocturnists can only take night shifts
-        if shift_key not in ["N12", "NB"]:
-            return False
     elif provider in SENIORS:
-        # Seniors can only take R12 shifts
+        # Seniors can ONLY take R12 shifts (7am rounding)
         if shift_key != "R12":
             return False
-    else:
-        # Regular providers cannot take APP shifts
-        if shift_key == "APP":
-            return False
-    
-    # Check shift preferences
-    if not validate_shift_type_preference(provider, shift_key, provider_rules):
+    elif shift_key == "APP":
+        # Only APP providers can take APP shifts
         return False
+    elif shift_key == "NB":
+        # Only bridge-qualified providers can take bridge shifts
+        if provider not in BRIDGE_QUALIFIED:
+            return False
+    # For all other combinations, continue with preference checking
+    
+    # Check shift preferences - be more lenient for new providers
+    try:
+        if not validate_shift_type_preference(provider, shift_key, provider_rules):
+            # Log for debugging
+            provider_rule = provider_rules.get(provider, {})
+            shift_preferences = provider_rule.get("shift_preferences", {})
+            logger.debug(f"Provider {provider} preference check failed for {shift_key}. Preferences: {shift_preferences}")
+            return False
+    except Exception as e:
+        logger.warning(f"Error checking shift preferences for {provider}, {shift_key}: {e}")
+        # If there's an error, be lenient and allow the shift
+        pass
     
     # Check if this would exceed expected shifts
     current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])

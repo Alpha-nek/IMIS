@@ -9,6 +9,9 @@ from models.constants import APP_PROVIDER_INITIALS
 NOCTURNISTS = {"JT", "OI", "AT", "CM", "YD", "RS"}
 SENIORS = {"AA", "AD", "LN", "SM", "FS", "KA", "RR", "AM"}
 
+# Bridge-qualified providers (only these can take NB shifts)
+BRIDGE_QUALIFIED = {"RJ", "AT", "EB", "YH", "CM", "MS", "DI"}
+
 def get_provider_type(provider: str) -> str:
     """
     Get the type of a provider.
@@ -24,18 +27,39 @@ def get_provider_type(provider: str) -> str:
 
 def get_allowed_shift_types(provider: str) -> List[str]:
     """
-    Get the shift types allowed for a provider based on their type.
+    Get the shift types allowed for a provider based on their type and qualifications.
     """
     provider_type = get_provider_type(provider)
     
     if provider_type == "APP":
+        # APPs can ONLY take APP shifts
         return ["APP"]
-    elif provider_type == "NOCTURNIST":
-        return ["N12", "NB"]
     elif provider_type == "SENIOR":
-        return ["R12"]  # Seniors only do 7am rounding shifts
+        # Seniors ONLY take 7am rounding shifts (R12)
+        return ["R12"]
     else:
-        return ["R12", "A12", "A10", "N12"]  # Regular providers can do all shifts except bridge shifts
+        # Regular providers and nocturnists
+        allowed = []
+        
+        # All non-APP, non-senior providers can do day and night shifts
+        if provider_type == "NOCTURNIST" or provider in NOCTURNISTS:
+            # Nocturnists prefer nights but can do day shifts if needed
+            allowed.extend(["N12", "R12", "A12", "A10"])
+        else:
+            # Regular providers can do all except APP
+            allowed.extend(["R12", "A12", "A10", "N12"])
+        
+        # Bridge shifts (NB) - only bridge-qualified providers
+        if provider in BRIDGE_QUALIFIED:
+            allowed.append("NB")
+        
+        return allowed
+
+def is_bridge_qualified(provider: str) -> bool:
+    """
+    Check if a provider is qualified to take bridge shifts.
+    """
+    return provider in BRIDGE_QUALIFIED
 
 def is_senior_provider(provider: str) -> bool:
     """

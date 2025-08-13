@@ -151,21 +151,22 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         shift_key = row["shift_key"]
         shift_type = row["shift_type"]
         
-        # Create colored text labels based on shift type
+        # Create colored text labels based on shift type with slot number
+        slot_num = row["slot"].replace("Slot ", "")
         if shift_key == "R12":
-            color_labels.append("🟢 Rounder")
+            color_labels.append(f"🟢 Rounder #{slot_num}")
         elif shift_key == "A12":
-            color_labels.append("🟡 Admitter")
+            color_labels.append(f"🟡 Admitter #{slot_num}")
         elif shift_key == "A10":
-            color_labels.append("🔴 Admitter")
+            color_labels.append(f"🔴 Admitter #{slot_num}")
         elif shift_key == "N12":
-            color_labels.append("🟣 Night")
+            color_labels.append(f"🟣 Night #{slot_num}")
         elif shift_key == "NB":
-            color_labels.append("🔵 Bridge")
+            color_labels.append(f"🔵 Bridge #{slot_num}")
         elif shift_key == "APP":
-            color_labels.append("🟪 APP")
+            color_labels.append(f"🟪 APP #{slot_num}")
         else:
-            color_labels.append(shift_type)
+            color_labels.append(f"{shift_type} #{slot_num}")
     
     grid_data["Shift Type"] = color_labels
     
@@ -180,13 +181,18 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     # Calculate height to avoid vertical scroll
     height_px = min(2200, 110 + len(row_meta) * 38)
     
+    # Calculate optimal width for first column based on longest label
+    max_label_length = max(len(label) for label in color_labels)
+    # Base width calculation: ~8px per character + padding + emoji space
+    optimal_width = max(140, min(200, max_label_length * 8 + 40))
+    
     # Create column configuration for the data editor
     col_config = {
         "Shift Type": st.column_config.TextColumn(
             "Shift Type",
             disabled=True,
-            help="Shift type color indicator",
-            width="small"  # Changed from "large" to "small" to make it narrower
+            help="Shift type and slot number",
+            width=optimal_width  # Dynamic width based on content
         )
     }
     
@@ -235,9 +241,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         """, unsafe_allow_html=True)
     
     # Add scroll hint
-    st.markdown("""
+    st.markdown(f"""
     <div class="scroll-hint">
-        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type column stays fixed while you scroll through the dates.
+        🔒 <strong>Freeze-Pane Active:</strong> The shift type column (width: {optimal_width}px) is frozen and will stay visible while you scroll horizontally through all {len(date_cols)} days.
     </div>
     """, unsafe_allow_html=True)
     
@@ -263,49 +269,65 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             font-weight: bold;
         }}
         
-        /* Comprehensive sticky column CSS for Streamlit data editor */
-        /* Target the data editor container */
+        /* Enhanced freeze-pane functionality for first column */
         [data-testid="stDataFrame"] {{
             overflow-x: auto !important;
             max-width: 100% !important;
             position: relative !important;
+            border: 1px solid #dee2e6 !important;
+            border-radius: 8px !important;
         }}
         
-        /* Target the table element inside data editor */
+        /* Table styling */
         [data-testid="stDataFrame"] table {{
-            border-collapse: collapse !important;
+            border-collapse: separate !important;
+            border-spacing: 0 !important;
             width: 100% !important;
         }}
         
-        /* Make the first column sticky and narrower */
+        /* Freeze-pane: First column (Shift Type) - Dynamic width */
         [data-testid="stDataFrame"] th:first-child,
         [data-testid="stDataFrame"] td:first-child {{
             position: sticky !important;
             left: 0 !important;
             z-index: 1000 !important;
-            background: white !important;
-            min-width: 120px !important;  /* Reduced from 200px */
-            max-width: 150px !important;  /* Reduced from 250px */
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%) !important;
+            width: {optimal_width}px !important;
+            min-width: {optimal_width}px !important;
+            max-width: {optimal_width}px !important;
             border-right: 3px solid #FF674D !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+            box-shadow: 2px 0 8px rgba(255, 103, 77, 0.15) !important;
+            font-weight: 600 !important;
+            padding: 8px 12px !important;
         }}
         
-        /* Ensure header stays on top */
+        /* Enhanced header for first column */
         [data-testid="stDataFrame"] thead th:first-child {{
             position: sticky !important;
             left: 0 !important;
             z-index: 1001 !important;
-            background: white !important;
-            min-width: 120px !important;  /* Reduced from 200px */
-            max-width: 150px !important;  /* Reduced from 250px */
-            border-right: 3px solid #FF674D !important;
+            background: linear-gradient(135deg, #FF674D 0%, #ff8a65 100%) !important;
+            color: white !important;
+            width: {optimal_width}px !important;
+            min-width: {optimal_width}px !important;
+            max-width: {optimal_width}px !important;
+            border-right: 3px solid #d32f2f !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+            box-shadow: 2px 0 8px rgba(255, 103, 77, 0.3) !important;
+            font-weight: 700 !important;
+            text-align: center !important;
+            padding: 10px 12px !important;
+        }}
+        
+        /* Hover effect for first column */
+        [data-testid="stDataFrame"] tbody tr:hover td:first-child {{
+            background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%) !important;
+            border-right: 3px solid #ff5722 !important;
         }}
         
         /* Provider highlighting styles */
@@ -316,39 +338,57 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             color: #856404 !important;
         }}
         
-        /* Make date columns narrower for better fit */
+        /* Date columns styling - optimized for scrolling */
         [data-testid="stDataFrame"] th:not(:first-child),
         [data-testid="stDataFrame"] td:not(:first-child) {{
-            min-width: 80px !important;
-            max-width: 100px !important;
+            min-width: 85px !important;
+            max-width: 95px !important;
             text-align: center !important;
+            padding: 6px 4px !important;
+            border-left: 1px solid #dee2e6 !important;
+        }}
+        
+        /* Date column headers */
+        [data-testid="stDataFrame"] thead th:not(:first-child) {{
+            background: linear-gradient(135deg, #2196f3 0%, #42a5f5 100%) !important;
+            color: white !important;
+            font-weight: 600 !important;
+            text-align: center !important;
+            border-bottom: 2px solid #1976d2 !important;
+            font-size: 12px !important;
         }}
         
         /* Improve overall table styling */
         [data-testid="stDataFrame"] table {{
-            border: 1px solid #dee2e6 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
         }}
         
-        [data-testid="stDataFrame"] th {{
-            background-color: #f8f9fa !important;
-            border-bottom: 2px solid #dee2e6 !important;
-            font-weight: 600 !important;
-            text-align: center !important;
+        /* Regular table cells */
+        [data-testid="stDataFrame"] td:not(:first-child) {{
+            border-left: 1px solid #e0e0e0 !important;
+            border-bottom: 1px solid #e0e0e0 !important;
+            padding: 6px 4px !important;
+            background: white !important;
         }}
         
-        [data-testid="stDataFrame"] td {{
-            border: 1px solid #dee2e6 !important;
-            padding: 4px 8px !important;
+        /* Row hover effects (excluding first column) */
+        [data-testid="stDataFrame"] tbody tr:hover td:not(:first-child) {{
+            background-color: #f5f5f5 !important;
         }}
         
-        /* Hover effects */
-        [data-testid="stDataFrame"] tbody tr:hover {{
-            background-color: #f8f9fa !important;
+        /* Weekend column highlighting */
+        [data-testid="stDataFrame"] th:nth-child(7n+1):not(:first-child),
+        [data-testid="stDataFrame"] th:nth-child(7n):not(:first-child),
+        [data-testid="stDataFrame"] td:nth-child(7n+1):not(:first-child),
+        [data-testid="stDataFrame"] td:nth-child(7n):not(:first-child) {{
+            background-color: #fff3e0 !important;
         }}
         
-        /* Ensure the sticky column doesn't interfere with scrolling */
-        [data-testid="stDataFrame"] .stDataFrame {{
-            overflow-x: auto !important;
+        /* Smooth scrolling */
+        [data-testid="stDataFrame"] {{
+            scroll-behavior: smooth !important;
         }}
     </style>
     
