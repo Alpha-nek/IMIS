@@ -149,6 +149,9 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                             # Use simple scoring for speed
                             simple_score = 1.0  # All feasible candidates get equal weight
                             candidates.append((provider, simple_score))
+                        else:
+                            # DEBUG: Log why provider was rejected
+                            pass  # The feasibility function will handle debug output
                     
                     debug_logger.log(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
                     print(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
@@ -219,6 +222,11 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     # DETAILED DEBUG: Track why providers are rejected
     debug_reason = None
     
+    # DEBUG: Log start of feasibility check for first few providers
+    if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+        print(f"        🔍 Checking {provider} for {shift_key} on {day}")
+        print(f"        📊 Current events count: {len(events)}")
+    
     # Check basic availability
     try:
         if is_provider_unavailable_on_date(provider, day, provider_rules):
@@ -230,9 +238,15 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     
     # Check if provider already has a shift on this day
     try:
-        if has_shift_on_date(provider, day, events):
+        # FIXED: Filter events to only this provider's shifts
+        provider_events = [e for e in events if e.extendedProps.get("provider") == provider]
+        if has_shift_on_date(provider, day, provider_events):
             debug_reason = f"already has shift on {day}"
+            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+                print(f"        ❌ {provider} already has shift on {day}")
             return False
+        elif provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+            print(f"        ✅ {provider} has no shift on {day} (provider events: {len(provider_events)})")
     except Exception as e:
         print(f"      ⚠️ Error checking existing shifts for {provider}: {e}")
         # Be lenient - if we can't check, assume no conflict
@@ -309,6 +323,8 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     #             return False
     
     # If we get here, provider is feasible
+    if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+        print(f"        ✅ {provider} is feasible for {shift_key}")
     return True
 
 def assign_app_shifts(month_days: List[date], app_providers: List[str], 
