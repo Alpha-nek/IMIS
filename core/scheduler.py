@@ -369,14 +369,14 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             if remaining_slots <= 0:
                 continue
             
-            # WORKFORCE PLANNING RULE: For rounder shifts (R12), be very conservative
-            # Allow gaps to be visible so you can see when you need more providers
+            # WORKFORCE PLANNING RULE: Balance between filling shifts and showing gaps
+            # For rounder shifts (R12), be moderately conservative to show gaps when needed
             if shift_type == "R12":
-                # Only fill rounder gaps if we have providers who are significantly under their expected shifts
-                # This makes gaps visible for workforce planning
-                safety_buffer = 3  # Larger buffer for rounder shifts
+                # For rounder shifts, use a smaller buffer to allow more assignments
+                # but still show gaps when we're truly short-staffed
+                safety_buffer = 1  # Smaller buffer for rounder shifts
             else:
-                # For other shift types, be moderately conservative
+                # For other shift types, be more conservative
                 safety_buffer = 2
             
             # Get all available providers for this shift type on this day
@@ -384,21 +384,21 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 day, shift_type, providers, provider_shifts, provider_rules
             )
             
-            # WORKFORCE PLANNING RULE 1: Only providers SIGNIFICANTLY below expected shifts
+            # WORKFORCE PLANNING RULE 1: Allow providers who are below or at expected shifts
             available_providers_for_day = []
             for provider in all_available:
                 if provider in APP_PROVIDER_INITIALS:
-                    # For APP providers, be very conservative
+                    # For APP providers, be moderately conservative
                     current_shifts = len(provider_shifts.get(provider, []))
-                    if current_shifts < 12:  # Even lower limit for APP providers
+                    if current_shifts < 15:  # Reasonable limit for APP providers
                         available_providers_for_day.append(provider)
                 else:
                     current_shifts = len(provider_shifts.get(provider, []))
                     expected_shifts = provider_expected_shifts.get(provider, 15)
                     
-                    # WORKFORCE PLANNING: Only if provider is significantly below expected
-                    # This creates visible gaps for workforce planning
-                    if current_shifts < (expected_shifts - safety_buffer):
+                    # WORKFORCE PLANNING: Allow providers who are at or below expected shifts
+                    # This ensures assignments happen while still preventing over-assignment
+                    if current_shifts <= expected_shifts:
                         available_providers_for_day.append(provider)
             
             # HARD RULE 2: Double-check shift type preferences
@@ -413,14 +413,10 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             
             available_providers_for_day = strictly_available_providers
             
-            # WORKFORCE PLANNING RULE 3: For rounder shifts, require multiple available providers
-            # This ensures gaps are visible when you don't have enough rounder-capable providers
-            if shift_type == "R12":
-                if len(available_providers_for_day) < 3:  # Require more options for rounder shifts
-                    continue  # Skip this slot - let the gap be visible
-            else:
-                if len(available_providers_for_day) < 2:  # Standard requirement for other shifts
-                    continue
+            # WORKFORCE PLANNING RULE 3: Require at least one available provider
+            # This ensures we can fill shifts when providers are available
+            if len(available_providers_for_day) < 1:
+                continue  # Skip this slot - let the gap be visible
             
             # Sort providers by total shifts (current + additional from this function)
             # This ensures we prioritize those with the fewest shifts
@@ -431,21 +427,14 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             
             available_providers_for_day.sort(key=get_total_shifts)
             
-            # WORKFORCE PLANNING RULE 4: Be very conservative about filling slots
-            # Only fill critical gaps, allow others to remain visible
+            # WORKFORCE PLANNING RULE 4: Fill slots more aggressively but still conservatively
+            # Fill multiple slots if we have enough providers, but prioritize those with fewer shifts
             if shift_type == "R12":
-                # For rounder shifts, only fill if it's a critical gap (weekend or high-demand day)
-                is_weekend = day.weekday() >= 5
-                is_high_demand = day.weekday() in [0, 1, 2, 3, 4]  # Monday-Friday
-                
-                if not (is_weekend or is_high_demand):
-                    continue  # Skip non-critical rounder gaps
-                
-                # Only fill one slot at a time for rounder shifts
-                slots_to_fill = min(1, remaining_slots, len(available_providers_for_day))
+                # For rounder shifts, fill more slots but still be somewhat conservative
+                slots_to_fill = min(2, remaining_slots, len(available_providers_for_day))
             else:
-                # For other shifts, be slightly more aggressive but still conservative
-                slots_to_fill = min(1, remaining_slots, len(available_providers_for_day))
+                # For other shifts, fill more aggressively
+                slots_to_fill = min(remaining_slots, len(available_providers_for_day))
             
             for _ in range(slots_to_fill):
                 if not available_providers_for_day:
