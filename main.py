@@ -472,6 +472,16 @@ def render_desktop_interface():
                 else:
                     st.metric("Providers Scheduled", 0)
         
+            # Debug information
+            with st.expander("🔍 Debug Information", expanded=False):
+                st.write("**Providers DataFrame:**")
+                st.dataframe(providers_df.head(10))
+                st.write(f"**Total rows in providers_df:** {len(providers_df)}")
+                st.write(f"**Events count:** {len(st.session_state.events) if st.session_state.events else 0}")
+                if st.session_state.events:
+                    st.write("**Sample event:**")
+                    st.json(st.session_state.events[0] if st.session_state.events else {})
+        
         # Render calendar
         if st.session_state.events:
             try:

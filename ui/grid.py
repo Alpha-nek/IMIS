@@ -23,12 +23,12 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     
     # Define the correct order of shift types for the grid
     shift_type_order = [
-        {"key": "R12", "label": "7am Rounders", "color": "#16a34a"},
-        {"key": "A12", "label": "7am Admitter", "color": "#f59e0b"},
-        {"key": "A10", "label": "10am Admitter", "color": "#ef4444"},
-        {"key": "N12", "label": "Night Shift", "color": "#7c3aed"},
-        {"key": "NB", "label": "Bridge", "color": "#06b6d4"},
-        {"key": "APP", "label": "APP", "color": "#8b5cf6"},
+        {"key": "R12", "label": "7am–7pm Rounder", "color": "#16a34a"},
+        {"key": "A12", "label": "7am–7pm Admitter", "color": "#f59e0b"},
+        {"key": "A10", "label": "10am–10pm Admitter", "color": "#ef4444"},
+        {"key": "N12", "label": "7pm–7am (Night)", "color": "#7c3aed"},
+        {"key": "NB", "label": "Night Bridge", "color": "#06b6d4"},
+        {"key": "APP", "label": "APP Provider", "color": "#8b5cf6"},
     ]
     
     # Create grid data with shift types as rows
@@ -114,21 +114,21 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         )
     
     st.markdown("### 📊 Schedule Grid View")
-    st.markdown("**Shift Types:** 7am Rounders | 7am Admitter | 10am Admitter | Night Shift | Bridge | APP")
+    st.markdown("**Shift Types:** 7am–7pm Rounder | 7am–7pm Admitter | 10am–10pm Admitter | 7pm–7am (Night) | Night Bridge | APP Provider")
     
     # Display the grid with styling
     display_df = df[["Shift Type"] + date_cols]
     
     # Apply color coding to the dataframe
     def color_shift_types(val):
-        if val in ["7am Rounders", "7am Admitter", "10am Admitter", "Night Shift", "Bridge", "APP"]:
+        if val in ["7am–7pm Rounder", "7am–7pm Admitter", "10am–10pm Admitter", "7pm–7am (Night)", "Night Bridge", "APP Provider"]:
             colors = {
-                "7am Rounders": "#16a34a",
-                "7am Admitter": "#f59e0b", 
-                "10am Admitter": "#ef4444",
-                "Night Shift": "#7c3aed",
-                "Bridge": "#06b6d4",
-                "APP": "#8b5cf6"
+                "7am–7pm Rounder": "#16a34a",
+                "7am–7pm Admitter": "#f59e0b", 
+                "10am–10pm Admitter": "#ef4444",
+                "7pm–7am (Night)": "#7c3aed",
+                "Night Bridge": "#06b6d4",
+                "APP Provider": "#8b5cf6"
             }
             return f'background-color: {colors.get(val, "#ffffff")}; color: white; font-weight: bold;'
         return ''
@@ -198,37 +198,17 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         with col3:
             st.metric("APPs", app_count)
         
-        # Show provider utilization
-        st.markdown("#### Provider Utilization")
-        provider_counts = {}
-        
-        for event in events:
-            if hasattr(event, 'extendedProps'):
-                provider = event.extendedProps.get("provider", "")
-            elif isinstance(event, dict) and 'extendedProps' in event:
-                provider = event['extendedProps'].get("provider", "")
-            else:
-                continue
-            
-            if provider:
-                provider_counts[provider] = provider_counts.get(provider, 0) + 1
-        
-        if provider_counts:
-            # Create a DataFrame for provider utilization
-            utilization_df = pd.DataFrame([
-                {"Provider": provider, "Shifts": count}
-                for provider, count in provider_counts.items()
-            ]).sort_values("Shifts", ascending=False)
-            
-            st.dataframe(
-                utilization_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Provider": st.column_config.TextColumn("Provider", width="medium"),
-                    "Shifts": st.column_config.NumberColumn("Shifts", width="small")
-                }
-            )
+        # Debug information
+        with st.expander("🔍 Grid Debug Information", expanded=False):
+            st.write("**Grid DataFrame Shape:**", df.shape)
+            st.write("**Grid Columns:**", list(df.columns))
+            st.write("**Date Columns:**", date_cols)
+            st.write("**Sample Grid Data:**")
+            st.dataframe(df.head())
+            st.write("**Events Count:**", len(events))
+            if events:
+                st.write("**Sample Event:**")
+                st.json(events[0] if events else {})
     
     return df
 
