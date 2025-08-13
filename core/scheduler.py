@@ -49,8 +49,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
                    shift_types: List[Dict], shift_capacity: Dict[str, int],
                    provider_rules: Dict, global_rules: RuleConfig) -> List[SEvent]:
     """
-    SIMPLIFIED assignment algorithm following ground rules.
-    Uses a day-by-day approach to ensure good coverage and distribution.
+    BLOCK-BASED assignment algorithm following ground rules.
+    Uses block scheduling for regular providers with proper rest periods.
     """
     try:
         # Validate inputs
@@ -75,6 +75,12 @@ def assign_advanced(year: int, month: int, providers: List[str],
         # Track provider assignments
         provider_shifts = {p: [] for p in providers}
         
+        logger.info(f"Provider breakdown:")
+        logger.info(f"  APP providers: {app_providers}")
+        logger.info(f"  Nocturnists: {nocturnists}")
+        logger.info(f"  Seniors: {seniors}")
+        logger.info(f"  Regular providers: {regular_providers}")
+        
         # Step 1: Assign APP shifts first (they have specific rules)
         app_events = assign_app_shifts(month_days, app_providers, shift_capacity, 
                                       provider_rules, global_rules)
@@ -97,8 +103,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                                     provider_rules, global_rules, provider_shifts, year, month)
         events.extend(senior_events)
         
-        # Step 4: Fill remaining shifts using the simplified algorithm
-        # This handles all regular providers and fills any remaining gaps
+        # Step 4: Fill remaining shifts using block-based algorithm for regular providers
+        # This handles all remaining shifts including night shifts for regular providers
         remaining_events = fill_remaining_shifts_balanced(month_days, regular_providers, shift_capacity,
                                                         provider_rules, global_rules, provider_shifts, year, month)
         events.extend(remaining_events)

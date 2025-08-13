@@ -44,35 +44,52 @@ def validate_provider_role_shift_type(provider: str, shift_type: str) -> bool:
 def has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[SEvent], min_rest_days: int = 2) -> bool:
     """
     Check if provider has sufficient rest days before the target date.
-    ENFORCES STRICT REST RULES: Must have min_rest_days between any shifts.
+    ENHANCED: Properly handles night shifts that end the next day.
     """
     try:
-        # Get all shift dates for this provider
-        shift_dates = []
+        # Get all shift end dates for this provider
+        shift_end_dates = []
         for shift in provider_shifts:
-            if hasattr(shift, 'start'):
-                shift_date = shift.start.date()
-            elif isinstance(shift, dict) and 'start' in shift:
+            if hasattr(shift, 'end'):
+                # For night shifts, the end time is the next day
+                end_datetime = shift.end
+                if isinstance(end_datetime, str):
+                    from datetime import datetime
+                    end_datetime = datetime.fromisoformat(end_datetime)
+                shift_end_date = end_datetime.date()
+                shift_end_dates.append(shift_end_date)
+            elif isinstance(shift, dict) and 'end' in shift:
                 from datetime import datetime
-                shift_date = datetime.fromisoformat(shift['start']).date()
+                end_datetime = datetime.fromisoformat(shift['end'])
+                shift_end_date = end_datetime.date()
+                shift_end_dates.append(shift_end_date)
             else:
-                continue
-            
-            shift_dates.append(shift_date)
+                # Fallback to start date if end date not available
+                if hasattr(shift, 'start'):
+                    start_datetime = shift.start
+                    if isinstance(start_datetime, str):
+                        from datetime import datetime
+                        start_datetime = datetime.fromisoformat(start_datetime)
+                    shift_end_dates.append(start_datetime.date())
+                elif isinstance(shift, dict) and 'start' in shift:
+                    from datetime import datetime
+                    start_datetime = datetime.fromisoformat(shift['start'])
+                    shift_end_dates.append(start_datetime.date())
         
-        if not shift_dates:
+        if not shift_end_dates:
             return True  # No previous shifts, so rest is sufficient
         
-        # Sort dates to find the most recent shift
-        shift_dates.sort()
-        last_shift_date = shift_dates[-1]
+        # Sort dates to find the most recent shift end
+        shift_end_dates.sort()
+        last_shift_end_date = shift_end_dates[-1]
         
-        # Calculate days between last shift and target date
-        days_between = (target_date - last_shift_date).days
+        # Calculate days between last shift end and target date
+        days_between = (target_date - last_shift_end_date).days
         
         # STRICT ENFORCEMENT: Must have exactly min_rest_days or more
         if days_between < min_rest_days:
             logger.debug(f"Provider {provider} needs {min_rest_days} days rest, but only has {days_between} days")
+            logger.debug(f"Last shift ended: {last_shift_end_date}, target date: {target_date}")
             return False
         
         return True
