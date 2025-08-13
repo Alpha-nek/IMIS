@@ -14,14 +14,21 @@ logger = logging.getLogger(__name__)
 def validate_shift_type_preference(provider: str, shift_type: str, provider_rules: Dict) -> bool:
     """
     Validate if a provider has preference for a specific shift type.
+    LESS RESTRICTIVE: If no preferences are set, allow any shift type.
     """
     try:
         provider_rule = provider_rules.get(provider, {})
         shift_preferences = provider_rule.get("shift_preferences", {})
+        
+        # If no preferences are set, allow any shift type
+        if not shift_preferences:
+            return True
+        
+        # If preferences are set, check if this shift type is preferred
         return shift_preferences.get(shift_type, False)
     except Exception as e:
         logger.error(f"Error validating shift type preference: {e}")
-        return False
+        return True  # Default to allowing the shift if there's an error
 
 def validate_provider_role_shift_type(provider: str, shift_type: str) -> bool:
     """

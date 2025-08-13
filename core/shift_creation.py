@@ -58,9 +58,9 @@ def get_shift_config(shift_type: str) -> Dict:
             "color": "#10b981"
         },
         "A10": {
-            "label": "9am Admitting",
-            "start": "09:00",
-            "end": "21:00",
+            "label": "10am Admitting",
+            "start": "10:00",
+            "end": "22:00",
             "color": "#059669"
         },
         "N12": {

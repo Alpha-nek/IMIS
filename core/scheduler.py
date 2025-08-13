@@ -49,8 +49,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
                    shift_types: List[Dict], shift_capacity: Dict[str, int],
                    provider_rules: Dict, global_rules: RuleConfig) -> List[SEvent]:
     """
-    BALANCED assignment algorithm following ground rules.
-    Uses a combination of block assignment and greedy filling to ensure good coverage.
+    SIMPLIFIED assignment algorithm following ground rules.
+    Uses a day-by-day approach to ensure good coverage and distribution.
     """
     try:
         # Validate inputs
@@ -97,19 +97,13 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                                     provider_rules, global_rules, provider_shifts, year, month)
         events.extend(senior_events)
         
-        # Step 4: Fill remaining shifts using a balanced approach
-        # This will now properly assign regular providers to different shift types
+        # Step 4: Fill remaining shifts using the simplified algorithm
+        # This handles all regular providers and fills any remaining gaps
         remaining_events = fill_remaining_shifts_balanced(month_days, regular_providers, shift_capacity,
                                                         provider_rules, global_rules, provider_shifts, year, month)
         events.extend(remaining_events)
         
-        # Step 5: Fill any remaining gaps with individual shifts
-        # This ensures we get good coverage for all shift types
-        gap_fill_events = fill_remaining_gaps_individual(month_days, providers, shift_capacity,
-                                                        provider_rules, global_rules, provider_shifts, year, month)
-        events.extend(gap_fill_events)
-        
-        # Step 6: Validate and auto-adjust schedule
+        # Step 5: Validate and auto-adjust schedule
         events = validate_and_adjust_schedule(events, providers, provider_rules, global_rules, year, month)
         
         return events
@@ -378,95 +372,4 @@ def validate_rules(events: List[SEvent], providers: List[str],
         "rest_violations": []
     }
 
-def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
-                                 shift_capacity: Dict[str, int], provider_rules: Dict,
-                                 global_rules: RuleConfig, provider_shifts: Dict,
-                                 year: int, month: int) -> List[SEvent]:
-    """
-    Fill any remaining gaps with individual shifts to ensure good coverage.
-    This ensures all shift types get proper coverage.
-    """
-    events = []
-    
-    # Define priority order for shift types (most important first)
-    shift_priority = ["N12", "A12", "A10", "R12", "NB", "APP"]
-    
-    for day in month_days:
-        for shift_type in shift_priority:
-            if shift_type not in shift_capacity:
-                continue
-                
-            capacity = shift_capacity[shift_type]
-            assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
-            remaining_slots = capacity - assigned_count
-            
-            for slot in range(remaining_slots):
-                # Find best available provider for this shift type
-                best_provider = find_best_provider_for_shift(day, shift_type, providers,
-                                                           provider_shifts, provider_rules,
-                                                           global_rules, year, month)
-                
-                if best_provider:
-                    event = create_shift_event(best_provider, shift_type, day)
-                    events.append(event)
-                    provider_shifts[best_provider].append(event)
-                    logger.info(f"✅ Gap fill: Assigned {shift_type} to {best_provider} on {day}")
-    
-    return events
 
-def find_best_provider_for_shift(day: date, shift_type: str, providers: List[str],
-                               provider_shifts: Dict, provider_rules: Dict,
-                               global_rules: RuleConfig, year: int, month: int) -> Optional[str]:
-    """
-    Find the best provider for a specific shift type on a given day.
-    """
-    from core.provider_types import get_provider_type, get_allowed_shift_types
-    from core.utils import is_provider_unavailable_on_date, get_adjusted_expected_shifts
-    from core.shift_validation import has_shift_on_date, validate_shift_type_preference, has_sufficient_rest
-    
-    best_provider = None
-    best_score = float('inf')
-    
-    for provider in providers:
-        # Check if provider can do this shift type
-        allowed_shifts = get_allowed_shift_types(provider)
-        if shift_type not in allowed_shifts:
-            continue
-        
-        # Basic availability checks
-        if is_provider_unavailable_on_date(provider, day, provider_rules):
-            continue
-        
-        if has_shift_on_date(provider, day, provider_shifts[provider]):
-            continue
-        
-        # Check shift type preference
-        if not validate_shift_type_preference(provider, shift_type, provider_rules):
-            continue
-        
-        # Check rest requirements (1 day minimum for individual shifts)
-        if not has_sufficient_rest(provider, day, provider_shifts[provider], 1):
-            continue
-        
-        # Check if assignment would exceed expected shifts
-        current_shifts = len(provider_shifts[provider])
-        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
-        
-        if current_shifts >= expected_shifts:
-            continue
-        
-        # Calculate score (lower is better)
-        # Prefer providers with fewer shifts
-        score = current_shifts / expected_shifts
-        
-        # Bonus for providers who prefer this shift type
-        provider_rule = provider_rules.get(provider, {})
-        shift_preferences = provider_rule.get("shift_preferences", {})
-        if shift_preferences.get(shift_type, False):
-            score -= 0.1  # Small bonus for preference
-        
-        if score < best_score:
-            best_score = score
-            best_provider = provider
-    
-    return best_provider
