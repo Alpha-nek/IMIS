@@ -37,10 +37,11 @@ def validate_provider_role_shift_type(provider: str, shift_type: str) -> bool:
 def has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[SEvent], min_rest_days: int = 2) -> bool:
     """
     Check if provider has sufficient rest days before the target date.
+    ENFORCES STRICT REST RULES: Must have min_rest_days between any shifts.
     """
     try:
-        # Get the last shift date for this provider
-        last_shift_date = None
+        # Get all shift dates for this provider
+        shift_dates = []
         for shift in provider_shifts:
             if hasattr(shift, 'start'):
                 shift_date = shift.start.date()
@@ -50,15 +51,24 @@ def has_sufficient_rest(provider: str, target_date: date, provider_shifts: List[
             else:
                 continue
             
-            if last_shift_date is None or shift_date > last_shift_date:
-                last_shift_date = shift_date
+            shift_dates.append(shift_date)
         
-        if last_shift_date is None:
+        if not shift_dates:
             return True  # No previous shifts, so rest is sufficient
+        
+        # Sort dates to find the most recent shift
+        shift_dates.sort()
+        last_shift_date = shift_dates[-1]
         
         # Calculate days between last shift and target date
         days_between = (target_date - last_shift_date).days
-        return days_between >= min_rest_days
+        
+        # STRICT ENFORCEMENT: Must have exactly min_rest_days or more
+        if days_between < min_rest_days:
+            logger.debug(f"Provider {provider} needs {min_rest_days} days rest, but only has {days_between} days")
+            return False
+        
+        return True
     except Exception as e:
         logger.error(f"Error checking sufficient rest: {e}")
         return False

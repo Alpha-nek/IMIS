@@ -20,13 +20,13 @@ def fill_remaining_shifts_balanced(month_days: List[date], providers: List[str],
                                  global_rules: RuleConfig, provider_shifts: Dict,
                                  year: int = None, month: int = None) -> List[SEvent]:
     """
-    BLOCK-BASED ALGORITHM: Create optimized shift blocks with staggered scheduling.
+    BLOCK-BASED ALGORITHM: Create optimized shift blocks with proper rest periods.
     
     Algorithm:
     1. Calculate expected shifts for each provider
     2. Create shift blocks (3-7 shifts) for each provider
-    3. Stagger blocks across the month to avoid conflicts
-    4. Fill any remaining gaps with individual shifts
+    3. Assign blocks with proper spacing (2+ days rest between blocks)
+    4. Fill any remaining gaps with individual shifts only if necessary
     """
     events = []
     
@@ -43,11 +43,11 @@ def fill_remaining_shifts_balanced(month_days: List[date], providers: List[str],
     provider_blocks = create_provider_shift_blocks(providers, provider_expected_shifts, 
                                                  month_days, provider_rules, global_rules)
     
-    # Step 2: Assign blocks with staggered scheduling
-    events.extend(assign_staggered_blocks(provider_blocks, month_days, shift_capacity,
-                                        provider_rules, global_rules, provider_shifts, year, month))
+    # Step 2: Assign blocks with proper spacing (2+ days rest between blocks)
+    events.extend(assign_blocks_with_proper_spacing(provider_blocks, month_days, shift_capacity,
+                                                  provider_rules, global_rules, provider_shifts, year, month))
     
-    # Step 3: Fill any remaining gaps with individual shifts
+    # Step 3: Fill any remaining gaps with individual shifts (only if absolutely necessary)
     events.extend(fill_remaining_gaps_individual(month_days, providers, shift_capacity,
                                                provider_rules, global_rules, provider_shifts,
                                                provider_expected_shifts, year, month))
@@ -59,6 +59,7 @@ def create_provider_shift_blocks(providers: List[str], provider_expected_shifts:
                                global_rules: RuleConfig) -> Dict[str, List[Dict]]:
     """
     Create shift blocks for each provider based on their expected shifts.
+    Prioritize larger blocks for better continuity.
     """
     provider_blocks = {}
     
@@ -79,7 +80,11 @@ def create_provider_shift_blocks(providers: List[str], provider_expected_shifts:
                 # Prefer larger blocks (5-7 shifts) for better continuity
                 max_block_size = min(7, remaining_shifts)
                 if max_block_size >= 5:
-                    block_size = random.randint(5, max_block_size)
+                    # 70% chance of larger blocks (5-7), 30% chance of smaller blocks (3-4)
+                    if random.random() < 0.7:
+                        block_size = random.randint(5, max_block_size)
+                    else:
+                        block_size = random.randint(3, min(4, max_block_size))
                 else:
                     block_size = random.randint(3, max_block_size)
             
@@ -94,8 +99,8 @@ def create_provider_shift_blocks(providers: List[str], provider_expected_shifts:
             })
             
             current_shifts += block_size
-    
-    provider_blocks[provider] = blocks
+        
+        provider_blocks[provider] = blocks
     
     return provider_blocks
 
@@ -120,12 +125,12 @@ def determine_shift_type_for_block(provider: str, provider_rules: Dict) -> str:
         # Default to rounding if no preferences
         return "R12"
 
-def assign_staggered_blocks(provider_blocks: Dict[str, List[Dict]], month_days: List[date],
-                          shift_capacity: Dict[str, int], provider_rules: Dict,
-                          global_rules: RuleConfig, provider_shifts: Dict,
-                          year: int, month: int) -> List[SEvent]:
+def assign_blocks_with_proper_spacing(provider_blocks: Dict[str, List[Dict]], month_days: List[date],
+                                    shift_capacity: Dict[str, int], provider_rules: Dict,
+                                    global_rules: RuleConfig, provider_shifts: Dict,
+                                    year: int, month: int) -> List[SEvent]:
     """
-    Assign blocks with staggered scheduling to avoid conflicts.
+    Assign blocks with proper spacing to ensure 2+ days rest between blocks.
     """
     events = []
     
@@ -140,8 +145,8 @@ def assign_staggered_blocks(provider_blocks: Dict[str, List[Dict]], month_days: 
             if block["assigned"]:
                 continue
             
-            # Find available dates for this block
-            available_dates = find_available_dates_for_block_staggered(
+            # Find available dates for this block with proper spacing
+            available_dates = find_available_dates_for_block_with_spacing(
                 provider, block["shift_type"], block["size"], month_days,
                 provider_shifts, provider_rules, global_rules, year, month
             )
@@ -157,12 +162,12 @@ def assign_staggered_blocks(provider_blocks: Dict[str, List[Dict]], month_days: 
     
     return events
 
-def find_available_dates_for_block_staggered(provider: str, shift_type: str, block_size: int,
-                                           month_days: List[date], provider_shifts: Dict,
-                                           provider_rules: Dict, global_rules: RuleConfig,
-                                           year: int, month: int) -> List[date]:
+def find_available_dates_for_block_with_spacing(provider: str, shift_type: str, block_size: int,
+                                              month_days: List[date], provider_shifts: Dict,
+                                              provider_rules: Dict, global_rules: RuleConfig,
+                                              year: int, month: int) -> List[date]:
     """
-    Find available dates for a block with staggered scheduling.
+    Find available dates for a block with proper spacing (2+ days rest between blocks).
     """
     from core.utils import is_provider_unavailable_on_date
     from core.shift_validation import has_shift_on_date, validate_shift_type_preference, has_sufficient_rest
@@ -187,7 +192,7 @@ def find_available_dates_for_block_staggered(provider: str, shift_type: str, blo
             consecutive_count = 0
             continue
         
-        # Check rest requirements
+        # Check rest requirements - ENFORCE 2+ days rest between blocks
         min_rest_days = 2
         if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
             min_rest_days = max(2, global_rules.min_days_between_shifts)
@@ -230,7 +235,8 @@ def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
                                  global_rules: RuleConfig, provider_shifts: Dict,
                                  provider_expected_shifts: Dict, year: int, month: int) -> List[SEvent]:
     """
-    Fill any remaining gaps with individual shifts.
+    Fill any remaining gaps with individual shifts (only if absolutely necessary).
+    This should be minimal with proper block assignment.
     """
     events = []
     
@@ -278,7 +284,7 @@ def find_best_provider_for_single_shift(day: date, shift_type: str, providers: L
         if not validate_shift_type_preference(provider, shift_type, provider_rules):
             continue
         
-        # Check rest requirements (1 day minimum)
+        # Check rest requirements (1 day minimum for individual shifts)
         if not has_sufficient_rest(provider, day, provider_shifts[provider], 1):
             continue
         

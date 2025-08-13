@@ -307,7 +307,7 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
             consecutive_count = 0
             continue
         
-        # Check rest requirements
+        # Check rest requirements - ENFORCE 2+ days rest between blocks
         min_rest_days = 2
         if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
             min_rest_days = max(2, global_rules.min_days_between_shifts)

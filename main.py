@@ -754,8 +754,11 @@ def render_desktop_interface():
             # Summary metrics
             col1, col2, col3, col4 = st.columns(4)
             
-            with col1:
-                if validation["is_valid"]:
+                        with col1:
+                # Check if validation has violations
+                has_violations = len(validation.get("violations", [])) > 0 or len(validation.get("provider_violations", {})) > 0
+                
+                if not has_violations:
                     st.metric("✅ Status", "Valid", delta_color="normal")
                 else:
                     st.metric("❌ Status", "Issues Found", delta_color="inverse")
@@ -783,7 +786,7 @@ def render_desktop_interface():
                     st.metric("👥 Providers Used", 0)
             
             # Detailed violations - redesigned with tabs and columns
-            if not validation["is_valid"]:
+            if has_violations:
                 st.markdown("### 🔍 Violation Details")
                 
                 # Categorize violations by type
