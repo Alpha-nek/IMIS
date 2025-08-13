@@ -113,12 +113,12 @@ def render_header_with_logo():
         /* Header styling with logo */
         .main-header {
             background: linear-gradient(135deg, var(--primary-nile) 0%, var(--primary-coral) 50%, var(--light-nile) 100%);
-            padding: 2rem;
-            border-radius: 20px;
-            margin-bottom: 2rem;
+            padding: 3rem 2rem;
+            border-radius: 25px;
+            margin-bottom: 2.5rem;
             color: white;
             text-align: center;
-            box-shadow: 0 8px 25px rgba(24, 83, 91, 0.3);
+            box-shadow: 0 12px 35px rgba(24, 83, 91, 0.4);
             position: relative;
             overflow: hidden;
         }
@@ -130,8 +130,20 @@ def render_header_with_logo():
             left: 0;
             right: 0;
             bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-            opacity: 0.3;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="10" cy="60" r="0.8" fill="rgba(255,255,255,0.08)"/><circle cx="90" cy="30" r="0.6" fill="rgba(255,255,255,0.08)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.4;
+        }
+        
+        .main-header::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 30% 20%, rgba(255, 103, 77, 0.2) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(128, 164, 237, 0.2) 0%, transparent 50%);
+            pointer-events: none;
         }
         
         .header-content {
