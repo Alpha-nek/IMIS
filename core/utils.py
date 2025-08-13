@@ -60,6 +60,34 @@ def get_expected_shifts_for_month(year: int, month: int) -> int:
     # For February (28/29 days), use a reasonable expected value
     return 14
 
+def get_adjusted_expected_shifts(provider: str, year: int, month: int, 
+                               provider_rules: Dict, global_rules) -> int:
+    """
+    Get expected shifts for a provider adjusted for vacation time.
+    Reduces expected shifts by 3-4 shifts per week of vacation.
+    """
+    # Get base expected shifts
+    base_expected = get_expected_shifts_for_month(year, month)
+    
+    # Get provider-specific expected shifts if available
+    provider_rule = provider_rules.get(provider, {})
+    provider_expected = provider_rule.get("expected_shifts", base_expected)
+    
+    # Calculate vacation weeks for this month
+    vacation_weeks = _provider_vacation_weeks_in_month(provider_rule, year, month)
+    
+    if vacation_weeks == 0:
+        return provider_expected
+    
+    # Reduce expected shifts based on vacation weeks
+    # Most providers take 1 week (reduce by 3-4 shifts), some take 2 weeks (reduce by 6-8 shifts)
+    reduction_per_week = 3.5  # Average reduction per week of vacation
+    total_reduction = int(vacation_weeks * reduction_per_week)
+    
+    adjusted_expected = max(0, provider_expected - total_reduction)
+    
+    return adjusted_expected
+
 def get_min_shifts_for_month(year: int, month: int) -> int:
     """Get minimum shifts required for a specific month based on number of days."""
     days = cal.monthrange(year, month)[1]

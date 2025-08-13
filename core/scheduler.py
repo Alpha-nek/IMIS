@@ -102,12 +102,9 @@ def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List
     
     # Create night shift blocks for each nocturnist
     for nocturnist in nocturnists:
-        # Determine target number of night shifts for this nocturnist
-        provider_rule = provider_rules.get(nocturnist, {})
-        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
-        
-        # For nocturnists, use expected shifts with some variation
-        target_shifts = expected_shifts
+        # Determine target number of night shifts for this nocturnist (adjusted for vacation)
+        from core.utils import get_adjusted_expected_shifts
+        target_shifts = get_adjusted_expected_shifts(nocturnist, year, month, provider_rules, global_rules)
         
         # Create blocks of 3-7 shifts
         remaining_shifts = target_shifts
@@ -267,11 +264,12 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
     """
     events = []
     
-    # Define all shift types
-    all_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
+    # Define all shift types - prioritize rounder shifts to avoid gaps
+    # Order: Rounder shifts first, then admitting, then night shifts, then APP
+    priority_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
     
     for day in month_days:
-        for shift_type in all_shift_types:
+        for shift_type in priority_shift_types:
             if shift_type not in shift_capacity:
                 continue
                 
@@ -296,10 +294,10 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                         # APP providers have different rules
                         filtered_providers.append(provider)
                     else:
-                        # Check if provider has reached expected shifts (with tolerance)
+                        # Check if provider has reached expected shifts (with tolerance, adjusted for vacation)
                         current_shifts = len(provider_shifts.get(provider, []))
-                        provider_rule = provider_rules.get(provider, {})
-                        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+                        from core.utils import get_adjusted_expected_shifts
+                        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
                         tolerance = 2
                         max_acceptable = expected_shifts + tolerance
                         
@@ -448,12 +446,9 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
     expected_shifts = get_expected_shifts_for_month(year, month)
     
     for provider in physician_providers:
-        # Get provider preferences
-        provider_rule = provider_rules.get(provider, {})
-        provider_expected_shifts = provider_rule.get("expected_shifts", expected_shifts)
-        
-        # Use expected shifts for the provider
-        target_shifts = provider_expected_shifts
+        # Get provider preferences and expected shifts (adjusted for vacation)
+        from core.utils import get_adjusted_expected_shifts
+        target_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
         
         # Create blocks with maximum 7 shifts per block
         remaining_shifts = target_shifts
@@ -808,10 +803,31 @@ def _can_provider_take_shift(provider: str, day: date, shift_type: str,
     return True
 
 def validate_rules(events: List[SEvent], providers: List[str], 
-                  global_rules: RuleConfig, provider_rules: Dict) -> Dict[str, Any]:
+                  global_rules: RuleConfig, provider_rules: Dict, 
+                  year: int = None, month: int = None) -> Dict[str, Any]:
     """
     Validate scheduling rules and return violations.
     """
+    # Determine year and month from events if not provided
+    if year is None or month is None:
+        if events:
+            # Get year and month from the first event
+            first_event = events[0]
+            if hasattr(first_event, 'start'):
+                year = first_event.start.year
+                month = first_event.start.month
+            else:
+                # Fallback to current date
+                from datetime import date
+                today = date.today()
+                year = today.year
+                month = today.month
+        else:
+            # Fallback to current date
+            from datetime import date
+            today = date.today()
+            year = today.year
+            month = today.month
     violations = []
     provider_violations = {}
     
@@ -855,8 +871,9 @@ def validate_rules(events: List[SEvent], providers: List[str],
         if provider in APP_PROVIDER_INITIALS:
             continue
         
-        # Get expected shifts from provider-specific rules or global rules
-        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+        # Get expected shifts from provider-specific rules or global rules (adjusted for vacation)
+        from core.utils import get_adjusted_expected_shifts
+        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
         
         provider_violations[provider] = []
         

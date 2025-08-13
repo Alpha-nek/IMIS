@@ -84,8 +84,9 @@ def test_shift_count_validation(year: int = 2024, month: int = 12):
             print(f"{provider} (APP): {total_shifts} shifts - APP providers have different rules")
             continue
         
-        # Get expected shifts from provider-specific rules or global rules
-        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+        # Get expected shifts from provider-specific rules or global rules (adjusted for vacation)
+        from core.utils import get_adjusted_expected_shifts
+        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
         tolerance = 2
         min_acceptable = expected_shifts - tolerance
         max_acceptable = expected_shifts + tolerance
