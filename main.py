@@ -779,20 +779,108 @@ def render_desktop_interface():
                 else:
                     st.metric("👥 Providers Used", 0)
             
-            # Detailed violations
+            # Detailed violations - redesigned with tabs
             if not validation["is_valid"]:
-                with st.expander("🔍 View Detailed Violations", expanded=False):
-                    for violation in validation["violations"]:
-                        st.markdown(f"• {violation}")
+                st.markdown("### 🔍 Violation Details")
+                
+                # Categorize violations
+                general_violations = []
+                provider_violations = []
+                block_violations = []
+                rest_violations = []
+                capacity_violations = []
+                
+                # Categorize general violations
+                for violation in validation["violations"]:
+                    violation_lower = violation.lower()
+                    if "block" in violation_lower or "consecutive" in violation_lower:
+                        block_violations.append(violation)
+                    elif "rest" in violation_lower or "between" in violation_lower:
+                        rest_violations.append(violation)
+                    elif "capacity" in violation_lower or "over" in violation_lower:
+                        capacity_violations.append(violation)
+                    else:
+                        general_violations.append(violation)
+                
+                # Categorize provider violations
+                if validation["provider_violations"]:
+                    for provider, violations in validation["provider_violations"].items():
+                        for violation in violations:
+                            violation_lower = violation.lower()
+                            if "block" in violation_lower or "consecutive" in violation_lower:
+                                block_violations.append(f"**{provider}:** {violation}")
+                            elif "rest" in violation_lower or "between" in violation_lower:
+                                rest_violations.append(f"**{provider}:** {violation}")
+                            elif "capacity" in violation_lower or "over" in violation_lower:
+                                capacity_violations.append(f"**{provider}:** {violation}")
+                            else:
+                                provider_violations.append(f"**{provider}:** {violation}")
+                
+                # Create tabs for different violation types
+                tab_names = []
+                if general_violations:
+                    tab_names.append("General")
+                if provider_violations:
+                    tab_names.append("Provider")
+                if block_violations:
+                    tab_names.append("Block Issues")
+                if rest_violations:
+                    tab_names.append("Rest Periods")
+                if capacity_violations:
+                    tab_names.append("Capacity")
+                
+                if tab_names:
+                    violation_tabs = st.tabs(tab_names)
                     
-                    # Provider-specific violations
-                    if validation["provider_violations"]:
-                        st.markdown("#### Provider-Specific Issues:")
-                        for provider, violations in validation["provider_violations"].items():
-                            if violations:
-                                st.markdown(f"**{provider}:**")
-                                for violation in violations:
-                                    st.markdown(f"  - {violation}")
+                    tab_index = 0
+                    
+                    if general_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### General Schedule Issues")
+                            for violation in general_violations:
+                                st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if provider_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Provider-Specific Issues")
+                            for violation in provider_violations:
+                                st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if block_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Block & Consecutive Shift Issues")
+                            for violation in block_violations:
+                                st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if rest_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Rest Period Violations")
+                            for violation in rest_violations:
+                                st.markdown(f"• {violation}")
+                        tab_index += 1
+                    
+                    if capacity_violations:
+                        with violation_tabs[tab_index]:
+                            st.markdown("#### Capacity & Over-Assignment Issues")
+                            for violation in capacity_violations:
+                                st.markdown(f"• {violation}")
+                        tab_index += 1
+                else:
+                    # Fallback if no violations to categorize
+                    with st.expander("🔍 View All Violations", expanded=False):
+                        for violation in validation["violations"]:
+                            st.markdown(f"• {violation}")
+                        
+                        if validation["provider_violations"]:
+                            st.markdown("#### Provider-Specific Issues:")
+                            for provider, violations in validation["provider_violations"].items():
+                                if violations:
+                                    st.markdown(f"**{provider}:**")
+                                    for violation in violations:
+                                        st.markdown(f"  - {violation}")
             
             # Quick action buttons
             if not validation["is_valid"]:
