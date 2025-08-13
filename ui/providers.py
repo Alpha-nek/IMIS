@@ -282,25 +282,16 @@ def add_new_provider():
         
         # Day/Night Percentage
         st.markdown("**Day vs Night Shift Distribution**")
-        st.markdown("Set the preferred percentage of day vs night shifts:")
+        st.markdown("Set the preferred percentage of day shifts (night shifts will be the remainder):")
         
-        col1, col2 = st.columns(2)
+        day_percentage = st.slider(
+            "Day Shifts Percentage",
+            min_value=0, max_value=100,
+            value=70,
+            help="Percentage of shifts that should be day shifts (7am-7pm). Night shifts will be 100% minus this value."
+        )
         
-        with col1:
-            day_percentage = st.slider(
-                "Day Shifts Percentage",
-                min_value=0, max_value=100,
-                value=70,
-                help="Percentage of shifts that should be day shifts (7am-7pm)"
-            )
-        
-        with col2:
-            night_percentage = st.slider(
-                "Night Shifts Percentage",
-                min_value=0, max_value=100,
-                value=30,
-                help="Percentage of shifts that should be night shifts (7pm-7am)"
-            )
+        night_percentage = 100 - day_percentage
         
         # Show the actual percentages
         st.info(f"📊 **Distribution:** {day_percentage}% Day Shifts, {night_percentage}% Night Shifts")
@@ -607,26 +598,17 @@ def provider_rules_panel():
         
         # Day/Night distribution
         st.markdown("#### Day vs Night Shift Distribution")
+        st.markdown("Set the preferred percentage of day shifts (night shifts will be the remainder):")
         
-        col1, col2 = st.columns(2)
+        provider_rules["day_percentage"] = st.slider(
+            "Day Shifts Percentage",
+            min_value=0, max_value=100,
+            value=provider_rules.get("day_percentage", 70),
+            key=f"day_percentage_{selected_provider}",
+            help="Percentage of shifts that should be day shifts (7am-7pm). Night shifts will be 100% minus this value."
+        )
         
-        with col1:
-            provider_rules["day_percentage"] = st.slider(
-                "Day Shifts Percentage",
-                min_value=0, max_value=100,
-                value=provider_rules.get("day_percentage", 70),
-                key=f"day_percentage_{selected_provider}",
-                help="Percentage of shifts that should be day shifts (7am-7pm)"
-            )
-        
-        with col2:
-            provider_rules["night_percentage"] = st.slider(
-                "Night Shifts Percentage",
-                min_value=0, max_value=100,
-                value=provider_rules.get("night_percentage", 30),
-                key=f"night_percentage_{selected_provider}",
-                help="Percentage of shifts that should be night shifts (7pm-7am)"
-            )
+        provider_rules["night_percentage"] = 100 - provider_rules["day_percentage"]
         
         st.info(f"📊 **Distribution:** {provider_rules['day_percentage']}% Day Shifts, {provider_rules['night_percentage']}% Night Shifts")
         

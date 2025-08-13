@@ -296,12 +296,14 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                         # APP providers have different rules
                         filtered_providers.append(provider)
                     else:
-                        # Check if provider has reached maximum shifts
+                        # Check if provider has reached expected shifts (with tolerance)
                         current_shifts = len(provider_shifts.get(provider, []))
                         provider_rule = provider_rules.get(provider, {})
-                        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+                        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
+                        tolerance = 2
+                        max_acceptable = expected_shifts + tolerance
                         
-                        if current_shifts < max_shifts:
+                        if current_shifts < max_acceptable:
                             filtered_providers.append(provider)
                 
                 if filtered_providers:
