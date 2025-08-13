@@ -425,21 +425,139 @@ def render_desktop_interface():
             results = st.session_state.validation_results
             
             if not results["is_valid"]:
-                st.error("❌ Rule Violations Found")
+                # Compact validation summary with visual status
+                st.markdown("### ⚠️ Schedule Validation Results")
                 
-                with st.expander("View Violations", expanded=True):
-                    if results["violations"]:
-                        for violation in results["violations"]:
-                            st.error(f"• {violation}")
+                # Visual status indicator
+                total_violations = len(results.get("violations", []))
+                provider_violations = sum(len(violations) for violations in results.get("provider_violations", {}).values())
+                total_issues = total_violations + provider_violations
+                
+                # Status badge
+                if total_issues == 0:
+                    status_color = "🟢"
+                    status_text = "Valid"
+                elif total_issues <= 5:
+                    status_color = "🟡"
+                    status_text = "Minor Issues"
+                elif total_issues <= 15:
+                    status_color = "🟠"
+                    status_text = "Moderate Issues"
+                else:
+                    status_color = "🔴"
+                    status_text = "Major Issues"
+                
+                st.markdown(f"""
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                    <span style="font-size: 24px;">{status_color}</span>
+                    <span style="font-size: 18px; font-weight: bold;">{status_text}</span>
+                    <span style="color: #666;">({total_issues} issues found)</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Summary metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Issues", total_issues, delta=f"-{total_issues}" if total_issues > 0 else None)
+                
+                with col2:
+                    st.metric("Global Violations", total_violations)
+                
+                with col3:
+                    st.metric("Provider Violations", provider_violations)
+                
+                with col4:
+                    providers_with_issues = len(results.get("provider_violations", {}))
+                    st.metric("Providers Affected", providers_with_issues)
+                
+                # Detailed violations in organized format
+                with st.expander("📋 View Detailed Issues", expanded=False):
+                    # Global violations
+                    if results.get("violations"):
+                        st.markdown("#### 🌐 Global Rule Violations")
+                        violations_df = pd.DataFrame([
+                            {"Type": "Global Rule", "Issue": violation, "Provider": "N/A", "Severity": "High"}
+                            for violation in results["violations"]
+                        ])
+                        st.dataframe(
+                            violations_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Type": st.column_config.TextColumn("Type", width="medium"),
+                                "Issue": st.column_config.TextColumn("Issue", width="large"),
+                                "Provider": st.column_config.TextColumn("Provider", width="small"),
+                                "Severity": st.column_config.TextColumn("Severity", width="small")
+                            }
+                        )
                     
-                    if results["provider_violations"]:
-                        st.subheader("Provider-Specific Violations")
+                    # Provider-specific violations
+                    if results.get("provider_violations"):
+                        st.markdown("#### 👥 Provider-Specific Issues")
+                        provider_issues = []
                         for provider, violations in results["provider_violations"].items():
-                            st.error(f"**{provider}**:")
                             for violation in violations:
-                                st.error(f"  - {violation}")
+                                provider_issues.append({
+                                    "Provider": provider,
+                                    "Issue": violation,
+                                    "Type": "Provider Rule",
+                                    "Severity": "Medium"
+                                })
+                        
+                        if provider_issues:
+                            provider_violations_df = pd.DataFrame(provider_issues)
+                            st.dataframe(
+                                provider_violations_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Provider": st.column_config.TextColumn("Provider", width="small"),
+                                    "Issue": st.column_config.TextColumn("Issue", width="large"),
+                                    "Type": st.column_config.TextColumn("Type", width="medium"),
+                                    "Severity": st.column_config.TextColumn("Severity", width="small")
+                                }
+                            )
+                
+                # Quick action buttons
+                st.markdown("#### 🔧 Quick Actions")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("🔄 Regenerate Schedule", type="secondary", use_container_width=True):
+                        st.info("Click 'Generate Schedule' button above to create a new schedule with fewer violations.")
+                
+                with col2:
+                    if st.button("⚙️ Adjust Rules", type="secondary", use_container_width=True):
+                        st.info("Go to the Settings tab to modify scheduling rules.")
+                
+                with col3:
+                    if st.button("📊 View Grid", type="secondary", use_container_width=True):
+                        st.info("Go to the Grid View tab to manually adjust assignments.")
+                
             else:
-                st.success("✅ All rules validated successfully!")
+                # Success state with visual indicator
+                st.markdown("### ✅ Schedule Validation Results")
+                
+                st.markdown("""
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                    <span style="font-size: 24px;">🟢</span>
+                    <span style="font-size: 18px; font-weight: bold; color: #28a745;">Valid Schedule</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Status", "Valid", delta="✓")
+                
+                with col2:
+                    st.metric("Issues Found", 0)
+                
+                with col3:
+                    st.metric("Compliance", "100%")
+                
+                st.markdown("🎉 **All scheduling rules have been satisfied!** The schedule is ready for use.")
         
         # Provider statistics section
         if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
