@@ -248,7 +248,7 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     
     # Create shift blocks for each physician
     physician_blocks = create_shift_blocks(month_days, physician_providers, 
-                                         shift_capacity, provider_rules, global_rules)
+                                         shift_capacity, provider_rules, global_rules, year, month)
     
     # Assign shifts based on blocks
     for provider, blocks in physician_blocks.items():
@@ -413,7 +413,7 @@ def count_shifts_on_date(day: date, shift_type: str, provider_shifts: Dict) -> i
 
 def create_shift_blocks(month_days: List[date], physician_providers: List[str], 
                        shift_capacity: Dict[str, int], provider_rules: Dict, 
-                       global_rules: RuleConfig) -> Dict[str, List[Dict]]:
+                       global_rules: RuleConfig, year: int, month: int) -> Dict[str, List[Dict]]:
     """
     Create shift blocks for each physician following the rules:
     - Maximum 7 shifts per block

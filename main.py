@@ -643,9 +643,9 @@ def render_desktop_interface():
     st.markdown("</div>", unsafe_allow_html=True)
     
     # Main tabs with brown theme
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", 
-        "🔄 Sync", "📝 Requests", "💾 Data"
+        "🔄 Sync", "📝 Requests", "💾 Data", "🐛 Debug Test"
     ])
     
     # Calendar Tab
