@@ -94,26 +94,31 @@ def render_header_with_logo():
     """Render the main header with logo and branding."""
     st.markdown("""
     <style>
-        /* Brown color palette */
+        /* Crimson and Nile Blue color palette */
         :root {
-            --primary-brown: #8B4513;
-            --secondary-brown: #A0522D;
-            --light-brown: #DEB887;
-            --warm-brown: #D2691E;
-            --cream: #F5F5DC;
-            --dark-brown: #654321;
-            --accent-brown: #CD853F;
+            --primary-crimson: #ED1C24;
+            --secondary-crimson: #C41E3A;
+            --light-crimson: #FF6B6B;
+            --dark-crimson: #B91C1C;
+            --primary-nile: #18535B;
+            --secondary-nile: #0F4C75;
+            --light-nile: #3282B8;
+            --accent-nile: #1E3A8A;
+            --cream: #F8FAFC;
+            --white: #FFFFFF;
+            --gray-light: #F1F5F9;
+            --gray-dark: #475569;
         }
         
         /* Header styling with logo */
         .main-header {
-            background: linear-gradient(135deg, var(--primary-brown) 0%, var(--secondary-brown) 50%, var(--warm-brown) 100%);
-            padding: 1.5rem;
-            border-radius: 15px;
+            background: linear-gradient(135deg, var(--primary-crimson) 0%, var(--primary-nile) 50%, var(--secondary-nile) 100%);
+            padding: 2rem;
+            border-radius: 20px;
             margin-bottom: 2rem;
             color: white;
             text-align: center;
-            box-shadow: 0 4px 15px rgba(139, 69, 19, 0.3);
+            box-shadow: 0 8px 25px rgba(237, 28, 36, 0.3);
             position: relative;
             overflow: hidden;
         }
@@ -135,21 +140,23 @@ def render_header_with_logo():
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 1.5rem;
+            gap: 2rem;
         }
         
         .logo-container {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 12px;
-            padding: 0.5rem;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 1rem;
+            backdrop-filter: blur(15px);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
         
         .logo-container img {
-            height: 60px;
+            height: 100px;
             width: auto;
-            border-radius: 8px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
         
         .header-text {
@@ -157,31 +164,35 @@ def render_header_with_logo():
         }
         
         .header-text h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
+            font-size: 3rem;
+            font-weight: 800;
             margin: 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            color: var(--cream);
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.4);
+            color: var(--white);
+            letter-spacing: -0.5px;
         }
         
         .header-text p {
-            font-size: 1.1rem;
-            margin: 0.5rem 0 0 0;
-            opacity: 0.9;
-            font-weight: 300;
+            font-size: 1.3rem;
+            margin: 0.75rem 0 0 0;
+            opacity: 0.95;
+            font-weight: 400;
+            color: var(--cream);
         }
         
         .header-subtitle {
-            font-size: 0.9rem;
-            opacity: 0.8;
-            margin-top: 0.25rem;
+            font-size: 1rem;
+            opacity: 0.9;
+            margin-top: 0.5rem;
+            color: var(--gray-light);
+            font-weight: 300;
         }
         
         /* Mobile responsive header */
         @media (max-width: 768px) {
             .header-content {
                 flex-direction: column;
-                gap: 1rem;
+                gap: 1.5rem;
             }
             
             .header-text {
@@ -189,161 +200,164 @@ def render_header_with_logo():
             }
             
             .header-text h1 {
-                font-size: 2rem;
+                font-size: 2.5rem;
             }
             
             .logo-container img {
-                height: 50px;
+                height: 80px;
             }
         }
         
-        /* Global brown theme styling */
+        /* Global crimson/nile theme styling */
         .stButton > button {
-            background-color: var(--primary-brown) !important;
-            border-color: var(--primary-brown) !important;
+            background-color: var(--primary-crimson) !important;
+            border-color: var(--primary-crimson) !important;
             color: white !important;
-            border-radius: 8px !important;
-            font-weight: 500 !important;
+            border-radius: 10px !important;
+            font-weight: 600 !important;
             transition: all 0.3s ease !important;
+            padding: 0.75rem 1.5rem !important;
         }
         
         .stButton > button:hover {
-            background-color: var(--secondary-brown) !important;
-            border-color: var(--secondary-brown) !important;
-            transform: translateY(-2px) !important;
-            box-shadow: 0 6px 12px rgba(139, 69, 19, 0.3) !important;
+            background-color: var(--secondary-crimson) !important;
+            border-color: var(--secondary-crimson) !important;
+            transform: translateY(-3px) !important;
+            box-shadow: 0 8px 20px rgba(237, 28, 36, 0.4) !important;
         }
         
         .stButton > button:active {
-            transform: translateY(0) !important;
+            transform: translateY(-1px) !important;
         }
         
         /* Secondary button styling */
         .stButton > button[kind="secondary"] {
             background-color: transparent !important;
-            border-color: var(--primary-brown) !important;
-            color: var(--primary-brown) !important;
+            border-color: var(--primary-nile) !important;
+            color: var(--primary-nile) !important;
         }
         
         .stButton > button[kind="secondary"]:hover {
-            background-color: var(--primary-brown) !important;
+            background-color: var(--primary-nile) !important;
             color: white !important;
+            box-shadow: 0 8px 20px rgba(24, 83, 91, 0.4) !important;
         }
         
         /* Tab styling */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
-            background-color: var(--cream);
-            border-radius: 10px;
-            padding: 0.5rem;
+            gap: 10px;
+            background-color: var(--gray-light);
+            border-radius: 12px;
+            padding: 0.75rem;
         }
         
         .stTabs [data-baseweb="tab"] {
-            border-radius: 8px;
-            font-weight: 500;
-            color: var(--dark-brown);
+            border-radius: 10px;
+            font-weight: 600;
+            color: var(--gray-dark);
             transition: all 0.3s ease;
         }
         
         .stTabs [aria-selected="true"] {
-            background-color: var(--primary-brown) !important;
+            background-color: var(--primary-crimson) !important;
             color: white !important;
-            box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 12px rgba(237, 28, 36, 0.3);
         }
         
         .stTabs [aria-selected="false"]:hover {
-            background-color: var(--light-brown) !important;
-            color: var(--dark-brown) !important;
+            background-color: var(--light-crimson) !important;
+            color: white !important;
         }
         
         /* Metric cards */
         .metric-card {
             background: linear-gradient(135deg, var(--cream) 0%, white 100%);
-            border-radius: 12px;
+            border-radius: 15px;
             padding: 1.5rem;
             margin: 0.5rem 0;
-            border-left: 4px solid var(--primary-brown);
-            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+            border-left: 5px solid var(--primary-crimson);
+            box-shadow: 0 6px 20px rgba(237, 28, 36, 0.1);
             transition: all 0.3s ease;
         }
         
         .metric-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(139, 69, 19, 0.2);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(237, 28, 36, 0.2);
         }
         
         /* Status indicators */
         .status-success {
-            border-left-color: #28a745;
-            background: linear-gradient(135deg, #d4edda 0%, #f8f9fa 100%);
+            border-left-color: #10B981;
+            background: linear-gradient(135deg, #D1FAE5 0%, #F0FDF4 100%);
         }
         
         .status-error {
-            border-left-color: #dc3545;
-            background: linear-gradient(135deg, #f8d7da 0%, #f8f9fa 100%);
+            border-left-color: var(--primary-crimson);
+            background: linear-gradient(135deg, #FEE2E2 0%, #FEF2F2 100%);
         }
         
         .status-warning {
-            border-left-color: #ffc107;
-            background: linear-gradient(135deg, #fff3cd 0%, #f8f9fa 100%);
+            border-left-color: #F59E0B;
+            background: linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%);
         }
         
         /* Data editor styling */
         [data-testid="stDataFrame"] {
-            border-radius: 10px;
+            border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+            box-shadow: 0 6px 20px rgba(237, 28, 36, 0.1);
         }
         
         /* Calendar styling */
         .calendar-container {
             background: var(--cream);
-            border-radius: 12px;
-            padding: 1rem;
-            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+            border-radius: 15px;
+            padding: 1.5rem;
+            box-shadow: 0 6px 20px rgba(237, 28, 36, 0.1);
         }
         
         /* Form styling */
         .stTextInput > div > div > input {
-            border-color: var(--light-brown) !important;
-            border-radius: 8px !important;
+            border-color: var(--light-nile) !important;
+            border-radius: 10px !important;
         }
         
         .stTextInput > div > div > input:focus {
-            border-color: var(--primary-brown) !important;
-            box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.2) !important;
+            border-color: var(--primary-crimson) !important;
+            box-shadow: 0 0 0 3px rgba(237, 28, 36, 0.2) !important;
         }
         
         .stSelectbox > div > div > div {
-            border-color: var(--light-brown) !important;
-            border-radius: 8px !important;
+            border-color: var(--light-nile) !important;
+            border-radius: 10px !important;
         }
         
         .stSelectbox > div > div > div:focus-within {
-            border-color: var(--primary-brown) !important;
-            box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.2) !important;
+            border-color: var(--primary-crimson) !important;
+            box-shadow: 0 0 0 3px rgba(237, 28, 36, 0.2) !important;
         }
         
         /* Expander styling */
         .streamlit-expanderHeader {
-            background-color: var(--cream) !important;
-            border-radius: 8px !important;
-            color: var(--dark-brown) !important;
-            font-weight: 500 !important;
+            background-color: var(--gray-light) !important;
+            border-radius: 10px !important;
+            color: var(--gray-dark) !important;
+            font-weight: 600 !important;
         }
         
         .streamlit-expanderHeader:hover {
-            background-color: var(--light-brown) !important;
+            background-color: var(--light-crimson) !important;
+            color: white !important;
         }
         
         /* Success/Error messages */
         .stAlert {
-            border-radius: 8px !important;
-            border-left: 4px solid !important;
+            border-radius: 10px !important;
+            border-left: 5px solid !important;
         }
         
         .stAlert[data-baseweb="notification"] {
-            border-left-color: var(--primary-brown) !important;
+            border-left-color: var(--primary-crimson) !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -516,9 +530,9 @@ def render_desktop_interface():
     year = st.session_state.current_year
     month = st.session_state.current_month
     
-    # Main content area with brown theme
+    # Main content area with crimson/nile theme
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #F5F5DC 0%, #FFFFFF 100%); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
+    <div style="background: linear-gradient(135deg, #F8FAFC 0%, #FFFFFF 100%); padding: 1.5rem; border-radius: 15px; margin-bottom: 1rem; box-shadow: 0 4px 15px rgba(237, 28, 36, 0.1);">
     """, unsafe_allow_html=True)
     
     # Quick stats row
@@ -565,7 +579,7 @@ def render_desktop_interface():
         st.markdown("### 📅 Schedule Calendar")
         
         # Month navigation
-        render_month_navigation(year, month)
+        render_month_navigation()
         
         # Calendar display
         if st.session_state.events:
