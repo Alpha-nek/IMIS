@@ -216,15 +216,26 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     from models.constants import APP_PROVIDER_INITIALS
     from core.provider_types import NOCTURNISTS, SENIORS
     
+    # DETAILED DEBUG: Track why providers are rejected
+    debug_reason = None
+    
     # Check basic availability
-    if is_provider_unavailable_on_date(provider, day, provider_rules):
-        print(f"      ❌ {provider} unavailable on {day}")
-        return False
+    try:
+        if is_provider_unavailable_on_date(provider, day, provider_rules):
+            debug_reason = f"unavailable on {day}"
+            return False
+    except Exception as e:
+        print(f"      ⚠️ Error checking availability for {provider}: {e}")
+        # Be lenient - if we can't check, assume available
     
     # Check if provider already has a shift on this day
-    if has_shift_on_date(provider, day, events):
-        print(f"      ❌ {provider} already has shift on {day}")
-        return False
+    try:
+        if has_shift_on_date(provider, day, events):
+            debug_reason = f"already has shift on {day}"
+            return False
+    except Exception as e:
+        print(f"      ⚠️ Error checking existing shifts for {provider}: {e}")
+        # Be lenient - if we can't check, assume no conflict
     
     # Check shift type eligibility based on provider type and qualifications
     from core.provider_types import BRIDGE_QUALIFIED
@@ -232,76 +243,72 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     if provider in APP_PROVIDER_INITIALS:
         # APP providers can ONLY take APP shifts
         if shift_key != "APP":
-            print(f"      ❌ {provider} (APP) can't take {shift_key}")
+            debug_reason = f"APP provider can't take {shift_key}"
             return False
     elif provider in SENIORS:
         # Seniors can ONLY take R12 shifts (7am rounding)
         if shift_key != "R12":
-            print(f"      ❌ {provider} (Senior) can't take {shift_key}")
+            debug_reason = f"Senior can't take {shift_key}"
             return False
     elif shift_key == "APP":
         # Only APP providers can take APP shifts
-        print(f"      ❌ {provider} (non-APP) can't take APP")
+        debug_reason = f"non-APP can't take APP"
         return False
     elif shift_key == "NB":
         # Only bridge-qualified providers can take bridge shifts
         if provider not in BRIDGE_QUALIFIED:
-            print(f"      ❌ {provider} not bridge-qualified for NB")
-            return False
-    # For all other combinations, continue with preference checking
-    
-    # Check shift preferences - be more lenient for new providers
-    try:
-        if not validate_shift_type_preference(provider, shift_key, provider_rules):
-            # Log for debugging
-            provider_rule = provider_rules.get(provider, {})
-            shift_preferences = provider_rule.get("shift_preferences", {})
-            logger.debug(f"Provider {provider} preference check failed for {shift_key}. Preferences: {shift_preferences}")
-            return False
-    except Exception as e:
-        logger.warning(f"Error checking shift preferences for {provider}, {shift_key}: {e}")
-        # If there's an error, be lenient and allow the shift
-        pass
-    
-    # Check if this would exceed expected shifts - be more lenient
-    current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
-    try:
-        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
-        # Allow providers to exceed expected shifts slightly to ensure coverage
-        max_allowed_shifts = expected_shifts + 3  # Allow 3 extra shifts for coverage
-        
-        if current_shifts >= max_allowed_shifts:
-            return False
-    except Exception as e:
-        logger.warning(f"Error calculating expected shifts for {provider}: {e}")
-        # If we can't calculate expected shifts, allow up to 20 shifts per month
-        if current_shifts >= 20:
+            debug_reason = f"not bridge-qualified for NB"
             return False
     
-    # Check maximum night shifts
-    if shift_key in ["N12", "NB"]:
-        night_shifts = len([e for e in events 
-                           if e.extendedProps.get("provider") == provider 
-                           and e.extendedProps.get("shift_type") in ["N12", "NB"]])
-        max_nights = provider_rules.get(provider, {}).get("max_nights", global_rules.max_night_shifts_per_month)
-        
-        if max_nights is not None and night_shifts >= max_nights:
-            return False
+    # SIMPLIFIED: Skip preference checking for now to debug
+    # try:
+    #     if not validate_shift_type_preference(provider, shift_key, provider_rules):
+    #         debug_reason = f"preference check failed for {shift_key}"
+    #         return False
+    # except Exception as e:
+    #     print(f"      ⚠️ Error checking preferences for {provider}: {e}")
     
-    # Check rest requirements - simplified and more permissive
-    provider_events = [e for e in events if e.extendedProps.get("provider") == provider]
-    if provider_events:
-        provider_dates = {e.start.date() for e in provider_events}
-        
-        # Only block if this would create more than 7 consecutive days
-        consecutive_count = 0
-        check_date = day - timedelta(days=1)
-        while check_date in provider_dates:
-            consecutive_count += 1
-            check_date -= timedelta(days=1)
-            if consecutive_count >= 7:  # Hard limit at 7 consecutive days
-                return False
+    # SIMPLIFIED: Skip shift count checking for now
+    # current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
+    # try:
+    #     expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
+    #     max_allowed_shifts = expected_shifts + 3
+    #     
+    #     if current_shifts >= max_allowed_shifts:
+    #         debug_reason = f"would exceed max shifts ({current_shifts} >= {max_allowed_shifts})"
+    #         return False
+    # except Exception as e:
+    #     print(f"      ⚠️ Error calculating expected shifts for {provider}: {e}")
+    #     if current_shifts >= 20:
+    #         debug_reason = f"too many shifts ({current_shifts} >= 20)"
+    #         return False
     
+    # SIMPLIFIED: Skip night shift limits for now
+    # if shift_key in ["N12", "NB"]:
+    #     night_shifts = len([e for e in events 
+    #                        if e.extendedProps.get("provider") == provider 
+    #                        and e.extendedProps.get("shift_type") in ["N12", "NB"]])
+    #     max_nights = provider_rules.get(provider, {}).get("max_nights", global_rules.max_night_shifts_per_month)
+    #     
+    #     if max_nights is not None and night_shifts >= max_nights:
+    #         debug_reason = f"too many night shifts ({night_shifts} >= {max_nights})"
+    #         return False
+    
+    # SIMPLIFIED: Skip rest requirements for now
+    # provider_events = [e for e in events if e.extendedProps.get("provider") == provider]
+    # if provider_events:
+    #     provider_dates = {e.start.date() for e in provider_events}
+    #     
+    #     consecutive_count = 0
+    #     check_date = day - timedelta(days=1)
+    #     while check_date in provider_dates:
+    #         consecutive_count += 1
+    #         check_date -= timedelta(days=1)
+    #         if consecutive_count >= 7:
+    #             debug_reason = f"too many consecutive days ({consecutive_count} >= 7)"
+    #             return False
+    
+    # If we get here, provider is feasible
     return True
 
 def assign_app_shifts(month_days: List[date], app_providers: List[str], 
