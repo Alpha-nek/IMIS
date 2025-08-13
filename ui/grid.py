@@ -167,7 +167,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         else:
             color_labels.append(shift_type)
     
-    grid_data["Color"] = color_labels
+    grid_data["Shift Type"] = color_labels
     
     # Add date columns
     for date_col in date_cols:
@@ -175,14 +175,14 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         for idx, row in df.iterrows():
             grid_data[date_col].append(row[date_col] if row[date_col] else "")
     
-    grid_df = pd.DataFrame(grid_data, index=row_labels)
+    grid_df = pd.DataFrame(grid_data)
     
     # Calculate height to avoid vertical scroll
     height_px = min(2200, 110 + len(row_meta) * 38)
     
     # Create column configuration for the data editor
     col_config = {
-        "Color": st.column_config.TextColumn(
+        "Shift Type": st.column_config.TextColumn(
             "Shift Type",
             disabled=True,
             help="Shift type color indicator",
@@ -414,7 +414,7 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
         
         # Process each date column
         for col in edited_grid.columns:
-            if col == "Color":
+            if col == "Shift Type":
                 continue
             
             new_provider = edited_grid.at[row_label, col]
