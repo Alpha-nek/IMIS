@@ -34,7 +34,7 @@ def render_data_status():
     
     with col2:
         if os.path.exists(RULES_FILE):
-            _, shift_types, _ = load_rules()
+            _, shift_types, _, _ = load_rules()
             if shift_types:
                 st.success(f"Rules: {len(shift_types)} shift types")
             else:

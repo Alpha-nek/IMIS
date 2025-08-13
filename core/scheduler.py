@@ -180,7 +180,12 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
         while remaining_shifts > 0:
             # Determine block size (3-7 shifts, but no more than remaining shifts)
             max_block_size = min(7, remaining_shifts)
-            block_size = random.randint(3, max_block_size)
+            # Ensure we have a valid range for random.randint
+            if max_block_size < 3:
+                # If remaining shifts is less than 3, use all remaining shifts
+                block_size = remaining_shifts
+            else:
+                block_size = random.randint(3, max_block_size)
             
             # Determine shift type for this block
             shift_type = select_shift_type_for_block(provider, physician_shift_types, 
