@@ -1197,14 +1197,14 @@ def validate_rules(events: List[SEvent], providers: List[str],
                 month = first_event.start.month
             else:
                 # Fallback to current date
-                from datetime import date
-                today = date.today()
+                from datetime import date as date_class
+                today = date_class.today()
                 year = today.year
                 month = today.month
         else:
             # Fallback to current date
-            from datetime import date
-            today = date.today()
+            from datetime import date as date_class
+            today = date_class.today()
             year = today.year
             month = today.month
     
@@ -1320,11 +1320,12 @@ def validate_rules(events: List[SEvent], providers: List[str],
     
     # 5. ANALYZE COVERAGE GAPS
     # Get all dates in the month
-    month_start = date(year, month, 1)
+    from datetime import date as date_class
+    month_start = date_class(year, month, 1)
     if month == 12:
-        month_end = date(year + 1, 1, 1) - timedelta(days=1)
+        month_end = date_class(year + 1, 1, 1) - timedelta(days=1)
     else:
-        month_end = date(year, month + 1, 1) - timedelta(days=1)
+        month_end = date_class(year, month + 1, 1) - timedelta(days=1)
     
     # Check each day for coverage gaps
     for day in [month_start + timedelta(days=i) for i in range((month_end - month_start).days + 1)]:
