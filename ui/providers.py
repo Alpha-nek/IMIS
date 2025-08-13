@@ -18,9 +18,21 @@ def providers_panel():
     
     st.markdown("---")
     
+    # Add new provider section
+    with st.expander("➕ Add New Provider", expanded=False):
+        add_new_provider()
+    
+    st.markdown("---")
+    
     # Load providers section
     with st.expander("📁 Load Providers from CSV", expanded=False):
         load_providers_from_csv()
+    
+    # Clean up providers section
+    with st.expander("🧹 Clean Up Providers", expanded=False):
+        cleanup_providers()
+    
+    st.markdown("---")
     
     # Provider list section with improved UI
     if not st.session_state.providers_df.empty:
@@ -171,7 +183,221 @@ def providers_panel():
         st.subheader("⚙️ Provider Rules")
         provider_rules_panel()
     else:
-        st.info("No providers loaded. Please load a CSV file with provider data.")
+        st.info("No providers loaded. Please load a CSV file with provider data or add new providers.")
+
+def add_new_provider():
+    """Add a new provider with comprehensive information."""
+    st.markdown("#### Add New Provider")
+    st.markdown("Fill in the provider information below. All fields marked with * are required.")
+    
+    with st.form("add_provider_form"):
+        # Basic Information
+        st.markdown("**Basic Information**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            initials = st.text_input(
+                "Provider Initials *",
+                placeholder="e.g., JT",
+                max_chars=5,
+                help="Enter 2-5 character initials (will be converted to uppercase)"
+            )
+            
+            provider_name = st.text_input(
+                "Full Name *",
+                placeholder="e.g., Joel T Park",
+                help="Enter the provider's full name"
+            )
+        
+        with col2:
+            provider_type = st.selectbox(
+                "Provider Type *",
+                options=["Physician", "APP"],
+                help="Select whether this is a Physician or APP provider"
+            )
+            
+            # Day/Night preference
+            day_night_preference = st.selectbox(
+                "Day/Night Preference",
+                options=["No Preference", "Day Shifts Preferred", "Night Shifts Preferred", "Day Shifts Only", "Night Shifts Only"],
+                help="Select the provider's preference for day vs night shifts"
+            )
+        
+        st.markdown("---")
+        
+        # Shift Preferences
+        st.markdown("**Shift Preferences**")
+        st.markdown("Select which types of shifts this provider can work:")
+        
+        # Get shift types from constants
+        from models.constants import DEFAULT_SHIFT_TYPES
+        shift_types = [shift["key"] for shift in DEFAULT_SHIFT_TYPES]
+        shift_labels = [shift["label"] for shift in DEFAULT_SHIFT_TYPES]
+        
+        # Create shift preference checkboxes
+        shift_preferences = {}
+        cols = st.columns(3)
+        
+        for i, (shift_key, shift_label) in enumerate(zip(shift_types, shift_labels)):
+            with cols[i % 3]:
+                shift_preferences[shift_key] = st.checkbox(
+                    f"{shift_label} ({shift_key})",
+                    value=True if provider_type == "APP" and shift_key == "APP" else 
+                          True if provider_type == "Physician" and shift_key != "APP" else False,
+                    key=f"shift_pref_{shift_key}",
+                    help=f"Can this provider work {shift_label} shifts?"
+                )
+        
+        st.markdown("---")
+        
+        # Workload Preferences
+        st.markdown("**Workload Preferences**")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            min_shifts = st.number_input(
+                "Min Shifts per Month",
+                min_value=0, max_value=31,
+                value=8,
+                help="Minimum number of shifts this provider should work per month"
+            )
+            
+            max_shifts = st.number_input(
+                "Max Shifts per Month",
+                min_value=1, max_value=31,
+                value=16,
+                help="Maximum number of shifts this provider can work per month"
+            )
+        
+        with col2:
+            min_weekend_shifts = st.number_input(
+                "Min Weekend Shifts",
+                min_value=0, max_value=10,
+                value=1,
+                help="Minimum number of weekend shifts per month"
+            )
+            
+            max_weekend_shifts = st.number_input(
+                "Max Weekend Shifts",
+                min_value=0, max_value=10,
+                value=4,
+                help="Maximum number of weekend shifts per month"
+            )
+        
+        with col3:
+            min_night_shifts = st.number_input(
+                "Min Night Shifts",
+                min_value=0, max_value=31,
+                value=2,
+                help="Minimum number of night shifts per month"
+            )
+            
+            max_night_shifts = st.number_input(
+                "Max Night Shifts",
+                min_value=0, max_value=31,
+                value=8,
+                help="Maximum number of night shifts per month"
+            )
+        
+        st.markdown("---")
+        
+        # Day/Night Percentage
+        st.markdown("**Day vs Night Shift Distribution**")
+        st.markdown("Set the preferred percentage of day vs night shifts:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            day_percentage = st.slider(
+                "Day Shifts Percentage",
+                min_value=0, max_value=100,
+                value=70,
+                help="Percentage of shifts that should be day shifts (7am-7pm)"
+            )
+        
+        with col2:
+            night_percentage = st.slider(
+                "Night Shifts Percentage",
+                min_value=0, max_value=100,
+                value=30,
+                help="Percentage of shifts that should be night shifts (7pm-7am)"
+            )
+        
+        # Show the actual percentages
+        st.info(f"📊 **Distribution:** {day_percentage}% Day Shifts, {night_percentage}% Night Shifts")
+        
+        # Submit button
+        submitted = st.form_submit_button("➕ Add Provider", type="primary")
+        
+        if submitted:
+            # Validate required fields
+            if not initials or not provider_name:
+                st.error("❌ Please fill in all required fields (marked with *)")
+                return
+            
+            # Clean and validate initials
+            initials = initials.strip().upper()
+            if len(initials) < 2 or len(initials) > 5:
+                st.error("❌ Initials must be 2-5 characters long")
+                return
+            
+            # Check if initials already exist
+            if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+                existing_initials = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+                if initials in existing_initials:
+                    st.error(f"❌ Provider with initials '{initials}' already exists")
+                    return
+            
+            # Create new provider data
+            new_provider = {
+                "initials": initials,
+                "name": provider_name.strip(),
+                "type": provider_type
+            }
+            
+            # Add to providers dataframe
+            if "providers_df" in st.session_state:
+                new_df = pd.concat([st.session_state.providers_df, pd.DataFrame([new_provider])], ignore_index=True)
+            else:
+                new_df = pd.DataFrame([new_provider])
+            
+            st.session_state.providers_df = new_df
+            st.session_state.providers_loaded = True
+            
+            # Create provider rules
+            if "provider_rules" not in st.session_state:
+                st.session_state.provider_rules = {}
+            
+            st.session_state.provider_rules[initials] = {
+                "min_shifts": min_shifts,
+                "max_shifts": max_shifts,
+                "min_weekend_shifts": min_weekend_shifts,
+                "max_weekend_shifts": max_weekend_shifts,
+                "min_night_shifts": min_night_shifts,
+                "max_night_shifts": max_night_shifts,
+                "day_percentage": day_percentage,
+                "night_percentage": night_percentage,
+                "day_night_preference": day_night_preference,
+                "shift_preferences": shift_preferences,
+                "unavailable_dates": [],
+                "vacations": []
+            }
+            
+            # Auto-save providers and rules
+            from core.data_manager import save_providers, save_rules
+            save_providers(new_df, st.session_state.provider_rules)
+            save_rules(
+                st.session_state.global_rules,
+                st.session_state.shift_types,
+                st.session_state.shift_capacity,
+                st.session_state.provider_rules
+            )
+            
+            st.success(f"✅ Successfully added provider {initials} - {provider_name}!")
+            st.info(f"📋 Provider rules have been set up with your preferences. You can edit them in the Provider Rules section.")
+            st.rerun()
 
 def load_providers_from_csv():
     """Load providers from CSV file."""
@@ -223,6 +449,61 @@ def load_providers_from_csv():
                 
         except Exception as e:
             st.error(f"Error loading CSV file: {str(e)}")
+
+def cleanup_providers():
+    """Clean up old/non-current providers."""
+    st.markdown("#### 🧹 Clean Up Providers")
+    st.markdown("Remove providers who are no longer active or current.")
+    
+    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+        providers_df = st.session_state.providers_df.copy()
+        
+        # Show current providers
+        st.markdown("**Current Providers:**")
+        
+        # Create a list of providers to remove
+        providers_to_remove = st.multiselect(
+            "Select providers to remove:",
+            options=providers_df["initials"].tolist(),
+            format_func=lambda x: f"{x} - {providers_df[providers_df['initials'] == x]['name'].iloc[0]} ({providers_df[providers_df['initials'] == x]['type'].iloc[0]})",
+            help="Select providers who are no longer active"
+        )
+        
+        if providers_to_remove:
+            st.warning(f"⚠️ **Warning:** You are about to remove {len(providers_to_remove)} provider(s). This action cannot be undone.")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🗑️ Remove Selected Providers", type="secondary"):
+                    # Remove providers from dataframe
+                    new_df = providers_df[~providers_df["initials"].isin(providers_to_remove)]
+                    st.session_state.providers_df = new_df
+                    
+                    # Remove from provider rules
+                    if "provider_rules" in st.session_state:
+                        for provider in providers_to_remove:
+                            if provider in st.session_state.provider_rules:
+                                del st.session_state.provider_rules[provider]
+                    
+                    # Auto-save
+                    from core.data_manager import save_providers, save_rules
+                    save_providers(new_df, st.session_state.provider_rules)
+                    save_rules(
+                        st.session_state.global_rules,
+                        st.session_state.shift_types,
+                        st.session_state.shift_capacity,
+                        st.session_state.provider_rules
+                    )
+                    
+                    st.success(f"✅ Successfully removed {len(providers_to_remove)} provider(s)!")
+                    st.rerun()
+            
+            with col2:
+                if st.button("❌ Cancel", type="secondary"):
+                    st.rerun()
+    else:
+        st.info("No providers to clean up.")
 
 def provider_rules_selector():
     """Provider selection for rules editing."""
@@ -279,6 +560,10 @@ def provider_rules_panel():
             "max_weekend_shifts": 4,
             "min_night_shifts": 2,
             "max_night_shifts": 8,
+            "day_percentage": 70,
+            "night_percentage": 30,
+            "day_night_preference": "No Preference",
+            "shift_preferences": {},
             "unavailable_dates": [],
             "vacations": []
         }
@@ -286,7 +571,7 @@ def provider_rules_panel():
     provider_rules = st.session_state.provider_rules[selected_provider]
     
     # Create tabs for different rule categories
-    tab1, tab2, tab3 = st.tabs(["📊 Shift Limits", "🚫 Unavailable Dates", "🏖️ Vacations"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations"])
     
     with tab1:
         st.markdown("#### Monthly Shift Limits")
@@ -297,7 +582,7 @@ def provider_rules_panel():
             provider_rules["min_shifts"] = st.number_input(
                 "Min Shifts per Month",
                 min_value=0, max_value=31,
-                value=provider_rules["min_shifts"],
+                value=provider_rules.get("min_shifts", 8),
                 key=f"min_shifts_{selected_provider}",
                 help="Minimum number of shifts this provider should work per month"
             )
@@ -305,7 +590,7 @@ def provider_rules_panel():
             provider_rules["min_weekend_shifts"] = st.number_input(
                 "Min Weekend Shifts per Month",
                 min_value=0, max_value=10,
-                value=provider_rules["min_weekend_shifts"],
+                value=provider_rules.get("min_weekend_shifts", 1),
                 key=f"min_weekend_{selected_provider}",
                 help="Minimum number of weekend shifts this provider should work per month"
             )
@@ -313,7 +598,7 @@ def provider_rules_panel():
             provider_rules["min_night_shifts"] = st.number_input(
                 "Min Night Shifts per Month",
                 min_value=0, max_value=31,
-                value=provider_rules["min_night_shifts"],
+                value=provider_rules.get("min_night_shifts", 2),
                 key=f"min_night_{selected_provider}",
                 help="Minimum number of night shifts this provider should work per month"
             )
@@ -322,7 +607,7 @@ def provider_rules_panel():
             provider_rules["max_shifts"] = st.number_input(
                 "Max Shifts per Month",
                 min_value=1, max_value=31,
-                value=provider_rules["max_shifts"],
+                value=provider_rules.get("max_shifts", 16),
                 key=f"max_shifts_{selected_provider}",
                 help="Maximum number of shifts this provider can work per month"
             )
@@ -330,7 +615,7 @@ def provider_rules_panel():
             provider_rules["max_weekend_shifts"] = st.number_input(
                 "Max Weekend Shifts per Month",
                 min_value=0, max_value=10,
-                value=provider_rules["max_weekend_shifts"],
+                value=provider_rules.get("max_weekend_shifts", 4),
                 key=f"max_weekend_{selected_provider}",
                 help="Maximum number of weekend shifts this provider can work per month"
             )
@@ -338,12 +623,78 @@ def provider_rules_panel():
             provider_rules["max_night_shifts"] = st.number_input(
                 "Max Night Shifts per Month",
                 min_value=0, max_value=31,
-                value=provider_rules["max_night_shifts"],
+                value=provider_rules.get("max_night_shifts", 8),
                 key=f"max_night_{selected_provider}",
                 help="Maximum number of night shifts this provider can work per month"
             )
+        
+        # Day/Night distribution
+        st.markdown("#### Day vs Night Shift Distribution")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            provider_rules["day_percentage"] = st.slider(
+                "Day Shifts Percentage",
+                min_value=0, max_value=100,
+                value=provider_rules.get("day_percentage", 70),
+                key=f"day_percentage_{selected_provider}",
+                help="Percentage of shifts that should be day shifts (7am-7pm)"
+            )
+        
+        with col2:
+            provider_rules["night_percentage"] = st.slider(
+                "Night Shifts Percentage",
+                min_value=0, max_value=100,
+                value=provider_rules.get("night_percentage", 30),
+                key=f"night_percentage_{selected_provider}",
+                help="Percentage of shifts that should be night shifts (7pm-7am)"
+            )
+        
+        st.info(f"📊 **Distribution:** {provider_rules['day_percentage']}% Day Shifts, {provider_rules['night_percentage']}% Night Shifts")
+        
+        # Day/Night preference
+        provider_rules["day_night_preference"] = st.selectbox(
+            "Day/Night Preference",
+            options=["No Preference", "Day Shifts Preferred", "Night Shifts Preferred", "Day Shifts Only", "Night Shifts Only"],
+            index=["No Preference", "Day Shifts Preferred", "Night Shifts Preferred", "Day Shifts Only", "Night Shifts Only"].index(
+                provider_rules.get("day_night_preference", "No Preference")
+            ),
+            key=f"day_night_pref_{selected_provider}",
+            help="Select the provider's preference for day vs night shifts"
+        )
     
     with tab2:
+        st.markdown("#### Shift Type Preferences")
+        st.markdown("Select which types of shifts this provider can work:")
+        
+        # Get shift types from constants
+        from models.constants import DEFAULT_SHIFT_TYPES
+        shift_types = [shift["key"] for shift in DEFAULT_SHIFT_TYPES]
+        shift_labels = [shift["label"] for shift in DEFAULT_SHIFT_TYPES]
+        
+        # Initialize shift preferences if not exists
+        if "shift_preferences" not in provider_rules:
+            provider_rules["shift_preferences"] = {}
+        
+        # Create shift preference checkboxes
+        cols = st.columns(3)
+        
+        for i, (shift_key, shift_label) in enumerate(zip(shift_types, shift_labels)):
+            with cols[i % 3]:
+                current_value = provider_rules["shift_preferences"].get(shift_key, 
+                    True if provider_type == "APP" and shift_key == "APP" else 
+                    True if provider_type == "Physician" and shift_key != "APP" else False
+                )
+                
+                provider_rules["shift_preferences"][shift_key] = st.checkbox(
+                    f"{shift_label} ({shift_key})",
+                    value=current_value,
+                    key=f"shift_pref_{selected_provider}_{shift_key}",
+                    help=f"Can this provider work {shift_label} shifts?"
+                )
+    
+    with tab3:
         st.markdown("#### Unavailable Dates")
         st.markdown("Add specific dates when this provider cannot work.")
         
@@ -378,7 +729,7 @@ def provider_rules_panel():
         else:
             st.info("No unavailable dates set.")
     
-    with tab3:
+    with tab4:
         st.markdown("#### Vacation Periods")
         st.markdown("Add vacation periods when this provider will be away.")
         
