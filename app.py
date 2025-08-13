@@ -7623,5 +7623,3 @@ def check_shift_swap_violations(provider1: str, date1: str, provider2: str, date
 
 if __name__ == "__main__":
     main()
-
->>>>>>> 8d473f28e5648cd512b8cae2150e28bf02b1192c

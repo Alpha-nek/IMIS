@@ -552,7 +552,7 @@ def validate_and_adjust_schedule(events: List[SEvent], providers: List[str],
         
         if validation_result["is_valid"]:
             logger.info("Schedule passed validation - no adjustments needed")
-    return events
+            return events
         
         logger.info(f"Schedule has {validation_result['summary']['total_violations']} violations, attempting to optimize...")
         
