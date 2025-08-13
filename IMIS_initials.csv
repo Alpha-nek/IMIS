@@ -1,57 +1,61 @@
-initials
-AA
-AD
-AM
-FS
-JL
-JM
-JT
-KA
-LN
-SM
-OI
-NP
-PR
-UN
-DP
-FY
-YL
-RR
-SD
-JK
-NS
-PD
-AB
-KF
-AL
-GB
-KD
-NG
-GI
-VT
-DI
-YD
-HS
-YA
-NM
-EM
-SS
-YS
-HW
-AH
-RJ
-SI
-FH
-EB
-RS
-RG
-CJ
-MS
-AT
-YH
-XL
-MA
-LM
-MQ
-CM
-AI
+initials,name,type
+AA,Dr. A. A.,Physician
+AD,Dr. A. D.,Physician
+AM,Dr. A. M.,Physician
+FS,Dr. F. S.,Physician
+JL,Dr. J. L.,Physician
+JM,Dr. J. M.,Physician
+JT,Dr. J. T.,Physician
+KA,Dr. K. A.,Physician
+LN,Dr. L. N.,Physician
+SM,Dr. S. M.,Physician
+OI,Dr. O. I.,Physician
+NP,Dr. N. P.,Physician
+PR,Dr. P. R.,Physician
+UN,Dr. U. N.,Physician
+DP,Dr. D. P.,Physician
+FY,Dr. F. Y.,Physician
+YL,Dr. Y. L.,Physician
+RR,Dr. R. R.,Physician
+SD,Dr. S. D.,Physician
+JK,Dr. J. K.,Physician
+NS,Dr. N. S.,Physician
+PD,Dr. P. D.,Physician
+AB,Dr. A. B.,Physician
+KF,Dr. K. F.,Physician
+AL,Dr. A. L.,Physician
+GB,Dr. G. B.,Physician
+KD,Dr. K. D.,Physician
+NG,Dr. N. G.,Physician
+GI,Dr. G. I.,Physician
+VT,Dr. V. T.,Physician
+DI,Dr. D. I.,Physician
+YD,Dr. Y. D.,Physician
+HS,Dr. H. S.,Physician
+YA,Dr. Y. A.,Physician
+NM,Dr. N. M.,Physician
+EM,Dr. E. M.,Physician
+SS,Dr. S. S.,Physician
+YS,Dr. Y. S.,Physician
+HW,Dr. H. W.,Physician
+AH,Dr. A. H.,Physician
+RJ,Dr. R. J.,Physician
+SI,Dr. S. I.,Physician
+FH,Dr. F. H.,Physician
+EB,Dr. E. B.,Physician
+RS,Dr. R. S.,Physician
+RG,Dr. R. G.,Physician
+CJ,Dr. C. J.,Physician
+MS,Dr. M. S.,Physician
+AT,Dr. A. T.,Physician
+YH,Dr. Y. H.,Physician
+XL,Dr. X. L.,Physician
+MA,Dr. M. A.,Physician
+LM,Dr. L. M.,Physician
+MQ,Dr. M. Q.,Physician
+CM,Dr. C. M.,Physician
+AI,Dr. A. I.,Physician
+JA,APP A.,APP
+DN,APP D.,APP
+KP,APP K.,APP
+AR,APP A.,APP
