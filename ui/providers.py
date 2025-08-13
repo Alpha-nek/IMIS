@@ -300,6 +300,26 @@ def add_new_provider():
         timing_options = ["Even Distribution - No preference", "Front-Loaded - Prefer shifts in first half of month", "Back-Loaded - Prefer shifts in second half of month"]
         timing_preference_value = timing_values[timing_options.index(timing_preference)]
         
+        # Senior Provider Status
+        st.markdown("**Senior Provider Status**")
+        is_senior = st.checkbox(
+            "👑 Senior Provider",
+            value=False,
+            help="Check this box if this provider is a senior provider who only works 7am-7pm rounding shifts"
+        )
+        
+        if is_senior:
+            st.info("👑 **Senior Provider:** Will only be assigned 7am-7pm rounding shifts (R12)")
+            # Automatically set shift preferences for senior providers
+            shift_preferences = {
+                "R12": True,   # Only rounding shifts
+                "A12": False,  # No admitting shifts
+                "A10": False,  # No admitting shifts
+                "N12": False,  # No night shifts
+                "NB": False,   # No night bridge
+                "APP": False   # No APP shifts
+            }
+        
         # Unavailable Days of the Week
         st.markdown("**Unavailable Days of the Week**")
         st.markdown("Select days when this provider should not be assigned shifts:")
@@ -376,8 +396,14 @@ def add_new_provider():
                 "unavailable_dates": [],
                 "unavailable_days_of_week": unavailable_days_of_week,
                 "shift_timing_preference": timing_preference_value,
+                "is_senior": is_senior,
                 "vacations": []
             }
+            
+            # Update senior providers list if needed
+            if is_senior:
+                from core.provider_types import add_senior_provider
+                add_senior_provider(initials)
             
             # Auto-save providers and rules
             from core.data_manager import save_providers, save_rules
@@ -574,7 +600,7 @@ def provider_rules_panel():
     provider_rules = st.session_state.provider_rules[selected_provider]
     
     # Create tabs for different rule categories
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations", "⏰ Timing Preferences"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations", "⏰ Timing Preferences", "👑 Senior Status"])
     
     with tab1:
         st.markdown("#### FTE (Full Time Employment)")
@@ -851,6 +877,66 @@ def provider_rules_panel():
             st.info(f"🚫 **Unavailable Days:** {', '.join(unavailable_names)}")
         else:
             st.info("✅ **Available all days of the week**")
+    
+    with tab6:
+        st.markdown("#### Senior Provider Status")
+        st.markdown("Senior providers only work 7am-7pm rounding shifts (R12).")
+        
+        # Initialize senior status if not exists
+        if "is_senior" not in provider_rules:
+            provider_rules["is_senior"] = False
+        
+        # Senior provider checkbox
+        is_senior = st.checkbox(
+            "👑 Senior Provider",
+            value=provider_rules.get("is_senior", False),
+            key=f"is_senior_{selected_provider}",
+            help="Check this box if this provider is a senior provider who only works 7am-7pm rounding shifts"
+        )
+        
+        provider_rules["is_senior"] = is_senior
+        
+        if is_senior:
+            st.success("👑 **Senior Provider Status:** Active")
+            st.info("✅ This provider will only be assigned 7am-7pm rounding shifts (R12)")
+            st.info("🔒 All other shift types will be automatically disabled")
+            
+            # Automatically update shift preferences for senior providers
+            provider_rules["shift_preferences"] = {
+                "R12": True,   # Only rounding shifts
+                "A12": False,  # No admitting shifts
+                "A10": False,  # No admitting shifts
+                "N12": False,  # No night shifts
+                "NB": False,   # No night bridge
+                "APP": False   # No APP shifts
+            }
+            
+            # Update senior providers list
+            from core.provider_types import add_senior_provider, remove_senior_provider, get_senior_providers
+            
+            current_seniors = get_senior_providers()
+            if selected_provider not in current_seniors:
+                add_senior_provider(selected_provider)
+                st.success(f"✅ Added {selected_provider} to senior providers list")
+        else:
+            st.info("👤 **Regular Provider Status**")
+            
+            # Remove from senior providers list if they were previously a senior
+            from core.provider_types import remove_senior_provider, get_senior_providers
+            
+            current_seniors = get_senior_providers()
+            if selected_provider in current_seniors:
+                remove_senior_provider(selected_provider)
+                st.success(f"✅ Removed {selected_provider} from senior providers list")
+        
+        # Display current senior providers
+        from core.provider_types import get_senior_providers
+        current_seniors = get_senior_providers()
+        if current_seniors:
+            st.markdown("**Current Senior Providers:**")
+            st.write(", ".join(sorted(current_seniors)))
+        else:
+            st.info("No senior providers currently set")
     
     # Save button
     if st.button("💾 Save Rules", type="primary", key=f"save_rules_{selected_provider}"):
