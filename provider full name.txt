@@ -1,0 +1,88 @@
+AA	AA	MD	Secure message to Amion app	401 350 1289	Anna Acidera MD	 
+AD	AD	MD	 Not ready to receive secure messages. Click for more info.	401 350 7104	Ashok Devkota MD	 
+AM	AM	MD	Secure message to Amion app	401 350 4334	Ashish Misri MD	 
+DD	DD	NP	 Not ready to receive secure messages. Click for more info.	401 350 5419	Deb Durkin NP 401 339 3448	 
+DN	DN	NP	Secure message to Amion app	401 350 6937	Daniel Neilson NP	 
+FS	FS	MD	Secure message to Amion app	401 350 4846	Fadi Samaan MD	 
+JL	JL	PA	 Not ready to receive secure messages. Click for more info.	401 350-4063	Joanna Lannie PA	 
+JM	JM	MD	Secure message to Amion app	401 350 2957	Jacqueline Michaud DO	 
+JTP	JT	MD	 Not ready to receive secure messages. Click for more info.	401 350 9564	Joel T Park MD	 
+KA	KA	MD	 Not ready to receive secure messages. Click for more info.	401 350 4010	Kabita Karki MD	 
+LN	LN	MD	Secure message to Amion app	401 350 1736	Lina  Nemchenok MD	 
+Moonlighter	MO	MD	 Not ready to receive secure messages. Click for more info.	401 350 0944 (UMA) 350 0354 (IMIS) 350 7541 (X Coverage)	 	 
+SM	SM	MD	 Not ready to receive secure messages. Click for more info.	401 350 4810	Subhankar Maitra MD	 
+KN	KN	MD	Secure message to Amion app	401 350 2276	Dr Katherine Mahon	 
+OI	OI	MD	Secure message to Amion app	401 350 0426	Omosede Ighile MD	 
+ 	NP	 Not ready to receive secure messages. Click for more info.	 	 	 
+AR	AR	PA	 Not ready to receive secure messages. Click for more info.	401 350 0621	Andrew Rowles, PA	 
+JA	JA	NP	Secure message to Amion app	401 350 8292	Jessica Attar, NP	 
+RD	RD	MD	 Not ready to receive secure messages. Click for more info.	401 350 1084	Rongras Damrongwatanasuk MD	 
+PR	PR	MD	 Not ready to receive secure messages. Click for more info.	401 350 7337	Paras Ranjitkar MD	 
+UN	UN	MD	Secure message to Amion app	401 350 0565	Umair Nazir MD	 
+DP	DP	MD	 Not ready to receive secure messages. Click for more info.	401 350 1427	Damodar Penigalapati MD	 
+FY	FY	MD	 Not ready to receive secure messages. Click for more info.	401 350 2101	Ingrid Fang Yin Hao MD	 
+NZ	NZ	MD	 Not ready to receive secure messages. Click for more info.	401 350 0886	Nazir Ahmed MD	 
+YL	YL	MD	Secure message to Amion app	401 350 3283	Yi Lu MD	 
+RR	RR	MD	 Not ready to receive secure messages. Click for more info.	(401) 350 4715	Rosa Riera MD	 
+SD	SD	MD	Secure message to Amion app	401350 8113	Saud Dhillon MD	 
+JK	JK	MD	 Not ready to receive secure messages. Click for more info.	401 350 8100	Joseph Kilch MD	 
+TK	TK	MD	Secure message to Amion app	401 350 8125	Tushar Kulkarni MD	 
+AP	AP	MD	Secure message to Amion app	401 350 8131	Amrit Pathak MD	 
+NS	NS	MD	 Not ready to receive secure messages. Click for more info.	401 350 2544	Nikolaos Sismanopulos	 
+GH	GH	MD	 Not ready to receive secure messages. Click for more info.	401-350-3775	Greta Hussaini	 
+SB	SB	MD	Secure message to Amion app	401-350-2138	Shreeyukta Bhattarai, MD	 
+NH	NH	MD	 Not ready to receive secure messages. Click for more info.	401-350-2155	Neha Kumari, MD	 
+NF	NF	MD	Secure message to Amion app	401-350-2998	Negar Faramarzi, MD	 
+AS	AS	MD	 Not ready to receive secure messages. Click for more info.	401-350-0127	Ahmed Shahab,MD	 
+FN	FN	MD	 Not ready to receive secure messages. Click for more info.	401-350-1513	Fatima Najeeb, MD	 
+BD	BD	NP	Secure message to Amion app	401-325-0386	Beth Dufour, NP	 
+PD	PD	MD	 Not ready to receive secure messages. Click for more info.	401-350-2427	Davis Patel, MD	 
+AB	AB	MD	 Not ready to receive secure messages. Click for more info.	401-350-4178	Amrit Basnet, MD	 
+BB	BB	MD	 Not ready to receive secure messages. Click for more info.	401-350-4684	Binuragi Barakoti, MD	 
+ZB	ZB	MD	 Not ready to receive secure messages. Click for more info.	401-350-4689	Zubair Bashir, MD	 
+KF	KF	MD	Secure message to Amion app	401-350-4259	Khawaja Hasham Faisal, MD	 
+CI	CI	PA	 Not ready to receive secure messages. Click for more info.	401-350-4343	Caroline Izzo, PA	 
+AL	AL	MD	Secure message to Amion app	401-350-4164	Ali Mrad, MD	 
+GB	GB	MD	Secure message to Amion app	401-350-4165	Gurdev Bajwa, MD	 
+KD	KD	MD	Secure message to Amion app	401-350-0017	Katharine Darland	 
+SC	SC	NP	Secure message to Amion app	401-350-3002	Sarah Correira, NP	 
+NG	NG	MD	Secure message to Amion app	401-350-1585	Nathan Gelinas, MD	 
+GI	GI	MD	Secure message to Amion app	401-350-1571	Gabriel Ibarra-LeCompte, MD	 
+VT	VT	MD	 Not ready to receive secure messages. Click for more info.	401-460-1257	Vishal Tahilramani, MD	 
+BA	BA	MD	 Not ready to receive secure messages. Click for more info.	401-350-7477	Basarat, Baig, MD	 
+DI	DI	MD	Secure message to Amion app	401-350-6749	Dipesh Patel, MD	 
+YD	YD	MD	Secure message to Amion app	401-325-0760	Yannick D'Silva, MD	 
+HS	HS	MD	Secure message to Amion app	401-350-3437	Hala Soomro, MD	 
+AN	AN	MD	 Not ready to receive secure messages. Click for more info.	401-325-0362	Anchela Rajeshwaran, MD	 
+YA	YA	MD	Secure message to Amion app	401-325-8927	Yazan Al-Fanek, MD	 
+KK	KK	MD	 Not ready to receive secure messages. Click for more info.	(401)-221-0015	Dr. Kelsea Killin (Captain) 937-206-2652 - cell	 
+ZD	ZD	MD	 Not ready to receive secure messages. Click for more info.	(401) 221-0007	Zack Dale, MD	 
+NM	NM	MD	Secure message to Amion app	401-325-0071	Nazim Khan, MD	 
+GL	GL	MD	Secure message to Amion app	401-325-0012	Gin Yi Lee,MD	 
+EM	EM	MD	Secure message to Amion app	401-325-0044	Erika Mengalle, DO	 
+SS	SS	MD	 Not ready to receive secure messages. Click for more info.	(401)-221-0734	Senin Shah, MD	 
+YS	YS	MD	Secure message to Amion app	401-325-0010	Yi Yun Shi, MD	 
+HK	HK	MD	Secure message to Amion app	401-350-0336	Hazera Khatun, MD	 
+HW	HW	MD	Secure message to Amion app	401-350-0336	Helen Walsh, MD	 
+AH	AH	MD	 Not ready to receive secure messages. Click for more info.	401-325-0814	Ahlaa Salim, MD	 
+OK	OK	MD	Secure message to Amion app	401-325-0816	Omer Kamal, MD	 
+RJ	RJ	MD	Secure message to Amion app	401-350-4930	Rafael Jedlinski, MD	 
+SI	SI	MD	Secure message to Amion app	401-350-8240	Selina Imboywa,MD	 
+RC	RC	MD	Secure message to Amion app	401-350-8395	Rosa Constantino, MD	 
+FH	FH	MD	 Not ready to receive secure messages. Click for more info.	401-350-4625	FNU Farukhuddin, MD	 
+KP	KP	NP	Secure message to Amion app	401-350-4893	Kerry Lynn Perez, NP	 
+AE	AE	MD	 Not ready to receive secure messages. Click for more info.	401-221-0348	Ahmed Elshazly, MD	 
+EB	EB	MD	Secure message to Amion app	401-872-0007	Enrique Baez Delgado,MD	 
+RS	RS	MD	Secure message to Amion app	401-460-0401	Reeve D'Silva, MD	 
+RG	RG	MD	Secure message to Amion app	401-785-6224	Radu Grovu,MD	 
+CJ	CJ	MD	Secure message to Amion app	401-785-5246	Charlotta Jornlid, DO	 
+MS	MS	MD	Secure message to Amion app	401-460-1029	Mohammad Fawad Saeeduddin,MD	 
+AT	AT	MD	Secure message to Amion app	401-350-0308	Anoop Titus, MD	 
+YH	YH	MD	Secure message to Amion app	401-460-1262	Yihao Sun, MD	 
+XL	XL	MD	 Not ready to receive secure messages. Click for more info.	401-460-0493	Xiuhong Lyu, MD	 
+NO	NO	NP	 Not ready to receive secure messages. Click for more info.	401-221-0725	Nicole Oksanish, NP	 
+MA	MA	MD	Secure message to Amion app	401-221-0194	Mahmoud Amreia, MD	 
+LM	LM	MD	Secure message to Amion app	401-325-8743	Luka Machavariani, MD	 
+MQ	MQ	MD	 Not ready to receive secure messages. Click for more info.	401-221-0193	Mohammad Qazziha, MD	 
+CM	CM	MD	Secure message to Amion app	401-221-0192	Christopher Manners, MD	 
+AI	AI	MD	Secure message to Amion app	401-221-0171	Anila Hussain, MD

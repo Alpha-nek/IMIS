@@ -90,7 +90,11 @@ def load_providers_from_csv():
             st.session_state.providers_df = df
             st.session_state.providers_loaded = True
             
-            st.success(f"✅ Successfully loaded {len(df)} providers!")
+            # Auto-save providers
+            from core.data_manager import save_providers
+            save_providers(df, st.session_state.get('provider_rules', {}))
+            
+            st.success(f"✅ Successfully loaded and saved {len(df)} providers!")
             
             # Show preview
             with st.expander("Preview loaded data"):
@@ -263,4 +267,9 @@ def provider_rules_panel():
     # Save rules
     if st.button("💾 Save Rules", key=f"save_rules_{selected_provider}"):
         st.session_state.provider_rules[selected_provider] = provider_rules
+        
+        # Auto-save providers with updated rules
+        from core.data_manager import save_providers
+        save_providers(st.session_state.providers_df, st.session_state.provider_rules)
+        
         st.success(f"Rules saved for {selected_provider}!")
