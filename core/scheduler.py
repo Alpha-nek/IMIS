@@ -63,18 +63,19 @@ def generate_schedule(year: int, month: int, providers: List[str],
 def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -> Dict:
     """
     Ensure all providers have default rules initialized.
+    HARD RULE: Default shift preferences are False (opt-in system).
     """
     try:
         for provider in providers:
             if provider not in provider_rules:
                 provider_rules[provider] = {
                     "shift_preferences": {
-                        "R12": True,
-                        "A12": True,
-                        "A10": True,
-                        "N12": True,
-                        "NB": True,
-                        "APP": True
+                        "R12": False,  # HARD RULE: Default to False, must opt-in
+                        "A12": False,  # HARD RULE: Default to False, must opt-in
+                        "A10": False,  # HARD RULE: Default to False, must opt-in
+                        "N12": False,  # HARD RULE: Default to False, must opt-in
+                        "NB": False,   # HARD RULE: Default to False, must opt-in
+                        "APP": False   # HARD RULE: Default to False, must opt-in
                     },
                     "vacations": [],
                     "unavailable_dates": []
@@ -83,12 +84,12 @@ def _ensure_default_provider_rules(providers: List[str], provider_rules: Dict) -
                 # If provider rules exist but are not a dict, initialize them
                 provider_rules[provider] = {
                     "shift_preferences": {
-                        "R12": True,
-                        "A12": True,
-                        "A10": True,
-                        "N12": True,
-                        "NB": True,
-                        "APP": True
+                        "R12": False,  # HARD RULE: Default to False, must opt-in
+                        "A12": False,  # HARD RULE: Default to False, must opt-in
+                        "A10": False,  # HARD RULE: Default to False, must opt-in
+                        "N12": False,  # HARD RULE: Default to False, must opt-in
+                        "NB": False,   # HARD RULE: Default to False, must opt-in
+                        "APP": False   # HARD RULE: Default to False, must opt-in
                     },
                     "vacations": [],
                     "unavailable_dates": []
@@ -332,17 +333,19 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                          global_rules: RuleConfig, provider_shifts: Dict,
                          year: int = None, month: int = None) -> List[SEvent]:
     """
-    Fill remaining unfilled shifts with HARD RULES:
-    1. NO provider exceeds expected shifts unless manually edited
-    2. NO provider gets assigned to shift types against their preferences unless manually edited
+    Fill remaining unfilled shifts with WORKFORCE PLANNING APPROACH:
+    1. NO provider exceeds expected shifts - PERIOD
+    2. NO provider gets assigned to shift types against their preferences - PERIOD
+    3. Allow gaps to be visible for workforce planning (especially rounder shifts)
+    4. Only fill critical gaps when providers are significantly under their expected shifts
+    5. Prioritize providers with the fewest shifts to balance workload
     """
     events = []
     
     # Define all shift types - prioritize rounder shifts to avoid gaps
-    # Order: Rounder shifts first, then admitting, then night shifts, then APP
     priority_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
     
-    # Pre-calculate expected shifts for all providers to avoid repeated calculations
+    # Pre-calculate expected shifts for all providers
     provider_expected_shifts = {}
     for provider in providers:
         if provider not in APP_PROVIDER_INITIALS:
@@ -351,47 +354,54 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 provider, year, month, provider_rules, global_rules
             )
     
+    # Track how many additional shifts each provider gets from this function
+    additional_shifts_count = {p: 0 for p in providers}
+    
     for day in month_days:
         for shift_type in priority_shift_types:
             if shift_type not in shift_capacity:
                 continue
                 
             capacity = shift_capacity[shift_type]
-            
-            # Count how many shifts of this type are already assigned on this day
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
-            
-            # Fill remaining slots, but with HARD RULES
             remaining_slots = capacity - assigned_count
             
             if remaining_slots <= 0:
                 continue
+            
+            # WORKFORCE PLANNING RULE: For rounder shifts (R12), be very conservative
+            # Allow gaps to be visible so you can see when you need more providers
+            if shift_type == "R12":
+                # Only fill rounder gaps if we have providers who are significantly under their expected shifts
+                # This makes gaps visible for workforce planning
+                safety_buffer = 3  # Larger buffer for rounder shifts
+            else:
+                # For other shift types, be moderately conservative
+                safety_buffer = 2
             
             # Get all available providers for this shift type on this day
             all_available = get_available_providers_for_shift(
                 day, shift_type, providers, provider_shifts, provider_rules
             )
             
-            # HARD RULE 1: Filter providers who are at or above their expected shifts
-            # NO EXCEPTIONS - providers cannot exceed expected shifts
+            # WORKFORCE PLANNING RULE 1: Only providers SIGNIFICANTLY below expected shifts
             available_providers_for_day = []
             for provider in all_available:
                 if provider in APP_PROVIDER_INITIALS:
-                    # For APP providers, use a reasonable limit
+                    # For APP providers, be very conservative
                     current_shifts = len(provider_shifts.get(provider, []))
-                    if current_shifts < 20:  # Reasonable limit for APP providers
+                    if current_shifts < 12:  # Even lower limit for APP providers
                         available_providers_for_day.append(provider)
                 else:
                     current_shifts = len(provider_shifts.get(provider, []))
                     expected_shifts = provider_expected_shifts.get(provider, 15)
                     
-                    # HARD RULE: Only include providers who are BELOW their expected shifts
-                    # NO tolerance, NO exceptions - this prevents over-assignment
-                    if current_shifts < expected_shifts:
+                    # WORKFORCE PLANNING: Only if provider is significantly below expected
+                    # This creates visible gaps for workforce planning
+                    if current_shifts < (expected_shifts - safety_buffer):
                         available_providers_for_day.append(provider)
             
             # HARD RULE 2: Double-check shift type preferences
-            # NO provider gets assigned to shift types they don't prefer
             strictly_available_providers = []
             for provider in available_providers_for_day:
                 provider_rule = provider_rules.get(provider, {})
@@ -401,23 +411,62 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 if shift_preferences.get(shift_type, False):  # Must be explicitly True
                     strictly_available_providers.append(provider)
             
-            # Use the strictly filtered list
             available_providers_for_day = strictly_available_providers
             
-            # Only fill slots if we have available providers
-            slots_to_fill = min(remaining_slots, len(available_providers_for_day))
+            # WORKFORCE PLANNING RULE 3: For rounder shifts, require multiple available providers
+            # This ensures gaps are visible when you don't have enough rounder-capable providers
+            if shift_type == "R12":
+                if len(available_providers_for_day) < 3:  # Require more options for rounder shifts
+                    continue  # Skip this slot - let the gap be visible
+            else:
+                if len(available_providers_for_day) < 2:  # Standard requirement for other shifts
+                    continue
+            
+            # Sort providers by total shifts (current + additional from this function)
+            # This ensures we prioritize those with the fewest shifts
+            def get_total_shifts(provider):
+                current = len(provider_shifts.get(provider, []))
+                additional = additional_shifts_count.get(provider, 0)
+                return current + additional
+            
+            available_providers_for_day.sort(key=get_total_shifts)
+            
+            # WORKFORCE PLANNING RULE 4: Be very conservative about filling slots
+            # Only fill critical gaps, allow others to remain visible
+            if shift_type == "R12":
+                # For rounder shifts, only fill if it's a critical gap (weekend or high-demand day)
+                is_weekend = day.weekday() >= 5
+                is_high_demand = day.weekday() in [0, 1, 2, 3, 4]  # Monday-Friday
+                
+                if not (is_weekend or is_high_demand):
+                    continue  # Skip non-critical rounder gaps
+                
+                # Only fill one slot at a time for rounder shifts
+                slots_to_fill = min(1, remaining_slots, len(available_providers_for_day))
+            else:
+                # For other shifts, be slightly more aggressive but still conservative
+                slots_to_fill = min(1, remaining_slots, len(available_providers_for_day))
             
             for _ in range(slots_to_fill):
                 if not available_providers_for_day:
                     break
-                    
-                # Select provider (prefer those with fewer shifts)
-                provider = select_provider_with_fewer_shifts(available_providers_for_day, provider_shifts)
-                if not provider:
-                    break
                 
-                # Remove selected provider from available list for this iteration
+                # Take the provider with the fewest total shifts
+                provider = available_providers_for_day[0]
                 available_providers_for_day.remove(provider)
+                
+                # Double-check that this assignment won't exceed expected shifts
+                current_shifts = len(provider_shifts.get(provider, []))
+                additional_shifts = additional_shifts_count.get(provider, 0)
+                total_after_assignment = current_shifts + additional_shifts + 1
+                
+                if provider in APP_PROVIDER_INITIALS:
+                    if total_after_assignment >= 18:  # Even lower hard limit for APP providers
+                        continue
+                else:
+                    expected_shifts = provider_expected_shifts.get(provider, 15)
+                    if total_after_assignment >= expected_shifts:  # Hard limit for regular providers
+                        continue
                 
                 # Create shift event
                 shift_config = get_shift_config(shift_type)
@@ -443,6 +492,7 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 
                 events.append(event)
                 provider_shifts[provider].append(event)
+                additional_shifts_count[provider] += 1
     
     return events
 
