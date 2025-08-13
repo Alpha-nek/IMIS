@@ -13,7 +13,7 @@ from models.constants import DEFAULT_SHIFT_TYPES
 
 def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
-    Create a grid view of the schedule with shift types as rows and dates as columns.
+    Create a grid view of the schedule with multiple rows per shift type based on capacity.
     Handles both SEvent objects and dictionaries.
     """
     # Get month days
@@ -21,67 +21,76 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     for day in range(1, calendar.monthrange(year, month)[1] + 1):
         month_days.append(date(year, month, day))
     
-    # Define the correct order of shift types for the grid
+    # Define the correct order of shift types for the grid with capacities
     shift_type_order = [
-        {"key": "R12", "label": "7am–7pm Rounder", "color": "#16a34a"},
-        {"key": "A12", "label": "7am–7pm Admitter", "color": "#f59e0b"},
-        {"key": "A10", "label": "10am–10pm Admitter", "color": "#ef4444"},
-        {"key": "N12", "label": "7pm–7am (Night)", "color": "#7c3aed"},
-        {"key": "NB", "label": "Night Bridge", "color": "#06b6d4"},
-        {"key": "APP", "label": "APP Provider", "color": "#8b5cf6"},
+        {"key": "R12", "label": "7am–7pm Rounder", "color": "#16a34a", "capacity": 13},
+        {"key": "A12", "label": "7am–7pm Admitter", "color": "#f59e0b", "capacity": 1},
+        {"key": "A10", "label": "10am–10pm Admitter", "color": "#ef4444", "capacity": 2},
+        {"key": "N12", "label": "7pm–7am (Night)", "color": "#7c3aed", "capacity": 4},
+        {"key": "NB", "label": "Night Bridge", "color": "#06b6d4", "capacity": 1},
+        {"key": "APP", "label": "APP Provider", "color": "#8b5cf6", "capacity": 2},
     ]
     
-    # Create grid data with shift types as rows
+    # Create grid data with multiple rows per shift type
     grid_data = []
     
     for shift_type in shift_type_order:
         shift_key = shift_type["key"]
         shift_label = shift_type["label"]
+        capacity = shift_type["capacity"]
+        color = shift_type["color"]
         
-        row = {
-            "Shift Type": shift_label,
-            "Shift Key": shift_key,
-            "Color": shift_type["color"]
-        }
-        
-        # Add a column for each day of the month
-        for day in month_days:
-            day_key = day.strftime("%m/%d")
-            day_events = []
+        # Create multiple rows for this shift type based on capacity
+        for slot_num in range(1, capacity + 1):
+            row = {
+                "Shift Type": shift_label,
+                "Slot": f"Slot {slot_num}",
+                "Shift Key": shift_key,
+                "Color": color,
+                "Capacity": capacity
+            }
             
-            for e in events:
-                # Handle both SEvent objects and dictionaries
-                if hasattr(e, 'start'):
-                    # It's an SEvent object
-                    event_date = e.start.date()
-                    event_shift_type = e.extendedProps.get("shift_type")
-                    provider = e.extendedProps.get("provider", "")
-                elif isinstance(e, dict) and 'start' in e:
-                    # It's a dictionary with start field
-                    try:
-                        event_date = datetime.fromisoformat(e['start']).date()
-                        event_shift_type = e.get('extendedProps', {}).get("shift_type")
-                        provider = e.get('extendedProps', {}).get("provider", "")
-                    except (ValueError, TypeError):
-                        continue
-                else:
-                    # Unknown format, skip
-                    continue
+            # Add a column for each day of the month
+            for day in month_days:
+                day_key = day.strftime("%m/%d")
+                day_events = []
                 
-                if event_date == day and event_shift_type == shift_key:
-                    day_events.append(provider)
+                for e in events:
+                    # Handle both SEvent objects and dictionaries
+                    if hasattr(e, 'start'):
+                        # It's an SEvent object
+                        event_date = e.start.date()
+                        event_shift_type = e.extendedProps.get("shift_type")
+                        provider = e.extendedProps.get("provider", "")
+                    elif isinstance(e, dict) and 'start' in e:
+                        # It's a dictionary with start field
+                        try:
+                            event_date = datetime.fromisoformat(e['start']).date()
+                            event_shift_type = e.get('extendedProps', {}).get("shift_type")
+                            provider = e.get('extendedProps', {}).get("provider", "")
+                        except (ValueError, TypeError):
+                            continue
+                    else:
+                        # Unknown format, skip
+                        continue
+                    
+                    if event_date == day and event_shift_type == shift_key:
+                        day_events.append(provider)
+                
+                # Assign provider to this slot if available
+                if slot_num <= len(day_events):
+                    row[day_key] = day_events[slot_num - 1]
+                else:
+                    row[day_key] = ""
             
-            # Take only the first provider (one provider per cell)
-            row[day_key] = day_events[0] if day_events else ""
-        
-        grid_data.append(row)
+            grid_data.append(row)
     
     return pd.DataFrame(grid_data)
 
 def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
     Render the schedule grid with professional styling and color coding.
-    Shows shift types as rows and dates as columns with editable dropdowns.
+    Shows multiple rows per shift type based on capacity with editable dropdowns.
     """
     if not events:
         st.info("No schedule to display. Generate a schedule first.")
@@ -93,8 +102,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.info("No events found for this month.")
         return df
     
-    # Get the date columns (all columns except Shift Type, Shift Key, Color)
-    date_cols = [col for col in df.columns if col not in ["Shift Type", "Shift Key", "Color"]]
+    # Get the date columns (all columns except Shift Type, Slot, Shift Key, Color, Capacity)
+    date_cols = [col for col in df.columns if col not in ["Shift Type", "Slot", "Shift Key", "Color", "Capacity"]]
     
     # Get available providers
     if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
@@ -106,58 +115,72 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     provider_options = ["None"] + providers
     
     st.markdown("### 📊 Schedule Grid View")
-    st.markdown("**Shift Types:** 7am–7pm Rounder | 7am–7pm Admitter | 10am–10pm Admitter | 7pm–7am (Night) | Night Bridge | APP Provider")
-    st.markdown("**Instructions:** Use the dropdowns below to assign providers to shifts. Changes will be applied when you click 'Apply Grid Changes to Calendar'.")
+    st.markdown("**Shift Types:** 7am–7pm Rounder (13 slots) | 7am–7pm Admitter (1 slot) | 10am–10pm Admitter (2 slots) | 7pm–7am Night (4 slots) | Night Bridge (1 slot) | APP Provider (2 slots)")
+    st.markdown("**Instructions:** Each row represents a slot for that shift type. Use the dropdowns to assign providers to specific slots.")
     
     # Add CSS for better grid styling
     st.markdown("""
     <style>
         .grid-container {
             overflow-x: auto;
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
+            padding: 20px;
+            border: 3px solid #e0e0e0;
+            border-radius: 12px;
             background: #f8f9fa;
-            margin: 10px 0;
+            margin: 15px 0;
             max-width: 100%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         
         .grid-table {
             border-collapse: separate;
-            border-spacing: 2px;
+            border-spacing: 3px;
             width: max-content;
             min-width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
         }
         
         .grid-header {
-            background: #1f77b4;
+            background: linear-gradient(135deg, #1f77b4, #1565c0);
             color: white;
             font-weight: bold;
-            padding: 12px 8px;
+            padding: 15px 10px;
             text-align: center;
-            border: 1px solid #1565c0;
-            min-width: 150px;
+            border: 1px solid #0d47a1;
+            min-width: 120px;
             position: sticky;
             top: 0;
             z-index: 10;
+            font-size: 14px;
         }
         
         .grid-header:first-child {
             position: sticky;
             left: 0;
             z-index: 20;
-            min-width: 200px;
-            background: #1565c0;
+            min-width: 180px;
+            background: linear-gradient(135deg, #1565c0, #0d47a1);
+        }
+        
+        .grid-header:nth-child(2) {
+            position: sticky;
+            left: 180px;
+            z-index: 20;
+            min-width: 100px;
+            background: linear-gradient(135deg, #1565c0, #0d47a1);
         }
         
         .grid-cell {
             background: white;
             border: 2px solid #dee2e6;
-            padding: 8px;
-            min-width: 150px;
-            min-height: 50px;
+            padding: 12px 8px;
+            min-width: 120px;
+            min-height: 60px;
             text-align: center;
             vertical-align: middle;
+            font-size: 13px;
         }
         
         .grid-cell:first-child {
@@ -167,38 +190,70 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             background: #f8f9fa;
             border-right: 3px solid #1f77b4;
             font-weight: bold;
-            min-width: 200px;
+            min-width: 180px;
+            text-align: left;
+        }
+        
+        .grid-cell:nth-child(2) {
+            position: sticky;
+            left: 180px;
+            z-index: 15;
+            background: #f8f9fa;
+            border-right: 3px solid #1f77b4;
+            font-weight: bold;
+            min-width: 100px;
+            text-align: center;
         }
         
         .stSelectbox > div > div {
-            min-width: 140px;
-            min-height: 40px;
+            min-width: 110px;
+            min-height: 45px;
         }
         
         .stSelectbox select {
-            font-size: 14px;
+            font-size: 13px;
             padding: 8px;
         }
         
         .shift-type-label {
-            background: linear-gradient(45deg, #1f77b4, #ff7f0e);
             color: white;
-            padding: 10px;
+            padding: 8px 12px;
             border-radius: 6px;
             text-align: center;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 13px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: inline-block;
+            width: 100%;
+        }
+        
+        .slot-label {
+            background: #6c757d;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
         }
         
         .scroll-hint {
-            background: #e3f2fd;
-            border: 1px solid #2196f3;
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+            border: 2px solid #2196f3;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            text-align: center;
+            color: #1565c0;
+            font-weight: bold;
+        }
+        
+        .capacity-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
             border-radius: 6px;
             padding: 10px;
             margin: 10px 0;
-            text-align: center;
-            color: #1565c0;
+            color: #856404;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -209,7 +264,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     # Add scroll hint
     st.markdown("""
     <div class="scroll-hint">
-        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type column stays fixed while you scroll through the dates.
+        💡 <strong>Tip:</strong> Scroll horizontally to see all days. The shift type and slot columns stay fixed while you scroll through the dates.
     </div>
     """, unsafe_allow_html=True)
     
@@ -219,22 +274,13 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     
     # Create a form for the grid
     with st.form("schedule_grid_form"):
-        # Define shift colors for the visual grid
-        shift_colors = {
-            "7am–7pm Rounder": "#16a34a",
-            "7am–7pm Admitter": "#f59e0b", 
-            "10am–10pm Admitter": "#ef4444",
-            "7pm–7am (Night)": "#7c3aed",
-            "Night Bridge": "#06b6d4",
-            "APP Provider": "#8b5cf6"
-        }
-        
         # Create the grid using HTML table for better control
         grid_html = """
         <table class="grid-table">
             <thead>
                 <tr>
                     <th class="grid-header">Shift Type</th>
+                    <th class="grid-header">Slot</th>
         """
         
         # Add date headers
@@ -247,15 +293,21 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             <tbody>
         """
         
-        # Create rows for each shift type
+        # Create rows for each shift type slot
         updated_data = {}
+        current_shift_type = None
         
         for idx, row in df.iterrows():
             shift_type = row["Shift Type"]
             shift_key = row["Shift Key"]
+            slot = row["Slot"]
+            color = row["Color"]
             
-            # Get color for this shift type
-            color = shift_colors.get(shift_type, "#ffffff")
+            # Add a separator row when shift type changes
+            if current_shift_type != shift_type:
+                if current_shift_type is not None:
+                    grid_html += '<tr><td colspan="' + str(len(date_cols) + 2) + '" style="height: 10px; background: #f8f9fa;"></td></tr>'
+                current_shift_type = shift_type
             
             # Start row
             grid_html += f"""
@@ -265,15 +317,20 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                             {shift_type}
                         </div>
                     </td>
+                    <td class="grid-cell">
+                        <div class="slot-label">
+                            {slot}
+                        </div>
+                    </td>
             """
             
             # Add cells for each date
             for date_col in date_cols:
                 current_provider = row[date_col] if row[date_col] else "None"
-                dropdown_key = f"grid_{shift_key}_{date_col}"
+                dropdown_key = f"grid_{shift_key}_{slot.replace(' ', '_')}_{date_col}"
                 
                 grid_html += f'<td class="grid-cell">'
-                grid_html += f'<div style="min-height: 50px; display: flex; align-items: center; justify-content: center;">'
+                grid_html += f'<div style="min-height: 60px; display: flex; align-items: center; justify-content: center;">'
                 
                 # We'll add the dropdown here, but need to handle it with Streamlit
                 grid_html += f'<div id="{dropdown_key}_container"></div>'
@@ -281,9 +338,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 
                 # Store the selection for later processing
                 if current_provider != "None":
-                    updated_data[f"{shift_key}_{date_col}"] = current_provider
+                    updated_data[f"{shift_key}_{slot.replace(' ', '_')}_{date_col}"] = current_provider
                 else:
-                    updated_data[f"{shift_key}_{date_col}"] = ""
+                    updated_data[f"{shift_key}_{slot.replace(' ', '_')}_{date_col}"] = ""
             
             grid_html += "</tr>"
         
@@ -297,25 +354,36 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         
         # Now add the Streamlit dropdowns in a more organized way
         st.markdown("### Provider Assignments")
-        st.markdown("Use the dropdowns below to assign providers to shifts:")
+        st.markdown("Use the dropdowns below to assign providers to specific slots:")
         
-        # Create a more compact layout for the dropdowns
+        # Group by shift type for better organization
+        current_shift_type = None
+        
         for idx, row in df.iterrows():
             shift_type = row["Shift Type"]
             shift_key = row["Shift Key"]
+            slot = row["Slot"]
             
-            st.markdown(f"**{shift_type}**")
+            # Add shift type header when it changes
+            if current_shift_type != shift_type:
+                if current_shift_type is not None:
+                    st.markdown("---")
+                current_shift_type = shift_type
+                
+                # Get capacity for this shift type
+                capacity = row["Capacity"]
+                st.markdown(f"**{shift_type}** ({capacity} slots)")
             
-            # Create columns for this shift type's dates
+            # Create columns for this slot's dates
             cols = st.columns(len(date_cols))
             
             for i, date_col in enumerate(date_cols):
                 with cols[i]:
                     current_provider = row[date_col] if row[date_col] else "None"
-                    dropdown_key = f"grid_{shift_key}_{date_col}"
+                    dropdown_key = f"grid_{shift_key}_{slot.replace(' ', '_')}_{date_col}"
                     
                     selected_provider = st.selectbox(
-                        f"{date_col}",
+                        f"{slot} - {date_col}",
                         options=provider_options,
                         index=provider_options.index(current_provider) if current_provider in provider_options else 0,
                         key=dropdown_key,
@@ -324,11 +392,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                     
                     # Store the selection
                     if selected_provider != "None":
-                        updated_data[f"{shift_key}_{date_col}"] = selected_provider
+                        updated_data[f"{shift_key}_{slot.replace(' ', '_')}_{date_col}"] = selected_provider
                     else:
-                        updated_data[f"{shift_key}_{date_col}"] = ""
-            
-            st.markdown("---")
+                        updated_data[f"{shift_key}_{slot.replace(' ', '_')}_{date_col}"] = ""
         
         # Submit button
         submitted = st.form_submit_button("🔄 Apply Grid Changes to Calendar", type="primary")
@@ -347,97 +413,6 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     
     # Close the grid container
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Display read-only summary
-    st.markdown("---")
-    st.markdown("#### 📈 Schedule Summary")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_events = len(events)
-        st.metric("Total Events", total_events)
-    
-    with col2:
-        unique_providers = set()
-        for event in events:
-            if hasattr(event, 'extendedProps'):
-                provider = event.extendedProps.get("provider", "")
-            elif isinstance(event, dict) and 'extendedProps' in event:
-                provider = event['extendedProps'].get("provider", "")
-            else:
-                continue
-            if provider:
-                unique_providers.add(provider)
-        st.metric("Providers Used", len(unique_providers))
-    
-    with col3:
-        # Count days with events
-        days_with_events = 0
-        for date_col in date_cols:
-            if any(df[date_col] != ""):
-                days_with_events += 1
-        st.metric("Days with Events", days_with_events)
-    
-    with col4:
-        total_days = len(date_cols)
-        coverage_percent = (days_with_events / total_days * 100) if total_days > 0 else 0
-        st.metric("Coverage", f"{coverage_percent:.1f}%")
-    
-    # Provider statistics
-    st.markdown("### 📊 Provider Statistics")
-    
-    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
-        providers_df = st.session_state.providers_df
-        
-        # Count by type
-        physician_count = len(providers_df[providers_df["type"] == "Physician"])
-        app_count = len(providers_df[providers_df["type"] == "APP"])
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Providers", len(providers_df))
-        
-        with col2:
-            st.metric("Physicians", physician_count)
-        
-        with col3:
-            st.metric("APPs", app_count)
-        
-        # Show provider utilization
-        st.markdown("#### Provider Utilization")
-        provider_counts = {}
-        
-        for event in events:
-            if hasattr(event, 'extendedProps'):
-                provider = event.extendedProps.get("provider", "")
-            elif isinstance(event, dict) and 'extendedProps' in event:
-                provider = event['extendedProps'].get("provider", "")
-            else:
-                continue
-            
-            if provider:
-                provider_counts[provider] = provider_counts.get(provider, 0) + 1
-        
-        if provider_counts:
-            # Create a DataFrame for provider utilization
-            utilization_df = pd.DataFrame([
-                {"Provider": provider, "Shifts": count}
-                for provider, count in provider_counts.items()
-            ]).sort_values("Shifts", ascending=False)
-            
-            st.dataframe(
-                utilization_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Provider": st.column_config.TextColumn("Provider", width="medium"),
-                    "Shifts": st.column_config.NumberColumn("Shifts", width="small")
-                }
-            )
-    
-    return df
 
 def apply_grid_changes_to_calendar(updated_data: Dict[str, str], original_events: List[Any], year: int, month: int) -> List[Any]:
     """
@@ -467,7 +442,12 @@ def apply_grid_changes_to_calendar(updated_data: Dict[str, str], original_events
     
     # Process grid changes
     for grid_key, new_provider in updated_data.items():
-        shift_type, date_str = grid_key.split('_', 1)
+        # Parse the grid key: shift_type_slot_date
+        parts = grid_key.split('_', 2)
+        if len(parts) != 3:
+            continue
+            
+        shift_type, slot, date_str = parts
         
         # Parse date
         try:
@@ -476,6 +456,7 @@ def apply_grid_changes_to_calendar(updated_data: Dict[str, str], original_events
         except (ValueError, TypeError):
             continue
         
+        # For now, we'll use the original key format (without slot) for compatibility
         key = f"{shift_type}_{date_str}"
         
         if new_provider:  # Provider assigned
