@@ -658,115 +658,10 @@ def render_desktop_interface():
         # Calendar display
         if st.session_state.events:
             st.markdown('<div class="calendar-container">', unsafe_allow_html=True)
-            # Debug info
-            st.write(f"Debug: Found {len(st.session_state.events)} events")
-            if st.session_state.events:
-                st.write(f"Debug: First event type: {type(st.session_state.events[0])}")
-                if hasattr(st.session_state.events[0], 'title'):
-                    st.write(f"Debug: First event title: {st.session_state.events[0].title}")
-                if hasattr(st.session_state.events[0], 'extendedProps'):
-                    st.write(f"Debug: First event extendedProps: {st.session_state.events[0].extendedProps}")
-                if hasattr(st.session_state.events[0], 'start'):
-                    st.write(f"Debug: First event start: {st.session_state.events[0].start}")
             render_calendar(st.session_state.events)
             st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.info("No schedule available. Generate a schedule first.")
-        
-        # Debug test section
-        st.markdown("### 🐛 Debug Test Section")
-        if st.button("🔍 Run Debug Test", type="secondary"):
-            st.markdown("#### Debug Results:")
-            
-            # Test 1: Check session state
-            st.write("**Test 1: Session State Check**")
-            st.write(f"- Events in session state: {'events' in st.session_state}")
-            if 'events' in st.session_state:
-                st.write(f"- Number of events: {len(st.session_state.events)}")
-                st.write(f"- Events type: {type(st.session_state.events)}")
-                if st.session_state.events:
-                    st.write(f"- First event type: {type(st.session_state.events[0])}")
-                    st.write(f"- First event: {st.session_state.events[0]}")
-            
-            # Test 2: Check if events are SEvent objects
-            st.write("**Test 2: Event Object Check**")
-            if st.session_state.events:
-                for i, event in enumerate(st.session_state.events[:3]):  # Check first 3 events
-                    st.write(f"Event {i+1}:")
-                    st.write(f"  - Type: {type(event)}")
-                    st.write(f"  - Has 'start' attribute: {hasattr(event, 'start')}")
-                    st.write(f"  - Has 'extendedProps' attribute: {hasattr(event, 'extendedProps')}")
-                    st.write(f"  - Has 'to_json_event' method: {hasattr(event, 'to_json_event')}")
-                    if hasattr(event, 'start'):
-                        st.write(f"  - Start date: {event.start}")
-                    if hasattr(event, 'extendedProps'):
-                        st.write(f"  - Extended props: {event.extendedProps}")
-            
-            # Test 3: Try to convert events to JSON
-            st.write("**Test 3: JSON Conversion Test**")
-            if st.session_state.events:
-                try:
-                    json_events = []
-                    for event in st.session_state.events[:2]:  # Test first 2 events
-                        if hasattr(event, 'to_json_event'):
-                            json_event = event.to_json_event()
-                            json_events.append(json_event)
-                            st.write(f"✅ Successfully converted event to JSON: {json_event}")
-                        else:
-                            st.write(f"❌ Event missing to_json_event method: {event}")
-                    st.write(f"Successfully converted {len(json_events)} events to JSON")
-                except Exception as e:
-                    st.write(f"❌ Error converting to JSON: {e}")
-            
-            # Test 4: Check calendar component
-            st.write("**Test 4: Calendar Component Test**")
-            try:
-                # Use the already imported render_calendar
-                st.write("✅ Calendar component imported successfully")
-                st.write(f"Calendar function type: {type(render_calendar)}")
-            except Exception as e:
-                st.write(f"❌ Error with calendar component: {e}")
-            
-            # Test 5: Check grid component
-            st.write("**Test 5: Grid Component Test**")
-            try:
-                # Use the already imported render_schedule_grid
-                st.write("✅ Grid component imported successfully")
-                st.write(f"Grid function type: {type(render_schedule_grid)}")
-            except Exception as e:
-                st.write(f"❌ Error with grid component: {e}")
-            
-            # Test 6: Generate test events
-            st.write("**Test 6: Generate Test Events**")
-            if st.button("🎯 Generate Test Events", type="primary"):
-                try:
-                    from models.data_models import SEvent
-                    import uuid
-                    from datetime import datetime, date
-                    
-                    # Create a simple test event
-                    test_event = SEvent(
-                        id=str(uuid.uuid4()),
-                        title="Test Event - JT",
-                        start=datetime.combine(date.today(), datetime.min.time()),
-                        end=datetime.combine(date.today(), datetime.min.time()),
-                        backgroundColor="#16a34a",
-                        extendedProps={
-                            "provider": "JT",
-                            "shift_type": "R12",
-                            "shift_label": "7am–7pm Rounder"
-                        }
-                    )
-                    
-                    st.session_state.events = [test_event]
-                    st.success("✅ Test event created successfully!")
-                    st.write(f"Test event: {test_event}")
-                    st.write(f"Test event JSON: {test_event.to_json_event()}")
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error creating test event: {e}")
-                    st.write(f"Error details: {traceback.format_exc()}")
         
         # Schedule generation
         st.markdown("### 🚀 Generate Schedule")
@@ -1243,12 +1138,6 @@ def render_desktop_interface():
     with tab4:
         if st.session_state.events:
             try:
-                # Debug info
-                st.write(f"Grid Debug: Found {len(st.session_state.events)} events")
-                if st.session_state.events:
-                    st.write(f"Grid Debug: First event type: {type(st.session_state.events[0])}")
-                    if hasattr(st.session_state.events[0], 'extendedProps'):
-                        st.write(f"Grid Debug: First event extendedProps: {st.session_state.events[0].extendedProps}")
                 # Render grid view (now includes editing functionality)
                 render_schedule_grid(st.session_state.events, year, month)
             except Exception as e:
@@ -1257,77 +1146,7 @@ def render_desktop_interface():
         else:
             st.info("No schedule available. Generate a schedule to view it in grid format.")
         
-        # Grid Debug Test
-        st.markdown("### 🐛 Grid Debug Test")
-        if st.button("🔍 Test Grid Component", type="secondary"):
-            st.markdown("#### Grid Debug Results:")
-            
-            # Test grid component directly
-            st.write("**Test 1: Grid Component Import**")
-            try:
-                # Use the already imported render_schedule_grid
-                st.write("✅ Grid components imported successfully")
-                st.write(f"Grid function type: {type(render_schedule_grid)}")
-            except Exception as e:
-                st.write(f"❌ Error with grid components: {e}")
-                st.write(f"Error details: {traceback.format_exc()}")
-            
-            # Test grid creation with test data
-            st.write("**Test 2: Grid Creation Test**")
-            if st.session_state.events:
-                try:
-                    # Import create_schedule_grid for this test
-                    from ui.grid import create_schedule_grid
-                    df = create_schedule_grid(st.session_state.events, year, month)
-                    st.write(f"✅ Grid DataFrame created successfully")
-                    st.write(f"- DataFrame shape: {df.shape}")
-                    st.write(f"- DataFrame columns: {list(df.columns)}")
-                    if not df.empty:
-                        st.write(f"- First few rows:")
-                        st.dataframe(df.head())
-                except Exception as e:
-                    st.write(f"❌ Error creating grid DataFrame: {e}")
-                    st.write(f"Error details: {traceback.format_exc()}")
-            else:
-                st.write("❌ No events available for grid test")
-            
-            # Test with sample data
-            st.write("**Test 3: Sample Data Test**")
-            if st.button("🎯 Test with Sample Data", type="primary"):
-                try:
-                    from models.data_models import SEvent
-                    import uuid
-                    from datetime import datetime, date
-                    
-                    # Create sample events for testing
-                    sample_events = []
-                    for i in range(3):
-                        event = SEvent(
-                            id=str(uuid.uuid4()),
-                            title=f"Sample Event {i+1} - JT",
-                            start=datetime.combine(date.today(), datetime.min.time()),
-                            end=datetime.combine(date.today(), datetime.min.time()),
-                            backgroundColor="#16a34a",
-                            extendedProps={
-                                "provider": "JT",
-                                "shift_type": "R12",
-                                "shift_label": "7am–7pm Rounder"
-                            }
-                        )
-                        sample_events.append(event)
-                    
-                    st.write(f"✅ Created {len(sample_events)} sample events")
-                    
-                    # Test grid creation with sample data
-                    from ui.grid import create_schedule_grid
-                    df = create_schedule_grid(sample_events, year, month)
-                    st.write(f"✅ Sample grid created successfully")
-                    st.write(f"- Sample grid shape: {df.shape}")
-                    st.dataframe(df)
-                    
-                except Exception as e:
-                    st.error(f"❌ Error with sample data test: {e}")
-                    st.write(f"Error details: {traceback.format_exc()}")
+
     
     # Google Calendar Sync Tab
     with tab5:
