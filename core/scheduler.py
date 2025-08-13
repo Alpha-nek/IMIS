@@ -24,7 +24,7 @@ from core.exceptions import (
 from core.provider_types import NOCTURNISTS, SENIORS, get_provider_type, get_allowed_shift_types
 from core.gap_analysis import analyze_admitting_gaps, analyze_rounding_gaps, find_consecutive_gaps
 from core.block_assignment import (
-    find_best_provider_for_gap_group, create_admitting_to_rounding_block, 
+    create_admitting_to_rounding_block, 
     create_rounding_block
 )
 
@@ -128,7 +128,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
                    shift_types: List[Dict], shift_capacity: Dict[str, int],
                    provider_rules: Dict, global_rules: RuleConfig) -> List[SEvent]:
     """
-    GAP-BASED assignment algorithm following ground rules.
+    BALANCED assignment algorithm following ground rules.
+    Uses a combination of block assignment and greedy filling to ensure good coverage.
     """
     try:
         import streamlit as st
@@ -177,17 +178,12 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                                     provider_rules, global_rules, provider_shifts, year, month)
         events.extend(senior_events)
         
-        # Step 4: Fill admitting shift gaps with optimized blocks
-        admitting_events = fill_admitting_gaps_with_blocks(month_days, regular_providers, shift_capacity,
-                                                          provider_rules, global_rules, provider_shifts, year, month)
-        events.extend(admitting_events)
-        
-        # Step 5: Fill rounding shift gaps with optimized blocks
-        rounding_events = fill_rounding_gaps_with_blocks(month_days, regular_providers, shift_capacity,
+        # Step 4: Fill remaining shifts using a balanced approach
+        remaining_events = fill_remaining_shifts_balanced(month_days, regular_providers, shift_capacity,
                                                         provider_rules, global_rules, provider_shifts, year, month)
-        events.extend(rounding_events)
+        events.extend(remaining_events)
         
-        # Step 6: Validate and auto-adjust schedule
+        # Step 5: Validate and auto-adjust schedule
         events = validate_and_adjust_schedule(events, providers, provider_rules, global_rules, year, month)
         
         return events
@@ -376,20 +372,18 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     
     return events
 
-def fill_remaining_shifts(month_days: List[date], providers: List[str], 
-                         shift_capacity: Dict[str, int], provider_rules: Dict, 
-                         global_rules: RuleConfig, provider_shifts: Dict,
-                         year: int = None, month: int = None) -> List[SEvent]:
+def fill_remaining_shifts_balanced(month_days: List[date], providers: List[str], 
+                                 shift_capacity: Dict[str, int], provider_rules: Dict, 
+                                 global_rules: RuleConfig, provider_shifts: Dict,
+                                 year: int = None, month: int = None) -> List[SEvent]:
     """
-    GREEDY ALGORITHM: Fill remaining shifts one by one, always choosing the best available provider.
-    HARD RULES ARE NEVER BROKEN - gaps are preferred over violations.
+    BALANCED ALGORITHM: Fill remaining shifts with a more flexible approach.
+    Prioritizes getting providers assigned while respecting hard rules.
     
     Algorithm:
-    1. For each day and shift type, find all available providers
-    2. Score each provider based on: (fewer shifts = better score)
-    3. Choose the provider with the best score who meets ALL hard rules
-    4. If no provider meets all rules, leave the gap
-    5. Repeat until all slots are filled or no more valid assignments possible
+    1. First pass: Try to fill gaps with blocks where possible (2+ consecutive days)
+    2. Second pass: Fill individual gaps with best available providers
+    3. Third pass: Fill any remaining gaps with any available provider (relaxed rules)
     """
     events = []
     
@@ -402,9 +396,71 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 provider, year, month, provider_rules, global_rules
             )
     
-    # GREEDY ALGORITHM: Process each day and shift type
+    # PASS 1: Try to fill consecutive gaps with blocks (2+ days)
+    events.extend(_fill_consecutive_gaps_with_blocks(month_days, providers, shift_capacity,
+                                                   provider_rules, global_rules, provider_shifts, 
+                                                   provider_expected_shifts, year, month))
+    
+    # PASS 2: Fill individual gaps with best available providers
+    events.extend(_fill_individual_gaps(month_days, providers, shift_capacity,
+                                      provider_rules, global_rules, provider_shifts,
+                                      provider_expected_shifts, year, month))
+    
+    # PASS 3: Fill any remaining gaps with relaxed rules (if providers are under their expected shifts)
+    events.extend(_fill_remaining_gaps_relaxed(month_days, providers, shift_capacity,
+                                             provider_rules, global_rules, provider_shifts,
+                                             provider_expected_shifts, year, month))
+    
+    return events
+
+def _fill_consecutive_gaps_with_blocks(month_days: List[date], providers: List[str],
+                                     shift_capacity: Dict[str, int], provider_rules: Dict,
+                                     global_rules: RuleConfig, provider_shifts: Dict,
+                                     provider_expected_shifts: Dict, year: int, month: int) -> List[SEvent]:
+    """
+    Fill consecutive gaps (2+ days) with blocks to optimize provider assignments.
+    """
+    events = []
+    
+    # Find consecutive gaps for each shift type
+    for shift_type in ["R12", "A12", "A10", "N12"]:
+        if shift_type not in shift_capacity:
+            continue
+            
+        # Find consecutive gaps of 2+ days
+        consecutive_gaps = _find_consecutive_gaps_for_shift_type(month_days, shift_type, 
+                                                               shift_capacity, provider_shifts, min_consecutive=2)
+        
+        for gap_group in consecutive_gaps:
+            # Find best provider for this gap group
+            best_provider = _find_best_provider_for_gap_group_relaxed(gap_group, providers, 
+                                                                     provider_shifts, provider_rules,
+                                                                     global_rules, provider_expected_shifts, year, month)
+            
+            if best_provider:
+                # Assign the block
+                block_events = _assign_shift_block_relaxed(best_provider, gap_group, provider_shifts)
+                events.extend(block_events)
+                
+                # Update provider tracking
+                for event in block_events:
+                    provider = event.extendedProps.get("provider")
+                    if provider:
+                        provider_shifts[provider].append(event)
+    
+    return events
+
+def _fill_individual_gaps(month_days: List[date], providers: List[str],
+                         shift_capacity: Dict[str, int], provider_rules: Dict,
+                         global_rules: RuleConfig, provider_shifts: Dict,
+                         provider_expected_shifts: Dict, year: int, month: int) -> List[SEvent]:
+    """
+    Fill individual gaps with best available providers.
+    """
+    events = []
+    
     for day in month_days:
-        for shift_type in ["R12", "A12", "A10", "N12", "NB", "APP"]:
+        for shift_type in ["R12", "A12", "A10", "N12"]:
             if shift_type not in shift_capacity:
                 continue
                 
@@ -412,68 +468,46 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
             remaining_slots = capacity - assigned_count
             
-            # Fill each remaining slot with the best available provider
             for slot in range(remaining_slots):
-                # Get all providers who could potentially take this shift
-                all_providers = [p for p in providers if p not in APP_PROVIDER_INITIALS or shift_type == "APP"]
+                # Find best available provider
+                best_provider = _find_best_provider_for_single_shift(day, shift_type, providers,
+                                                                   provider_shifts, provider_rules,
+                                                                   global_rules, provider_expected_shifts, year, month)
                 
-                # Score each provider (lower score = better choice)
-                provider_scores = []
-                for provider in all_providers:
-                    score = _calculate_provider_score(provider, day, shift_type, provider_shifts, 
-                                                    provider_rules, global_rules, provider_expected_shifts, year, month)
-                    if score is not None:  # None means provider is not eligible
-                        provider_scores.append((score, provider))
+                if best_provider:
+                    event = _create_shift_event(best_provider, shift_type, day)
+                    events.append(event)
+                    provider_shifts[best_provider].append(event)
+    
+    return events
+
+def _fill_remaining_gaps_relaxed(month_days: List[date], providers: List[str],
+                                shift_capacity: Dict[str, int], provider_rules: Dict,
+                                global_rules: RuleConfig, provider_shifts: Dict,
+                                provider_expected_shifts: Dict, year: int, month: int) -> List[SEvent]:
+    """
+    Fill any remaining gaps with relaxed rules for providers under their expected shifts.
+    """
+    events = []
+    
+    for day in month_days:
+        for shift_type in ["R12", "A12", "A10", "N12"]:
+            if shift_type not in shift_capacity:
+                continue
                 
-                # Sort by score (best first)
-                provider_scores.sort()
+            capacity = shift_capacity[shift_type]
+            assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
+            remaining_slots = capacity - assigned_count
+            
+            for slot in range(remaining_slots):
+                # Find any provider who is under their expected shifts
+                best_provider = _find_any_available_provider(day, shift_type, providers,
+                                                           provider_shifts, provider_expected_shifts)
                 
-                # Choose the best provider who meets ALL hard rules
-                best_provider = None
-                best_score = None
-                for score, provider in provider_scores:
-                    # FINAL HARD STOP: Double-check that this assignment won't exceed expected shifts
-                    current_shifts = len(provider_shifts.get(provider, []))
-                    
-                    if provider in APP_PROVIDER_INITIALS:
-                        if current_shifts >= 12:
-                            logger.warning(f"FINAL HARD STOP: APP provider {provider} at {current_shifts} shifts")
-                            continue
-                    else:
-                        expected_shifts = provider_expected_shifts.get(provider, 15)
-                        if current_shifts >= expected_shifts:
-                            logger.warning(f"FINAL HARD STOP: Provider {provider} at {current_shifts} shifts (expected {expected_shifts})")
-                            continue
-                    
-                    if _validate_all_hard_rules(provider, day, shift_type, provider_shifts, 
-                                              provider_rules, global_rules, provider_expected_shifts):
-                        best_provider = provider
-                        best_score = score
-                        break
-                
-                if best_provider is None:
-                    logger.info(f"Leaving gap for {shift_type} on {day} - no providers meet all hard rules")
-                    continue  # Leave the gap
-                
-                # FINAL SAFETY CHECK: Verify we're not exceeding expected shifts
-                current_shifts = len(provider_shifts.get(best_provider, []))
-                
-                if best_provider in APP_PROVIDER_INITIALS:
-                    if current_shifts >= 12:
-                        logger.error(f"CRITICAL ERROR: APP provider {best_provider} would exceed 12 shifts - ABORTING ASSIGNMENT")
-                        continue
-                else:
-                    expected_shifts = provider_expected_shifts.get(best_provider, 15)
-                    if current_shifts >= expected_shifts:
-                        logger.error(f"CRITICAL ERROR: Provider {best_provider} would exceed {expected_shifts} shifts - ABORTING ASSIGNMENT")
-                        continue
-                
-                # Assign the shift to the best provider
-                event = _create_shift_event(best_provider, shift_type, day)
-                events.append(event)
-                provider_shifts[best_provider].append(event)
-                
-                logger.info(f"✅ GREEDY: Assigned {shift_type} to {best_provider} on {day} (score: {best_score}) - now at {current_shifts + 1} shifts")
+                if best_provider:
+                    event = _create_shift_event(best_provider, shift_type, day)
+                    events.append(event)
+                    provider_shifts[best_provider].append(event)
     
     return events
 
@@ -1575,149 +1609,7 @@ def find_consecutive_gaps(gaps: List[Dict], min_consecutive: int = 3) -> List[Li
     
     return consecutive_groups
 
-def fill_admitting_gaps_with_blocks(month_days: List[date], regular_providers: List[str], 
-                                   shift_capacity: Dict[str, int], provider_rules: Dict, 
-                                   global_rules: RuleConfig, provider_shifts: Dict, 
-                                   year: int, month: int) -> List[SEvent]:
-    """
-    Fill admitting shift gaps with optimized blocks.
-    Most blocks should start with admitting shifts then transition to rounding.
-    """
-    events = []
-    
-    # Analyze admitting gaps
-    admitting_gaps = analyze_admitting_gaps(month_days, shift_capacity, provider_shifts)
-    
-    # Find consecutive gap groups
-    consecutive_groups = find_consecutive_gaps(admitting_gaps, min_consecutive=3)
-    
-    for gap_group in consecutive_groups:
-        # Find the best provider for this gap group
-        best_provider = find_best_provider_for_gap_group(gap_group, regular_providers, 
-                                                        provider_shifts, provider_rules, 
-                                                        global_rules, year, month)
-        
-        if best_provider:
-            # Create a block that starts with admitting shifts
-            block_events = create_admitting_to_rounding_block(best_provider, gap_group, 
-                                                            provider_shifts, provider_rules, 
-                                                            global_rules, year, month)
-            events.extend(block_events)
-            
-            # Update provider tracking
-            for event in block_events:
-                provider = event.extendedProps.get("provider")
-                if provider:
-                    provider_shifts[provider].append(event)
-    
-    return events
-
-def fill_rounding_gaps_with_blocks(month_days: List[date], regular_providers: List[str], 
-                                  shift_capacity: Dict[str, int], provider_rules: Dict, 
-                                  global_rules: RuleConfig, provider_shifts: Dict, 
-                                  year: int, month: int) -> List[SEvent]:
-    """
-    Fill rounding shift gaps with optimized blocks.
-    Focus on providers who don't have shifts already scheduled.
-    """
-    events = []
-    
-    # Analyze rounding gaps
-    rounding_gaps = analyze_rounding_gaps(month_days, shift_capacity, provider_shifts)
-    
-    # Find consecutive gap groups
-    consecutive_groups = find_consecutive_gaps(rounding_gaps, min_consecutive=3)
-    
-    for gap_group in consecutive_groups:
-        # Find the best provider for this gap group
-        best_provider = find_best_provider_for_gap_group(gap_group, regular_providers, 
-                                                        provider_shifts, provider_rules, 
-                                                        global_rules, year, month)
-        
-        if best_provider:
-            # Create a rounding block
-            block_events = create_rounding_block(best_provider, gap_group, 
-                                               provider_shifts, provider_rules, 
-                                               global_rules, year, month)
-            events.extend(block_events)
-            
-            # Update provider tracking
-            for event in block_events:
-                provider = event.extendedProps.get("provider")
-                if provider:
-                    provider_shifts[provider].append(event)
-    
-    return events
-
-def find_best_provider_for_gap_group(gap_group: List[Dict], regular_providers: List[str], 
-                                    provider_shifts: Dict, provider_rules: Dict, 
-                                    global_rules: RuleConfig, year: int, month: int) -> Optional[str]:
-    """
-    Find the best provider for a gap group based on:
-    1. Current shift count (fewer = better)
-    2. Availability for all dates in the gap
-    3. Shift type preferences
-    4. Rest requirements
-    """
-    best_provider = None
-    best_score = float('inf')
-    
-    for provider in regular_providers:
-        # Check if provider is available for all dates in the gap
-        available_for_all = True
-        for gap in gap_group:
-            day = gap["day"]
-            shift_type = gap["shift_type"]
-            
-            # Check availability
-            if is_provider_unavailable_on_date(provider, day, provider_rules):
-                available_for_all = False
-                break
-            
-            # Check if already has shift on this day
-            if _has_shift_on_date(provider, day, provider_shifts[provider]):
-                available_for_all = False
-                break
-            
-            # Check shift type preference
-            if not _validate_shift_type_preference(provider, shift_type, provider_rules):
-                available_for_all = False
-                break
-        
-        if not available_for_all:
-            continue
-        
-        # Check rest requirements
-        min_rest_days = 2
-        if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
-            min_rest_days = max(2, global_rules.min_days_between_shifts)
-        
-        rest_ok = True
-        for gap in gap_group:
-            day = gap["day"]
-            if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
-                rest_ok = False
-                break
-        
-        if not rest_ok:
-            continue
-        
-        # Check if assignment would exceed expected shifts
-        current_shifts = len(provider_shifts[provider])
-        from core.utils import get_adjusted_expected_shifts
-        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
-        
-        if current_shifts + len(gap_group) > expected_shifts:
-            continue
-        
-        # Calculate score (lower is better)
-        score = current_shifts / expected_shifts  # Prefer providers with fewer shifts
-        
-        if score < best_score:
-            best_score = score
-            best_provider = provider
-    
-    return best_provider
+# Removed old gap-filling functions - replaced with balanced approach
 
 def create_admitting_to_rounding_block(provider: str, gap_group: List[Dict], 
                                       provider_shifts: Dict, provider_rules: Dict, 
@@ -1927,3 +1819,184 @@ def validate_and_adjust_schedule(events: List[SEvent], providers: List[str],
         logger.info("✅ No violations found in schedule")
     
     return adjusted_events
+
+def _find_consecutive_gaps_for_shift_type(month_days: List[date], shift_type: str,
+                                        shift_capacity: Dict[str, int], provider_shifts: Dict,
+                                        min_consecutive: int = 2) -> List[List[Dict]]:
+    """
+    Find consecutive gaps for a specific shift type.
+    """
+    gaps = []
+    
+    for day in month_days:
+        capacity = shift_capacity.get(shift_type, 0)
+        assigned = count_shifts_on_date(day, shift_type, provider_shifts)
+        remaining = capacity - assigned
+        
+        if remaining > 0:
+            gaps.append({
+                "day": day,
+                "shift_type": shift_type,
+                "remaining": remaining
+            })
+    
+    # Group consecutive gaps
+    consecutive_groups = []
+    if gaps:
+        current_group = [gaps[0]]
+        
+        for i in range(1, len(gaps)):
+            current_gap = gaps[i]
+            last_gap = current_group[-1]
+            
+            # Check if gaps are consecutive (allow 1 day gap)
+            days_diff = (current_gap["day"] - last_gap["day"]).days
+            
+            if days_diff <= 1:
+                current_group.append(current_gap)
+            else:
+                if len(current_group) >= min_consecutive:
+                    consecutive_groups.append(current_group)
+                current_group = [current_gap]
+        
+        # Add the last group if it's long enough
+        if len(current_group) >= min_consecutive:
+            consecutive_groups.append(current_group)
+    
+    return consecutive_groups
+
+def _find_best_provider_for_gap_group_relaxed(gap_group: List[Dict], providers: List[str],
+                                             provider_shifts: Dict, provider_rules: Dict,
+                                             global_rules: RuleConfig, provider_expected_shifts: Dict,
+                                             year: int, month: int) -> Optional[str]:
+    """
+    Find the best provider for a gap group with relaxed rules.
+    """
+    best_provider = None
+    best_score = float('inf')
+    
+    for provider in providers:
+        # Check if provider can take at least 70% of the shifts in the gap group
+        available_shifts = 0
+        total_shifts = len(gap_group)
+        
+        for gap in gap_group:
+            day = gap["day"]
+            shift_type = gap["shift_type"]
+            
+            # Basic availability checks
+            if is_provider_unavailable_on_date(provider, day, provider_rules):
+                continue
+            
+            if _has_shift_on_date(provider, day, provider_shifts[provider]):
+                continue
+            
+            # Check shift type preference (relaxed)
+            if not _validate_shift_type_preference(provider, shift_type, provider_rules):
+                continue
+            
+            # Check rest requirements (relaxed - allow 1 day rest)
+            if not _has_sufficient_rest(provider, day, provider_shifts[provider], 1):
+                continue
+            
+            available_shifts += 1
+        
+        # Provider must be available for at least 70% of shifts
+        if available_shifts < total_shifts * 0.7:
+            continue
+        
+        # Check if assignment would exceed expected shifts
+        current_shifts = len(provider_shifts[provider])
+        expected_shifts = provider_expected_shifts.get(provider, 15)
+        
+        if current_shifts + available_shifts > expected_shifts:
+            continue
+        
+        # Calculate score (lower is better)
+        score = current_shifts / expected_shifts
+        
+        if score < best_score:
+            best_score = score
+            best_provider = provider
+    
+    return best_provider
+
+def _find_best_provider_for_single_shift(day: date, shift_type: str, providers: List[str],
+                                       provider_shifts: Dict, provider_rules: Dict,
+                                       global_rules: RuleConfig, provider_expected_shifts: Dict,
+                                       year: int, month: int) -> Optional[str]:
+    """
+    Find the best provider for a single shift.
+    """
+    best_provider = None
+    best_score = float('inf')
+    
+    for provider in providers:
+        # Basic availability checks
+        if is_provider_unavailable_on_date(provider, day, provider_rules):
+            continue
+        
+        if _has_shift_on_date(provider, day, provider_shifts[provider]):
+            continue
+        
+        # Check shift type preference
+        if not _validate_shift_type_preference(provider, shift_type, provider_rules):
+            continue
+        
+        # Check rest requirements (1 day minimum)
+        if not _has_sufficient_rest(provider, day, provider_shifts[provider], 1):
+            continue
+        
+        # Check if assignment would exceed expected shifts
+        current_shifts = len(provider_shifts[provider])
+        expected_shifts = provider_expected_shifts.get(provider, 15)
+        
+        if current_shifts >= expected_shifts:
+            continue
+        
+        # Calculate score (lower is better)
+        score = current_shifts / expected_shifts
+        
+        if score < best_score:
+            best_score = score
+            best_provider = provider
+    
+    return best_provider
+
+def _find_any_available_provider(day: date, shift_type: str, providers: List[str],
+                               provider_shifts: Dict, provider_expected_shifts: Dict) -> Optional[str]:
+    """
+    Find any available provider for a shift (relaxed rules).
+    Only checks if provider is under their expected shifts.
+    """
+    for provider in providers:
+        # Check if provider is under their expected shifts
+        current_shifts = len(provider_shifts[provider])
+        expected_shifts = provider_expected_shifts.get(provider, 15)
+        
+        if current_shifts < expected_shifts:
+            # Check if they don't already have a shift on this day
+            if not _has_shift_on_date(provider, day, provider_shifts[provider]):
+                return provider
+    
+    return None
+
+def _assign_shift_block_relaxed(provider: str, gap_group: List[Dict], provider_shifts: Dict) -> List[SEvent]:
+    """
+    Assign a block of shifts to a provider with relaxed rules.
+    """
+    events = []
+    
+    for gap in gap_group:
+        day = gap["day"]
+        shift_type = gap["shift_type"]
+        
+        # Check if provider can take this shift
+        if _has_shift_on_date(provider, day, provider_shifts[provider]):
+            continue
+        
+        # Create shift event
+        event = _create_shift_event(provider, shift_type, day)
+        events.append(event)
+    
+    return events
