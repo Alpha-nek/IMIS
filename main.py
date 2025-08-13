@@ -1206,66 +1206,139 @@ def render_desktop_interface():
                 # Validate rules
                 validation_result = validate_rules(events, providers, global_rules, provider_rules)
                 
-                # Display results
-                col1, col2, col3 = st.columns(3)
+                # Display enhanced results
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Total Events", len(events))
                 with col2:
                     st.metric("Total Violations", validation_result['summary']['total_violations'])
                 with col3:
+                    st.metric("Coverage Gaps", validation_result['summary']['coverage_gaps_count'])
+                with col4:
                     st.metric("Schedule Valid", "✅" if validation_result['is_valid'] else "❌")
                 
-                # Provider analysis
-                st.markdown("### Provider Analysis")
+                # Enhanced Provider Analysis
+                st.markdown("### 📊 Enhanced Provider Analysis")
                 provider_stats = validation_result['summary']['provider_stats']
                 
-                # Create analysis dataframe
+                # Create enhanced analysis dataframe
                 analysis_data = []
                 for provider, stats in provider_stats.items():
                     total_shifts = stats['total_shifts']
-                    provider_rule = provider_rules.get(provider, {})
+                    expected_shifts = stats.get('expected_shifts', 'N/A')
+                    shift_types = stats.get('shift_types', [])
                     
-                    # Skip APP providers for expected shifts validation
+                    # Determine status based on expected shifts
                     if provider in APP_PROVIDER_INITIALS:
-                        status = "APP Provider"
-                        expected_shifts = "N/A"
-                        min_acceptable = "N/A"
-                        max_acceptable = "N/A"
+                        status = "🟢 APP Provider"
+                        expected_display = "N/A"
+                        status_detail = "APP providers have different rules"
+                    elif expected_shifts == 'N/A':
+                        status = "⚠️ No Expected Shifts"
+                        expected_display = "N/A"
+                        status_detail = "Expected shifts not calculated"
                     else:
-                        expected_shifts = provider_rule.get("expected_shifts", global_rules.expected_shifts_per_month)
-                        tolerance = 2
-                        min_acceptable = expected_shifts - tolerance
-                        max_acceptable = expected_shifts + tolerance
-                        
-                        if total_shifts < min_acceptable:
-                            status = f"❌ Below Expected ({expected_shifts}±{tolerance})"
-                        elif total_shifts > max_acceptable:
-                            status = f"❌ Above Expected ({expected_shifts}±{tolerance})"
+                        expected_shifts = int(expected_shifts)
+                        if total_shifts > expected_shifts:
+                            status = "❌ EXCEEDS Expected"
+                            status_detail = f"Has {total_shifts} shifts, expected {expected_shifts}"
+                        elif total_shifts < (expected_shifts - 1):
+                            status = "⚠️ Below Expected"
+                            status_detail = f"Has {total_shifts} shifts, expected {expected_shifts}"
                         else:
-                            status = "✅ OK"
+                            status = "✅ Within Range"
+                            status_detail = f"Has {total_shifts} shifts, expected {expected_shifts}"
+                        expected_display = expected_shifts
                     
                     analysis_data.append({
                         "Provider": provider,
                         "Total Shifts": total_shifts,
-                        "Expected": expected_shifts,
-                        "Acceptable Range": f"{min_acceptable}-{max_acceptable}",
+                        "Expected": expected_display,
                         "Status": status,
+                        "Shift Types": ", ".join(shift_types) if shift_types else "None",
                         "Weekend": stats['weekend_shifts'],
                         "Night": stats['night_shifts'],
                         "Rounder": stats['rounder_shifts'],
-                        "Admitting": stats['admitting_shifts']
+                        "Admitting": stats['admitting_shifts'],
+                        "Details": status_detail
                     })
                 
                 analysis_df = pd.DataFrame(analysis_data)
                 st.dataframe(analysis_df, use_container_width=True)
                 
-                # Show violations
+                # Enhanced Violations Display
                 if validation_result['violations']:
-                    st.markdown("### Violations Found")
-                    violations_df = pd.DataFrame({
-                        "Violation": validation_result['violations']
-                    })
-                    st.dataframe(violations_df, use_container_width=True)
+                    st.markdown("### ❌ All Violations Found")
+                    
+                    # Group violations by type
+                    if validation_result.get('preference_violations'):
+                        st.markdown("#### 🚫 Shift Type Preference Violations")
+                        for violation in validation_result['preference_violations']:
+                            st.error(violation)
+                    
+                    if validation_result.get('rest_violations'):
+                        st.markdown("#### 😴 Rest Day Violations")
+                        for violation in validation_result['rest_violations']:
+                            st.error(violation)
+                    
+                    # Other violations
+                    other_violations = [v for v in validation_result['violations'] 
+                                      if v not in validation_result.get('preference_violations', [])
+                                      and v not in validation_result.get('rest_violations', [])]
+                    if other_violations:
+                        st.markdown("#### ⚠️ Other Violations")
+                        for violation in other_violations:
+                            st.warning(violation)
+                
+                # Coverage Gaps Analysis
+                if validation_result.get('coverage_gaps'):
+                    st.markdown("### 🔍 Coverage Gaps Analysis")
+                    st.markdown("These are days/shifts where not all required slots are filled:")
+                    
+                    # Group gaps by shift type
+                    gap_by_type = {}
+                    for gap in validation_result['coverage_gaps']:
+                        # Extract shift type from gap message
+                        if "R12" in gap:
+                            shift_type = "R12"
+                        elif "A12" in gap:
+                            shift_type = "A12"
+                        elif "A10" in gap:
+                            shift_type = "A10"
+                        elif "N12" in gap:
+                            shift_type = "N12"
+                        elif "NB" in gap:
+                            shift_type = "NB"
+                        elif "APP" in gap:
+                            shift_type = "APP"
+                        else:
+                            shift_type = "Unknown"
+                        
+                        if shift_type not in gap_by_type:
+                            gap_by_type[shift_type] = []
+                        gap_by_type[shift_type].append(gap)
+                    
+                    # Display gaps by type
+                    for shift_type, gaps in gap_by_type.items():
+                        with st.expander(f"{shift_type} Gaps ({len(gaps)} gaps)"):
+                            for gap in gaps:
+                                st.info(gap)
+                
+                # Summary Statistics
+                st.markdown("### 📈 Summary Statistics")
+                summary_col1, summary_col2, summary_col3 = st.columns(3)
+                
+                with summary_col1:
+                    st.metric("Preference Violations", validation_result['summary']['preference_violations_count'])
+                    st.metric("Rest Violations", validation_result['summary']['rest_violations_count'])
+                
+                with summary_col2:
+                    st.metric("Providers Used", validation_result['summary']['providers_used'])
+                    st.metric("Total Providers", len(providers))
+                
+                with summary_col3:
+                    coverage_percentage = ((len(events) / (validation_result['summary']['total_events'] + validation_result['summary']['coverage_gaps_count'])) * 100) if (validation_result['summary']['total_events'] + validation_result['summary']['coverage_gaps_count']) > 0 else 0
+                    st.metric("Coverage %", f"{coverage_percentage:.1f}%")
                 
                 # Shift distribution
                 st.markdown("### Shift Distribution")

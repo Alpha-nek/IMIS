@@ -405,6 +405,19 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 # Choose the best provider who meets ALL hard rules
                 best_provider = None
                 for score, provider in provider_scores:
+                    # FINAL HARD STOP: Double-check that this assignment won't exceed expected shifts
+                    current_shifts = len(provider_shifts.get(provider, []))
+                    
+                    if provider in APP_PROVIDER_INITIALS:
+                        if current_shifts >= 12:
+                            logger.warning(f"FINAL HARD STOP: APP provider {provider} at {current_shifts} shifts")
+                            continue
+                    else:
+                        expected_shifts = provider_expected_shifts.get(provider, 15)
+                        if current_shifts >= expected_shifts:
+                            logger.warning(f"FINAL HARD STOP: Provider {provider} at {current_shifts} shifts (expected {expected_shifts})")
+                            continue
+                    
                     if _validate_all_hard_rules(provider, day, shift_type, provider_shifts, 
                                               provider_rules, global_rules, provider_expected_shifts):
                         best_provider = provider
@@ -414,12 +427,25 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                     logger.info(f"Leaving gap for {shift_type} on {day} - no providers meet all hard rules")
                     continue  # Leave the gap
                 
+                # FINAL SAFETY CHECK: Verify we're not exceeding expected shifts
+                current_shifts = len(provider_shifts.get(best_provider, []))
+                
+                if best_provider in APP_PROVIDER_INITIALS:
+                    if current_shifts >= 12:
+                        logger.error(f"CRITICAL ERROR: APP provider {best_provider} would exceed 12 shifts - ABORTING ASSIGNMENT")
+                        continue
+                else:
+                    expected_shifts = provider_expected_shifts.get(best_provider, 15)
+                    if current_shifts >= expected_shifts:
+                        logger.error(f"CRITICAL ERROR: Provider {best_provider} would exceed {expected_shifts} shifts - ABORTING ASSIGNMENT")
+                        continue
+                
                 # Assign the shift to the best provider
                 event = _create_shift_event(best_provider, shift_type, day)
                 events.append(event)
                 provider_shifts[best_provider].append(event)
                 
-                logger.info(f"✅ GREEDY: Assigned {shift_type} to {best_provider} on {day} (score: {score})")
+                logger.info(f"✅ GREEDY: Assigned {shift_type} to {best_provider} on {day} (score: {score}) - now at {current_shifts + 1} shifts")
     
     return events
 
@@ -428,8 +454,8 @@ def _calculate_provider_score(provider: str, day: date, shift_type: str, provide
                             provider_expected_shifts: Dict) -> Optional[float]:
     """
     Calculate a score for a provider taking a specific shift.
+    HARD STOP: Returns None if assignment would exceed expected shifts.
     Lower score = better choice.
-    Returns None if provider is not eligible for this shift.
     """
     # Basic eligibility checks
     if is_provider_unavailable_on_date(provider, day):
@@ -454,22 +480,27 @@ def _calculate_provider_score(provider: str, day: date, shift_type: str, provide
     if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
         return None
     
-    # Calculate score based on current shift count
+    # HARD STOP: Check if assignment would exceed expected shifts
     current_shifts = len(provider_shifts.get(provider, []))
     
     if provider in APP_PROVIDER_INITIALS:
-        # APP providers: prefer those with fewer shifts (max 12)
+        # APP providers: HARD STOP at 12 shifts
         if current_shifts >= 12:
-            return None  # Not eligible
+            logger.debug(f"APP provider {provider} at {current_shifts} shifts - HARD STOP")
+            return None
         score = current_shifts  # Lower is better
     else:
-        # Regular providers: prefer those with fewer shifts relative to expected
+        # Regular providers: HARD STOP at expected shifts
         expected_shifts = provider_expected_shifts.get(provider, 15)
         if current_shifts >= expected_shifts:
-            return None  # Not eligible
+            logger.debug(f"Provider {provider} at {current_shifts} shifts (expected {expected_shifts}) - HARD STOP")
+            return None
         
         # Score based on how close to expected shifts (closer = higher score = worse)
+        # Add penalty for being close to limit
         score = current_shifts / expected_shifts
+        if current_shifts >= (expected_shifts - 1):
+            score += 10  # Heavy penalty for being close to limit
     
     return score
 
@@ -478,24 +509,35 @@ def _validate_all_hard_rules(provider: str, day: date, shift_type: str, provider
                            provider_expected_shifts: Dict) -> bool:
     """
     Validate ALL hard rules for a provider taking a specific shift.
-    Returns True only if ALL rules are satisfied.
+    ULTRA-STRICT: Returns True only if ALL rules are satisfied.
     """
     # HARD RULE 1: Shift type preference
     if not _validate_shift_type_preference(provider, shift_type, provider_rules):
+        logger.debug(f"Provider {provider} fails shift type preference check for {shift_type}")
         return False
     
     # HARD RULE 2: Provider role validation
     if not _validate_provider_role_shift_type(provider, shift_type):
+        logger.debug(f"Provider {provider} fails role validation for {shift_type}")
         return False
     
-    # HARD RULE 3: Expected shifts limit
+    # HARD RULE 3: Expected shifts limit - ULTRA-STRICT
     current_shifts = len(provider_shifts.get(provider, []))
     if provider in APP_PROVIDER_INITIALS:
-        if not _validate_expected_shifts_limit(provider, current_shifts, 12, 0):
+        # APP providers: HARD STOP at 12 shifts
+        if current_shifts >= 12:
+            logger.warning(f"ULTRA-STRICT: APP provider {provider} at {current_shifts} shifts - BLOCKED")
             return False
     else:
+        # Regular providers: HARD STOP at expected shifts
         expected_shifts = provider_expected_shifts.get(provider, 15)
-        if not _validate_expected_shifts_limit(provider, current_shifts, expected_shifts, 0):
+        if current_shifts >= expected_shifts:
+            logger.warning(f"ULTRA-STRICT: Provider {provider} at {current_shifts} shifts (expected {expected_shifts}) - BLOCKED")
+            return False
+        
+        # Additional safety: Don't assign if within 1 shift of limit
+        if current_shifts >= (expected_shifts - 1):
+            logger.info(f"ULTRA-STRICT: Provider {provider} at {current_shifts} shifts (expected {expected_shifts}) - too close to limit")
             return False
     
     # HARD RULE 4: Rest requirements
@@ -504,8 +546,10 @@ def _validate_all_hard_rules(provider: str, day: date, shift_type: str, provider
         min_rest_days = max(2, global_rules.min_days_between_shifts)
     
     if not _has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
+        logger.debug(f"Provider {provider} fails rest requirements check")
         return False
     
+    logger.debug(f"Provider {provider} passes ALL hard rules for {shift_type}")
     return True
 
 def _create_shift_event(provider: str, shift_type: str, day: date) -> SEvent:
@@ -1135,7 +1179,13 @@ def validate_rules(events: List[SEvent], providers: List[str],
                   global_rules: RuleConfig, provider_rules: Dict, 
                   year: int = None, month: int = None) -> Dict[str, Any]:
     """
-    Validate scheduling rules and return violations.
+    ENHANCED VALIDATION: Comprehensive debugging and validation of scheduling rules.
+    Checks for:
+    1. Expected shift count violations (exceeding or below by more than 1)
+    2. Shift type preference violations
+    3. Coverage gaps
+    4. Rest day violations
+    5. Role-based shift type violations
     """
     # Determine year and month from events if not provided
     if year is None or month is None:
@@ -1157,24 +1207,35 @@ def validate_rules(events: List[SEvent], providers: List[str],
             today = date.today()
             year = today.year
             month = today.month
+    
     violations = []
     provider_violations = {}
+    coverage_gaps = []
+    preference_violations = []
+    rest_violations = []
     
-    # Count shifts per provider
+    # Initialize tracking dictionaries
     provider_shift_counts = {p: 0 for p in providers}
+    provider_shift_types = {p: [] for p in providers}  # Track which shift types each provider has
+    provider_shift_dates = {p: [] for p in providers}  # Track dates of shifts for rest analysis
     provider_weekend_shifts = {p: 0 for p in providers}
     provider_night_shifts = {p: 0 for p in providers}
     provider_rounder_shifts = {p: 0 for p in providers}
     provider_admitting_shifts = {p: 0 for p in providers}
     
+    # Analyze all events
     for event in events:
         provider = event.extendedProps.get("provider")
-        if provider:
+        shift_type = event.extendedProps.get("shift_type")
+        
+        if provider and shift_type:
             provider_shift_counts[provider] += 1
+            provider_shift_types[provider].append(shift_type)
             
             # Get event date
             if hasattr(event, 'start'):
                 event_date = event.start.date()
+                provider_shift_dates[provider].append(event_date)
             else:
                 continue
             
@@ -1183,7 +1244,6 @@ def validate_rules(events: List[SEvent], providers: List[str],
                 provider_weekend_shifts[provider] += 1
             
             # Count shift types
-            shift_type = event.extendedProps.get("shift_type")
             if shift_type in ["N12", "NB"]:
                 provider_night_shifts[provider] += 1
             elif shift_type == "R12":
@@ -1191,73 +1251,152 @@ def validate_rules(events: List[SEvent], providers: List[str],
             elif shift_type in ["A12", "A10"]:
                 provider_admitting_shifts[provider] += 1
     
-    # Check violations
+    # 1. CHECK EXPECTED SHIFT COUNT VIOLATIONS
     for provider in providers:
         shift_count = provider_shift_counts[provider]
         provider_rule = provider_rules.get(provider, {})
         
-        # Skip APP providers for min/max shift validation
+        # Skip APP providers for expected shift validation
         if provider in APP_PROVIDER_INITIALS:
             continue
         
-        # Get expected shifts from provider-specific rules or global rules (adjusted for vacation)
+        # Get expected shifts (adjusted for vacation)
         from core.utils import get_adjusted_expected_shifts
         expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
         
         provider_violations[provider] = []
         
-        # Check total shift count against expected (with minimal tolerance)
-        tolerance = 1  # Allow only 1 shift deviation from expected
-        min_acceptable = expected_shifts - tolerance
-        max_acceptable = expected_shifts + tolerance
-        
-        if shift_count < min_acceptable:
-            violation = f"{provider}: {shift_count} shifts (expected {expected_shifts}, min acceptable {min_acceptable})"
+        # Check if provider exceeds expected shifts or is below by more than 1
+        if shift_count > expected_shifts:
+            violation = f"❌ {provider}: {shift_count} shifts (EXCEEDS expected {expected_shifts})"
             violations.append(violation)
             provider_violations[provider].append(violation)
-        
-        if shift_count > max_acceptable:
-            violation = f"{provider}: {shift_count} shifts (expected {expected_shifts}, max acceptable {max_acceptable})"
+        elif shift_count < (expected_shifts - 1):
+            violation = f"⚠️ {provider}: {shift_count} shifts (below expected {expected_shifts} by more than 1)"
             violations.append(violation)
             provider_violations[provider].append(violation)
+        else:
+            # Log good performance
+            logger.info(f"✅ {provider}: {shift_count} shifts (within expected range: {expected_shifts})")
+    
+    # 2. CHECK SHIFT TYPE PREFERENCE VIOLATIONS
+    for provider in providers:
+        provider_rule = provider_rules.get(provider, {})
+        shift_preferences = provider_rule.get("shift_preferences", {})
         
+        for shift_type in provider_shift_types[provider]:
+            # Check if provider explicitly prefers this shift type
+            if not shift_preferences.get(shift_type, False):
+                violation = f"❌ {provider}: Assigned {shift_type} but does NOT prefer it"
+                preference_violations.append(violation)
+                if provider not in provider_violations:
+                    provider_violations[provider] = []
+                provider_violations[provider].append(violation)
+    
+    # 3. CHECK REST DAY VIOLATIONS
+    min_rest_days = 2
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = max(2, global_rules.min_days_between_shifts)
+    
+    for provider in providers:
+        dates = sorted(provider_shift_dates[provider])
+        for i in range(len(dates) - 1):
+            days_between = (dates[i+1] - dates[i]).days
+            if days_between < min_rest_days:
+                violation = f"❌ {provider}: Only {days_between} days rest between {dates[i]} and {dates[i+1]} (min {min_rest_days} required)"
+                rest_violations.append(violation)
+                if provider not in provider_violations:
+                    provider_violations[provider] = []
+                provider_violations[provider].append(violation)
+    
+    # 4. CHECK ROLE-BASED SHIFT TYPE VIOLATIONS
+    for provider in providers:
+        for shift_type in provider_shift_types[provider]:
+            if not _validate_provider_role_shift_type(provider, shift_type):
+                violation = f"❌ {provider}: Assigned {shift_type} but role does not allow it"
+                if provider not in provider_violations:
+                    provider_violations[provider] = []
+                provider_violations[provider].append(violation)
+    
+    # 5. ANALYZE COVERAGE GAPS
+    # Get all dates in the month
+    month_start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        month_end = date(year, month + 1, 1) - timedelta(days=1)
+    
+    # Check each day for coverage gaps
+    for day in [month_start + timedelta(days=i) for i in range((month_end - month_start).days + 1)]:
+        for shift_type in ["R12", "A12", "A10", "N12", "NB", "APP"]:
+            if shift_type not in global_rules.shift_capacity:
+                continue
+            
+            required_capacity = global_rules.shift_capacity[shift_type]
+            assigned_count = count_shifts_on_date(day, shift_type, provider_shifts={p: events for p in providers})
+            
+            if assigned_count < required_capacity:
+                gap = f"⚠️ {day}: {shift_type} has {assigned_count}/{required_capacity} slots filled"
+                coverage_gaps.append(gap)
+    
+    # 6. CHECK WEEKEND AND NIGHT SHIFT LIMITS (existing logic)
+    for provider in providers:
         # Check weekend coverage
         if provider_weekend_shifts[provider] < global_rules.min_weekend_shifts_per_month:
-            violation = f"{provider}: {provider_weekend_shifts[provider]} weekend shifts (min {global_rules.min_weekend_shifts_per_month} required)"
+            violation = f"⚠️ {provider}: {provider_weekend_shifts[provider]} weekend shifts (min {global_rules.min_weekend_shifts_per_month} required)"
             violations.append(violation)
+            if provider not in provider_violations:
+                provider_violations[provider] = []
             provider_violations[provider].append(violation)
         
         if provider_weekend_shifts[provider] > global_rules.max_weekend_shifts_per_month:
-            violation = f"{provider}: {provider_weekend_shifts[provider]} weekend shifts (max {global_rules.max_weekend_shifts_per_month} allowed)"
+            violation = f"❌ {provider}: {provider_weekend_shifts[provider]} weekend shifts (max {global_rules.max_weekend_shifts_per_month} allowed)"
             violations.append(violation)
+            if provider not in provider_violations:
+                provider_violations[provider] = []
             provider_violations[provider].append(violation)
         
         # Check night shift limits
         if provider_night_shifts[provider] < global_rules.min_night_shifts_per_month:
-            violation = f"{provider}: {provider_night_shifts[provider]} night shifts (min {global_rules.min_night_shifts_per_month} required)"
+            violation = f"⚠️ {provider}: {provider_night_shifts[provider]} night shifts (min {global_rules.min_night_shifts_per_month} required)"
             violations.append(violation)
+            if provider not in provider_violations:
+                provider_violations[provider] = []
             provider_violations[provider].append(violation)
         
         if provider_night_shifts[provider] > global_rules.max_night_shifts_per_month:
-            violation = f"{provider}: {provider_night_shifts[provider]} night shifts (max {global_rules.max_night_shifts_per_month} allowed)"
+            violation = f"❌ {provider}: {provider_night_shifts[provider]} night shifts (max {global_rules.max_night_shifts_per_month} allowed)"
             violations.append(violation)
+            if provider not in provider_violations:
+                provider_violations[provider] = []
             provider_violations[provider].append(violation)
     
+    # Combine all violations
+    all_violations = violations + preference_violations + rest_violations
+    
     return {
-        "is_valid": len(violations) == 0,
-        "violations": violations,
+        "is_valid": len(all_violations) == 0,
+        "violations": all_violations,
         "provider_violations": provider_violations,
+        "coverage_gaps": coverage_gaps,
+        "preference_violations": preference_violations,
+        "rest_violations": rest_violations,
         "summary": {
             "total_events": len(events),
             "providers_used": len([p for p in providers if provider_shift_counts[p] > 0]),
-            "total_violations": len(violations),
+            "total_violations": len(all_violations),
+            "coverage_gaps_count": len(coverage_gaps),
+            "preference_violations_count": len(preference_violations),
+            "rest_violations_count": len(rest_violations),
             "provider_stats": {
                 provider: {
                     "total_shifts": provider_shift_counts[provider],
+                    "expected_shifts": get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules) if provider not in APP_PROVIDER_INITIALS else "N/A",
                     "weekend_shifts": provider_weekend_shifts[provider],
                     "night_shifts": provider_night_shifts[provider],
                     "rounder_shifts": provider_rounder_shifts[provider],
-                    "admitting_shifts": provider_admitting_shifts[provider]
+                    "admitting_shifts": provider_admitting_shifts[provider],
+                    "shift_types": list(set(provider_shift_types[provider]))  # Unique shift types assigned
                 } for provider in providers
             }
         }
