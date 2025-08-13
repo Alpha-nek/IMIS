@@ -13,7 +13,7 @@ from models.constants import DEFAULT_SHIFT_TYPES
 
 def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
-    Create a grid view of the schedule with proper shift type columns.
+    Create a grid view of the schedule with shift types as rows and dates as columns.
     Handles both SEvent objects and dictionaries.
     """
     # Get month days
@@ -31,70 +31,48 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         {"key": "APP", "label": "APP", "color": "#8b5cf6"},
     ]
     
-    # Create grid data
+    # Create grid data with shift types as rows
     grid_data = []
-    for day in month_days:
-        day_events = []
-        for e in events:
-            # Handle both SEvent objects and dictionaries
-            if hasattr(e, 'start'):
-                # It's an SEvent object
-                event_date = e.start.date()
-            elif isinstance(e, dict) and 'start' in e:
-                # It's a dictionary with start field
-                try:
-                    event_date = datetime.fromisoformat(e['start']).date()
-                except (ValueError, TypeError):
-                    continue
-            else:
-                # Unknown format, skip
-                continue
-            
-            if event_date == day:
-                day_events.append(e)
+    
+    for shift_type in shift_type_order:
+        shift_key = shift_type["key"]
+        shift_label = shift_type["label"]
         
         row = {
-            "Date": day.strftime("%Y-%m-%d"), 
-            "Day": day.strftime("%A"),
-            "Day_Short": day.strftime("%a")
+            "Shift Type": shift_label,
+            "Shift Key": shift_key,
+            "Color": shift_type["color"]
         }
         
-        # Add shift type columns in the correct order
-        for shift_type in shift_type_order:
-            shift_key = shift_type["key"]
-            shift_events = []
-            for e in day_events:
+        # Add a column for each day of the month
+        for day in month_days:
+            day_key = day.strftime("%m/%d")
+            day_events = []
+            
+            for e in events:
                 # Handle both SEvent objects and dictionaries
-                if hasattr(e, 'extendedProps'):
+                if hasattr(e, 'start'):
                     # It's an SEvent object
+                    event_date = e.start.date()
                     event_shift_type = e.extendedProps.get("shift_type")
-                elif isinstance(e, dict) and 'extendedProps' in e:
-                    # It's a dictionary
-                    event_shift_type = e['extendedProps'].get("shift_type")
-                else:
-                    continue
-                
-                if event_shift_type == shift_key:
-                    shift_events.append(e)
-            
-            # Extract provider names
-            providers = []
-            for e in shift_events:
-                if hasattr(e, 'extendedProps'):
-                    # It's an SEvent object
                     provider = e.extendedProps.get("provider", "")
-                elif isinstance(e, dict) and 'extendedProps' in e:
-                    # It's a dictionary
-                    provider = e['extendedProps'].get("provider", "")
+                elif isinstance(e, dict) and 'start' in e:
+                    # It's a dictionary with start field
+                    try:
+                        event_date = datetime.fromisoformat(e['start']).date()
+                        event_shift_type = e.get('extendedProps', {}).get("shift_type")
+                        provider = e.get('extendedProps', {}).get("provider", "")
+                    except (ValueError, TypeError):
+                        continue
                 else:
+                    # Unknown format, skip
                     continue
                 
-                if provider:
-                    providers.append(provider)
+                if event_date == day and event_shift_type == shift_key:
+                    day_events.append(provider)
             
-            # Use shift label for column name
-            column_name = shift_type["label"]
-            row[column_name] = ", ".join(providers) if providers else ""
+            # Join multiple providers with commas if there are multiple
+            row[day_key] = ", ".join(day_events) if day_events else ""
         
         grid_data.append(row)
     
@@ -103,7 +81,7 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
 def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFrame:
     """
     Render the schedule grid with professional styling and color coding.
-    Handles both SEvent objects and dictionaries.
+    Shows shift types as rows and dates as columns.
     """
     if not events:
         st.info("No schedule to display. Generate a schedule first.")
@@ -115,48 +93,51 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.info("No events found for this month.")
         return df
     
-    # Define column order and styling
-    date_cols = ["Date", "Day", "Day_Short"]
-    shift_cols = [
-        "7am Rounders",
-        "7am Admitter", 
-        "10am Admitter",
-        "Night Shift",
-        "Bridge",
-        "APP"
-    ]
+    # Get the date columns (all columns except Shift Type, Shift Key, Color)
+    date_cols = [col for col in df.columns if col not in ["Shift Type", "Shift Key", "Color"]]
     
     # Create column configuration with color coding
     column_config = {
-        "Date": st.column_config.DateColumn("Date", format="MM/DD/YYYY", width="medium"),
-        "Day": st.column_config.TextColumn("Day", width="medium"),
-        "Day_Short": st.column_config.TextColumn("Day", width="small"),
+        "Shift Type": st.column_config.TextColumn(
+            "Shift Type", 
+            width="medium",
+            help="Type of shift"
+        )
     }
     
-    # Add shift type columns with color coding
-    shift_colors = {
-        "7am Rounders": "#16a34a",
-        "7am Admitter": "#f59e0b", 
-        "10am Admitter": "#ef4444",
-        "Night Shift": "#7c3aed",
-        "Bridge": "#06b6d4",
-        "APP": "#8b5cf6"
-    }
-    
-    for shift_col in shift_cols:
-        if shift_col in df.columns:
-            column_config[shift_col] = st.column_config.TextColumn(
-                shift_col, 
-                width="medium",
-                help=f"Providers assigned to {shift_col}"
-            )
+    # Add date columns
+    for date_col in date_cols:
+        column_config[date_col] = st.column_config.TextColumn(
+            date_col, 
+            width="small",
+            help=f"Providers assigned on {date_col}"
+        )
     
     st.markdown("### 📊 Schedule Grid View")
     st.markdown("**Shift Types:** 7am Rounders | 7am Admitter | 10am Admitter | Night Shift | Bridge | APP")
     
     # Display the grid with styling
+    display_df = df[["Shift Type"] + date_cols]
+    
+    # Apply color coding to the dataframe
+    def color_shift_types(val):
+        if val in ["7am Rounders", "7am Admitter", "10am Admitter", "Night Shift", "Bridge", "APP"]:
+            colors = {
+                "7am Rounders": "#16a34a",
+                "7am Admitter": "#f59e0b", 
+                "10am Admitter": "#ef4444",
+                "Night Shift": "#7c3aed",
+                "Bridge": "#06b6d4",
+                "APP": "#8b5cf6"
+            }
+            return f'background-color: {colors.get(val, "#ffffff")}; color: white; font-weight: bold;'
+        return ''
+    
+    # Apply styling
+    styled_df = display_df.style.applymap(color_shift_types, subset=['Shift Type'])
+    
     st.dataframe(
-        df[date_cols + shift_cols],
+        styled_df,
         use_container_width=True,
         hide_index=True,
         column_config=column_config
@@ -184,13 +165,70 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.metric("Providers Used", len(unique_providers))
     
     with col3:
-        days_with_events = len([row for _, row in df.iterrows() if any(row[col] != "" for col in shift_cols)])
+        # Count days with events
+        days_with_events = 0
+        for date_col in date_cols:
+            if any(df[date_col] != ""):
+                days_with_events += 1
         st.metric("Days with Events", days_with_events)
     
     with col4:
-        total_days = len(df)
+        total_days = len(date_cols)
         coverage_percent = (days_with_events / total_days * 100) if total_days > 0 else 0
         st.metric("Coverage", f"{coverage_percent:.1f}%")
+    
+    # Provider statistics
+    st.markdown("### 📈 Provider Statistics")
+    
+    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+        providers_df = st.session_state.providers_df
+        
+        # Count by type
+        physician_count = len(providers_df[providers_df["type"] == "Physician"])
+        app_count = len(providers_df[providers_df["type"] == "APP"])
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total Providers", len(providers_df))
+        
+        with col2:
+            st.metric("Physicians", physician_count)
+        
+        with col3:
+            st.metric("APPs", app_count)
+        
+        # Show provider utilization
+        st.markdown("#### Provider Utilization")
+        provider_counts = {}
+        
+        for event in events:
+            if hasattr(event, 'extendedProps'):
+                provider = event.extendedProps.get("provider", "")
+            elif isinstance(event, dict) and 'extendedProps' in event:
+                provider = event['extendedProps'].get("provider", "")
+            else:
+                continue
+            
+            if provider:
+                provider_counts[provider] = provider_counts.get(provider, 0) + 1
+        
+        if provider_counts:
+            # Create a DataFrame for provider utilization
+            utilization_df = pd.DataFrame([
+                {"Provider": provider, "Shifts": count}
+                for provider, count in provider_counts.items()
+            ]).sort_values("Shifts", ascending=False)
+            
+            st.dataframe(
+                utilization_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Provider": st.column_config.TextColumn("Provider", width="medium"),
+                    "Shifts": st.column_config.NumberColumn("Shifts", width="small")
+                }
+            )
     
     return df
 

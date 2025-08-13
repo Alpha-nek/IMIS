@@ -23,16 +23,16 @@ DEFAULT_SHIFT_TYPES = [
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-# Provider Rosters
+# Provider Rosters - Updated to match CSV file exactly
 PROVIDER_INITIALS_DEFAULT = [
-    "AA","AD","AM","FS","JM","JT","KA","LN","SM","OI","NP","PR","UN",
+    "AA","AD","AM","FS","JL","JM","JT","KA","LN","SM","OI","NP","PR","UN",
     "DP","FY","YL","RR","SD","JK","NS","PD","AB","KF","AL","GB","KD","NG","GI","VT","DI","YD",
     "HS","YA","NM","EM","SS","YS","HW","AH","RJ","SI","FH","EB","RS","RG","CJ","MS","AT",
     "YH","XL","MA","LM","MQ","CM","AI"
 ]
 
 # APP Provider roster - these providers can only take APP shifts
-APP_PROVIDER_INITIALS = ["JA", "DN", "KP", "AR", "JL"]
+APP_PROVIDER_INITIALS = ["JA", "DN", "KP", "AR"]
 
 # Default shift capacities
 DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2, "APP": 2}

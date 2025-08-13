@@ -53,7 +53,6 @@ def vacation_request_form(provider: str):
         end_date = st.date_input("End Date", key="vacation_end")
     
     reason = st.text_area("Reason for Vacation", key="vacation_reason")
-    priority = st.select_slider("Priority", options=["Low", "Medium", "High"], value="Medium", key="vacation_priority")
     
     if st.button("Submit Vacation Request", type="primary"):
         if not provider or not reason or start_date >= end_date:
@@ -66,7 +65,6 @@ def vacation_request_form(provider: str):
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
                 "reason": reason,
-                "priority": priority,
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -84,7 +82,6 @@ def blackout_date_request_form(provider: str):
     
     blackout_date = st.date_input("Blackout Date", key="blackout_date")
     reason = st.text_area("Reason for Blackout", key="blackout_reason")
-    priority = st.select_slider("Priority", options=["Low", "Medium", "High"], value="Medium", key="blackout_priority")
     
     if st.button("Submit Blackout Request", type="primary"):
         if not provider or not reason:
@@ -96,7 +93,6 @@ def blackout_date_request_form(provider: str):
                 "provider": provider,
                 "date": blackout_date.isoformat(),
                 "reason": reason,
-                "priority": priority,
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -124,12 +120,20 @@ def shift_swap_request_form(provider: str):
         desired_date = st.date_input("Desired Shift Date", key="swap_desired_date")
         desired_shift = st.selectbox("Desired Shift Type", options=["Day", "Night", "APP"], key="swap_desired_shift")
     
-    swap_with = st.text_input("Swap with Provider (Optional)", key="swap_with_provider")
+    # Make swap_with required instead of optional
+    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+        # Remove current provider from the list
+        providers = [p for p in providers if p != provider]
+        swap_with = st.selectbox("Swap with Provider", options=providers, key="swap_with_provider")
+    else:
+        swap_with = st.text_input("Swap with Provider", key="swap_with_provider")
+    
     reason = st.text_area("Reason for Swap", key="swap_reason")
     
     if st.button("Submit Swap Request", type="primary"):
-        if not provider or not reason:
-            st.error("Please fill in all required fields.")
+        if not provider or not swap_with or not reason:
+            st.error("Please fill in all required fields including the provider to swap with.")
         else:
             request = {
                 "id": f"swap_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
@@ -139,7 +143,7 @@ def shift_swap_request_form(provider: str):
                 "current_shift": current_shift,
                 "desired_date": desired_date.isoformat(),
                 "desired_shift": desired_shift,
-                "swap_with": swap_with if swap_with else None,
+                "swap_with": swap_with,
                 "reason": reason,
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
@@ -158,7 +162,6 @@ def general_request_form(provider: str):
     
     request_title = st.text_input("Request Title", key="general_title")
     request_description = st.text_area("Request Description", key="general_description")
-    priority = st.select_slider("Priority", options=["Low", "Medium", "High"], value="Medium", key="general_priority")
     
     if st.button("Submit General Request", type="primary"):
         if not provider or not request_title or not request_description:
@@ -170,7 +173,6 @@ def general_request_form(provider: str):
                 "provider": provider,
                 "title": request_title,
                 "description": request_description,
-                "priority": priority,
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -196,7 +198,7 @@ def display_existing_requests():
     if pending_requests:
         st.subheader("⏳ Pending Requests")
         for i, request in enumerate(pending_requests):
-            with st.expander(f"{request['type']} - {request['provider']} ({request['priority']})", expanded=True):
+            with st.expander(f"{request['type']} - {request['provider']}", expanded=True):
                 display_request_details(request)
                 
                 col1, col2, col3 = st.columns([1, 1, 1])
@@ -204,7 +206,11 @@ def display_existing_requests():
                     if st.button("✅ Approve", key=f"approve_{request['id']}"):
                         request["status"] = "approved"
                         request["processed_at"] = datetime.now().isoformat()
-                        st.success("Request approved!")
+                        
+                        # Apply the approved request to the schedule
+                        apply_approved_request(request)
+                        
+                        st.success("Request approved and applied to schedule!")
                         st.rerun()
                 
                 with col2:
@@ -236,7 +242,6 @@ def display_request_details(request: Dict[str, Any]):
     """Display request details."""
     st.write(f"**Provider:** {request['provider']}")
     st.write(f"**Type:** {request['type']}")
-    st.write(f"**Priority:** {request['priority']}")
     st.write(f"**Submitted:** {request['submitted_at']}")
     
     if request['type'] == "Vacation Request":
@@ -253,17 +258,70 @@ def display_request_details(request: Dict[str, Any]):
     
     st.write(f"**Reason:** {request['reason']}")
 
+def apply_approved_request(request: Dict[str, Any]):
+    """Apply an approved request to the current schedule."""
+    if "events" not in st.session_state:
+        st.session_state.events = []
+    
+    if request["type"] == "Vacation Request":
+        # Add vacation events to the schedule
+        start_date = datetime.fromisoformat(request["start_date"]).date()
+        end_date = datetime.fromisoformat(request["end_date"]).date()
+        
+        current_date = start_date
+        while current_date <= end_date:
+            # Create vacation event
+            vacation_event = {
+                "id": f"vac_{request['provider']}_{current_date.isoformat()}",
+                "title": f"{request['provider']} - Vacation",
+                "start": datetime.combine(current_date, datetime.min.time()).isoformat(),
+                "end": datetime.combine(current_date, datetime.min.time()).isoformat(),
+                "extendedProps": {
+                    "provider": request["provider"],
+                    "shift_type": "VACATION",
+                    "reason": request["reason"]
+                }
+            }
+            st.session_state.events.append(vacation_event)
+            current_date += timedelta(days=1)
+    
+    elif request["type"] == "Shift Swap":
+        # Execute the shift swap
+        execute_shift_swap(request)
+
 def execute_shift_swap(request: Dict[str, Any]):
     """Execute a shift swap request."""
-    st.info("Shift swap execution would be implemented here.")
-    st.write("This would involve:")
-    st.write("1. Finding the current schedule")
-    st.write("2. Swapping the shifts")
-    st.write("3. Updating the calendar")
-    st.write("4. Notifying affected providers")
+    if "events" not in st.session_state:
+        st.session_state.events = []
     
-    # For now, just mark as executed
+    # Find the events to swap
+    current_date = datetime.fromisoformat(request["current_date"]).date()
+    desired_date = datetime.fromisoformat(request["desired_date"]).date()
+    
+    # Find current provider's event on current date
+    current_event = None
+    desired_event = None
+    
+    for event in st.session_state.events:
+        if isinstance(event, dict) and 'start' in event:
+            event_date = datetime.fromisoformat(event['start']).date()
+            event_provider = event.get('extendedProps', {}).get('provider', '')
+            
+            if event_date == current_date and event_provider == request["provider"]:
+                current_event = event
+            elif event_date == desired_date and event_provider == request["swap_with"]:
+                desired_event = event
+    
+    # Swap the providers
+    if current_event and desired_event:
+        # Swap providers
+        current_event['extendedProps']['provider'] = request["swap_with"]
+        desired_event['extendedProps']['provider'] = request["provider"]
+        
+        # Update titles
+        current_event['title'] = f"{request['swap_with']} - {current_event['extendedProps'].get('shift_type', 'Shift')}"
+        desired_event['title'] = f"{request['provider']} - {desired_event['extendedProps'].get('shift_type', 'Shift')}"
+    
+    # Mark as executed
     request["status"] = "executed"
     request["processed_at"] = datetime.now().isoformat()
-    st.success("Shift swap executed!")
-    st.rerun()

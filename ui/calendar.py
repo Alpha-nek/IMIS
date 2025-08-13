@@ -25,7 +25,7 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
         else:
             continue
     
-    # Calendar HTML with improved styling
+    # Calendar HTML with improved styling and full width
     calendar_html = f"""
     <!DOCTYPE html>
     <html>
@@ -37,23 +37,38 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                 margin: 0;
                 padding: 0;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                width: 100%;
+                height: 100%;
             }}
             
             #calendar {{
-                width: 100%;
-                height: 100%;
+                width: 100% !important;
+                height: 100% !important;
                 background: white;
+                margin: 0;
+                padding: 0;
             }}
             
             .fc {{
                 font-size: 14px;
                 line-height: 1.4;
+                width: 100% !important;
+                max-width: none !important;
+            }}
+            
+            .fc-view-harness {{
+                width: 100% !important;
+            }}
+            
+            .fc-scroller {{
+                width: 100% !important;
             }}
             
             .fc-header-toolbar {{
                 padding: 10px;
                 background: #f8f9fa;
                 border-bottom: 1px solid #dee2e6;
+                width: 100%;
             }}
             
             .fc-toolbar-title {{
@@ -83,6 +98,7 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             
             .fc-daygrid-day {{
                 border: 1px solid #dee2e6;
+                min-height: 120px;
             }}
             
             .fc-daygrid-day-number {{
@@ -138,11 +154,13 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             }}
             
             .fc-daygrid-day-frame {{
-                min-height: 100px;
+                min-height: 120px;
+                width: 100%;
             }}
             
             .fc-daygrid-day-events {{
                 margin: 2px;
+                width: 100%;
             }}
             
             .fc-daygrid-event-dot {{
@@ -160,10 +178,22 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
             .fc-daygrid-day.fc-day-other {{
                 background: #e9ecef;
             }}
+            
+            .fc-daygrid-day-events {{
+                min-height: 0;
+            }}
+            
+            .fc-daygrid-day-frame {{
+                min-height: 120px;
+            }}
+            
+            .fc-daygrid-day {{
+                min-height: 120px;
+            }}
         </style>
     </head>
     <body>
-        <div id='calendar'></div>
+        <div id='calendar' style="width: 100%; height: 100%;"></div>
         <script>
             var calendarEl = document.getElementById('calendar');
             var calendar = new FullCalendar.Calendar(calendarEl, {{
@@ -188,7 +218,7 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                     minute: '2-digit',
                     meridiem: 'short'
                 }},
-                dayMaxEvents: 5,
+                dayMaxEvents: 8,
                 moreLinkClick: 'popover',
                 eventClick: function(info) {{
                     // Send event data to Streamlit
@@ -219,12 +249,26 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                 }}
             }});
             calendar.render();
+            
+            // Force calendar to use full width
+            setTimeout(function() {{
+                calendar.updateSize();
+            }}, 100);
         </script>
     </body>
     </html>
     """
     
-    # Use full container width
+    # Use full container width with proper styling
+    st.markdown("""
+    <style>
+        .stApp > div > div > div > div > section > div {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     components.html(calendar_html, height=height, scrolling=False)
 
 def render_month_navigation() -> Tuple[int, int]:

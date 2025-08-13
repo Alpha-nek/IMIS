@@ -298,34 +298,13 @@ def render_desktop_interface():
     </style>
     """, unsafe_allow_html=True)
     
-    # Professional header and provider status indicator
+    # Professional header
     st.markdown("""
     <div class="main-header">
         <h1>🏥 IMIS Hospitalist Scheduler</h1>
         <p>Intelligent Medical Inpatient Scheduling System</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Provider status indicator
-    if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
-        provider_count = len(st.session_state.providers_df)
-        physicians = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "Physician"])
-        apps = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "APP"])
-        
-        st.markdown(f"""
-        <div class="status-card status-success">
-            <h4>✅ Providers Loaded Successfully</h4>
-            <p><strong>{provider_count}</strong> providers available ({physicians} Physicians, {apps} APPs)</p>
-            <p><small>Data automatically saved and will persist between sessions</small></p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="status-card status-error">
-            <h4>⚠️ No Providers Loaded</h4>
-            <p>Default providers are available. Load additional providers from the Providers tab.</p>
-        </div>
-        """, unsafe_allow_html=True)
     
     # Main tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -461,6 +440,37 @@ def render_desktop_interface():
                                 st.error(f"  - {violation}")
             else:
                 st.success("✅ All rules validated successfully!")
+        
+        # Provider statistics section
+        if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
+            st.markdown("### 📊 Provider Statistics")
+            
+            providers_df = st.session_state.providers_df
+            physician_count = len(providers_df[providers_df["type"] == "Physician"])
+            app_count = len(providers_df[providers_df["type"] == "APP"])
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Providers", len(providers_df))
+            
+            with col2:
+                st.metric("Physicians", physician_count)
+            
+            with col3:
+                st.metric("APPs", app_count)
+            
+            with col4:
+                if st.session_state.events:
+                    unique_providers = set()
+                    for event in st.session_state.events:
+                        if isinstance(event, dict) and 'extendedProps' in event:
+                            provider = event['extendedProps'].get("provider", "")
+                            if provider:
+                                unique_providers.add(provider)
+                    st.metric("Providers Scheduled", len(unique_providers))
+                else:
+                    st.metric("Providers Scheduled", 0)
         
         # Render calendar
         if st.session_state.events:
