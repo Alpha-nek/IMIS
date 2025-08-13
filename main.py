@@ -886,34 +886,47 @@ def render_desktop_interface():
         # Shift Types Configuration
         st.subheader("🔄 Shift Types")
         
+        # Use the correct shift type structure from constants
+        correct_shift_types = [
+            {"key": "R12", "label": "7am–7pm Rounder", "start": "07:00", "end": "19:00", "color": "#16a34a"},
+            {"key": "A12", "label": "7am–7pm Admitter", "start": "07:00", "end": "19:00", "color": "#f59e0b"},
+            {"key": "A10", "label": "10am–10pm Admitter", "start": "10:00", "end": "22:00", "color": "#ef4444"},
+            {"key": "N12", "label": "7pm–7am (Night)", "start": "19:00", "end": "07:00", "color": "#7c3aed"},
+            {"key": "NB", "label": "Night Bridge", "start": "23:00", "end": "07:00", "color": "#06b6d4"},
+            {"key": "APP", "label": "APP Provider", "start": "07:00", "end": "19:00", "color": "#8b5cf6"},
+        ]
+        
+        # Update session state if it doesn't match the correct structure
+        if not hasattr(st.session_state, 'shift_types') or len(st.session_state.shift_types) != len(correct_shift_types):
+            st.session_state.shift_types = correct_shift_types.copy()
+        
         for i, shift_type in enumerate(st.session_state.shift_types):
-            # Safety check for shift_type structure
-            if not isinstance(shift_type, dict) or 'name' not in shift_type:
-                # Reset to default if corrupted
-                st.session_state.shift_types[i] = DEFAULT_SHIFT_TYPES[i] if i < len(DEFAULT_SHIFT_TYPES) else {
-                    'name': f'Shift {i+1}',
-                    'start_time': '08:00',
-                    'end_time': '16:00',
-                    'color': '#1f77b4'
-                }
+            # Ensure the shift type has the correct structure
+            if not isinstance(shift_type, dict) or 'key' not in shift_type:
+                st.session_state.shift_types[i] = correct_shift_types[i]
                 shift_type = st.session_state.shift_types[i]
             
-            with st.expander(f"Shift Type: {shift_type.get('name', f'Shift {i+1}')}", expanded=True):
-                col1, col2, col3 = st.columns(3)
+            with st.expander(f"Shift Type: {shift_type.get('label', f'Shift {i+1}')}", expanded=True):
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.session_state.shift_types[i]['name'] = st.text_input(
-                        "Name", value=shift_type.get('name', f'Shift {i+1}'), key=f"shift_name_{i}"
+                    st.session_state.shift_types[i]['key'] = st.text_input(
+                        "Key", value=shift_type.get('key', ''), key=f"shift_key_{i}"
                     )
                 
                 with col2:
-                    st.session_state.shift_types[i]['start_time'] = st.text_input(
-                        "Start Time", value=shift_type.get('start_time', '08:00'), key=f"shift_start_{i}"
+                    st.session_state.shift_types[i]['label'] = st.text_input(
+                        "Label", value=shift_type.get('label', ''), key=f"shift_label_{i}"
                     )
                 
                 with col3:
-                    st.session_state.shift_types[i]['end_time'] = st.text_input(
-                        "End Time", value=shift_type.get('end_time', '16:00'), key=f"shift_end_{i}"
+                    st.session_state.shift_types[i]['start'] = st.text_input(
+                        "Start Time", value=shift_type.get('start', '07:00'), key=f"shift_start_{i}"
+                    )
+                
+                with col4:
+                    st.session_state.shift_types[i]['end'] = st.text_input(
+                        "End Time", value=shift_type.get('end', '19:00'), key=f"shift_end_{i}"
                     )
                 
                 # Color picker for shift type
@@ -924,19 +937,24 @@ def render_desktop_interface():
         # Shift Capacity Configuration
         st.subheader("📊 Shift Capacity")
         
+        # Use the correct capacity mapping
+        default_capacities = {"R12": 13, "A12": 1, "A10": 2, "N12": 4, "NB": 1, "APP": 2}
+        
         for shift_type in st.session_state.shift_types:
-            # Safety check for shift_type structure
-            if not isinstance(shift_type, dict) or 'name' not in shift_type:
-                continue  # Skip corrupted shift types
+            if not isinstance(shift_type, dict) or 'key' not in shift_type:
+                continue
             
-            shift_name = shift_type.get('name', 'Unknown')
+            shift_key = shift_type.get('key', 'Unknown')
+            shift_label = shift_type.get('label', shift_key)
+            default_capacity = default_capacities.get(shift_key, 1)
+            
             capacity = st.number_input(
-                f"Capacity for {shift_name}", 
-                min_value=1, max_value=10, 
-                value=st.session_state.shift_capacity.get(shift_name, 1),
-                key=f"capacity_{shift_name}"
+                f"Capacity for {shift_label} ({shift_key})", 
+                min_value=1, max_value=20, 
+                value=st.session_state.shift_capacity.get(shift_key, default_capacity),
+                key=f"capacity_{shift_key}"
             )
-            st.session_state.shift_capacity[shift_name] = capacity
+            st.session_state.shift_capacity[shift_key] = capacity
         
         # Auto-save settings when changed
         if st.button("💾 Save Settings", type="primary"):

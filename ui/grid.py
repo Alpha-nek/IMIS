@@ -186,7 +186,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "Shift Type",
             disabled=True,
             help="Shift type color indicator",
-            width="small"
+            width="medium"
         )
     }
     
@@ -198,29 +198,21 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             if meta["row_label"] in grid_df.index:
                 shift_types_in_col.add(meta["shift_key"])
         
-        # Set options based on shift types in this column
-        if "APP" in shift_types_in_col and len(shift_types_in_col) == 1:
-            # If ONLY APP shifts are available, only APP providers can be assigned
-            app_providers = ["None"] + [p for p in providers if p in ["JA", "DN", "KP", "AR"]]
-            options = app_providers
-            help_text = f"Assignments for {date_col} (APP providers only)"
-        elif "APP" not in shift_types_in_col:
-            # If NO APP shifts are available, only physician providers
-            physician_providers = ["None"] + [p for p in providers if p not in ["JA", "DN", "KP", "AR"]]
-            options = physician_providers
-            help_text = f"Assignments for {date_col} (Physicians only)"
-        else:
-            # Mixed shift types - allow both provider types
-            options = provider_options
-            help_text = f"Assignments for {date_col} (All providers)"
+        # Filter providers based on shift type
+        available_providers = []
+        for provider in providers:
+            # For now, allow all providers for all shift types
+            # This can be enhanced later with provider-specific restrictions
+            available_providers.append(provider)
         
         col_config[date_col] = st.column_config.SelectboxColumn(
-            options=options,
-            help=help_text,
+            date_col,
+            options=provider_options,
+            help=f"Assign provider to {date_col}",
             width="small"
         )
     
-    # Add CSS for better styling with sticky first column
+    # Add custom CSS for sticky first column and better styling
     st.markdown("""
     <style>
         .grid-container {
@@ -248,13 +240,31 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             left: 0 !important;
             z-index: 1000 !important;
             background: white !important;
+            min-width: 200px !important;
         }
-        
+
         /* Ensure sticky column has proper styling */
         [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child th,
         [data-testid="stDataFrame"] [data-testid="stDataFrame"] > div:first-child td {
             background: white !important;
-            border-right: 2px solid #e0e0e0 !important;
+            border-right: 3px solid #FF674D !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        
+        /* Make the data editor container scrollable */
+        [data-testid="stDataFrame"] {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        
+        /* Ensure proper cell sizing */
+        [data-testid="stDataFrame"] td {
+            min-width: 120px !important;
+            max-width: 150px !important;
         }
     </style>
     """, unsafe_allow_html=True)
