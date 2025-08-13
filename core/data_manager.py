@@ -168,27 +168,28 @@ def load_providers() -> tuple[pd.DataFrame, Dict]:
         print(f"Error loading providers: {e}")
         return pd.DataFrame(), {}
 
-def save_rules(global_rules: Any, shift_types: List, shift_capacity: Dict) -> None:
-    """Save global rules and shift configuration to JSON file."""
+def save_rules(global_rules: Any, shift_types: List, shift_capacity: Dict, provider_rules: Dict = None) -> None:
+    """Save global rules, shift configuration, and provider rules to JSON file."""
     ensure_data_directory()
     
     data = {
         "global_rules": global_rules.dict() if hasattr(global_rules, 'dict') else global_rules.__dict__,
         "shift_types": shift_types,
         "shift_capacity": shift_capacity,
+        "provider_rules": provider_rules or {},
         "last_updated": datetime.now().isoformat()
     }
     
     with open(RULES_FILE, 'w') as f:
         json.dump(data, f, indent=2, default=str)
 
-def load_rules() -> tuple[Dict, List, Dict]:
-    """Load global rules and shift configuration from JSON file."""
+def load_rules() -> tuple[Dict, List, Dict, Dict]:
+    """Load global rules, shift configuration, and provider rules from JSON file."""
     ensure_data_directory()
     
     if not os.path.exists(RULES_FILE):
         # Return defaults if file doesn't exist
-        return {}, [], {}
+        return {}, [], {}, {}
     
     try:
         with open(RULES_FILE, 'r') as f:
@@ -197,11 +198,12 @@ def load_rules() -> tuple[Dict, List, Dict]:
         global_rules = data.get("global_rules", {})
         shift_types = data.get("shift_types", [])
         shift_capacity = data.get("shift_capacity", {})
+        provider_rules = data.get("provider_rules", {})
         
-        return global_rules, shift_types, shift_capacity
+        return global_rules, shift_types, shift_capacity, provider_rules
     except Exception as e:
         print(f"Error loading rules: {e}")
-        return {}, [], {}
+        return {}, [], {}, {}
 
 def save_schedule(year: int, month: int, events: List[Dict]) -> None:
     """Save schedule for a specific month to JSON file."""
@@ -312,7 +314,8 @@ def auto_save_session_state():
             save_rules(
                 st.session_state.global_rules,
                 st.session_state.get('shift_types', []),
-                st.session_state.get('shift_capacity', {})
+                st.session_state.get('shift_capacity', {}),
+                st.session_state.get('provider_rules', {}) # Pass provider_rules to save_rules
             )
         
         # Save current schedule if it exists
@@ -328,14 +331,13 @@ def auto_load_session_state():
     """Automatically load data from files into session state."""
     try:
         # Load providers
-        providers_df, provider_rules = load_providers()
+        providers_df, provider_rules_from_file = load_providers()
         if not providers_df.empty:
             st.session_state.providers_df = providers_df
-            st.session_state.provider_rules = provider_rules
             st.session_state.providers_loaded = True
         
         # Load rules
-        global_rules_dict, shift_types, shift_capacity = load_rules()
+        global_rules_dict, shift_types, shift_capacity, provider_rules_from_rules = load_rules()
         if global_rules_dict:
             from models.data_models import RuleConfig
             st.session_state.global_rules = RuleConfig(**global_rules_dict)
@@ -343,6 +345,11 @@ def auto_load_session_state():
             st.session_state.shift_types = shift_types
         if shift_capacity:
             st.session_state.shift_capacity = shift_capacity
+        
+        # Merge provider rules (rules file takes precedence)
+        merged_provider_rules = {**provider_rules_from_file, **provider_rules_from_rules}
+        if merged_provider_rules:
+            st.session_state.provider_rules = merged_provider_rules
         
         # Load current month's schedule
         current_year = st.session_state.get('current_year', datetime.now().year)
