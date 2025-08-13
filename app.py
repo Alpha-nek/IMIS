@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # app.py — Interactive Monthly Scheduler for Multi-Doctor Shifts (Streamlit)
 # ---------------------------------------------------------------
 # 
@@ -3810,25 +3810,6 @@ def check_shift_swap_violations(provider1: str, date1: str, provider2: str, date
 
 if __name__ == "__main__":
     main()
-
-=======
-# app.py — Interactive Monthly Scheduler for Multi-Doctor Shifts (Streamlit)
-# ---------------------------------------------------------------
-# 
-# Vibe Coded By Yazan Al-Fanek, MD and Chat GPT5
-# 
-# Features
-# - Upload or paste a provider list (initials)
-# - Define/confirm shift types
-# - Pick a month/year
-# - Auto-generate a draft schedule from rules (greedy round-robin)
-# - FullCalendar-based interactive calendar (select, drag, edit, delete)
-# - Filter/highlight by provider
-# - Per-event comments (stored alongside events)
-# - Validate rules & show violations
-# - Save/Load as CSV or JSON
-#
-# Requirements (install):
 #   pip install streamlit pandas numpy pydantic streamlit-calendar python-dateutil
 #   # If streamlit-calendar fails to install, see: https://pypi.org/project/streamlit-calendar/
 #
