@@ -63,8 +63,8 @@ def get_min_shifts_for_month(year: int, month: int) -> int:
 def recommended_max_shifts_for_month():
     """Recommended max shifts per provider for the current month."""
     import streamlit as st
-    year = st.session_state.month.year
-    month = st.session_state.month.month
+    year = st.session_state.get("current_year", datetime.now().year)
+    month = st.session_state.get("current_month", datetime.now().month)
     return get_min_shifts_for_month(year, month)
 
 def make_month_days(year: int, month: int) -> List[date]:
@@ -107,7 +107,9 @@ def _provider_has_vacation_in_month(pr: dict) -> bool:
     vac = pr.get("vacations", [])
     if not vac:
         return False
-    ym = (st.session_state.month.year, st.session_state.month.month)
+    year = st.session_state.get("current_year", datetime.now().year)
+    month = st.session_state.get("current_month", datetime.now().month)
+    ym = (year, month)
     for d in _expand_vacation_dates(vac):
         if (d.year, d.month) == ym:
             return True

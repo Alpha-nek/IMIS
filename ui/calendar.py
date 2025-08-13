@@ -10,12 +10,19 @@ import json
 
 from models.data_models import SEvent
 
-def render_calendar(events: List[SEvent], height: int = 600) -> None:
+def render_calendar(events: List[Any], height: int = 600) -> None:
     """
-    Render the calendar using Streamlit components.
+    Render the calendar using Streamlit components. Handles both SEvent objects and dictionaries.
     """
     # Convert events to JSON format
-    events_json = [event.to_json_event() for event in events]
+    events_json = []
+    for event in events:
+        if hasattr(event, 'to_json_event'):
+            events_json.append(event.to_json_event())
+        elif isinstance(event, dict):
+            events_json.append(event)
+        else:
+            continue
     
     # Calendar HTML
     calendar_html = f"""
@@ -68,30 +75,42 @@ def render_month_navigation() -> Tuple[int, int]:
     """
     Render month navigation controls.
     """
+    # Get current year and month from session state
+    current_year = st.session_state.get("current_year", datetime.now().year)
+    current_month = st.session_state.get("current_month", datetime.now().month)
+    
+    # Create a date object for the current month
+    current_date = date(current_year, current_month, 1)
+    
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col1:
         if st.button("← Previous Month"):
-            current_date = st.session_state.get("current_month", date.today())
-            if current_date.month == 1:
-                new_date = current_date.replace(year=current_date.year - 1, month=12)
+            if current_month == 1:
+                new_year = current_year - 1
+                new_month = 12
             else:
-                new_date = current_date.replace(month=current_date.month - 1)
-            st.session_state.current_month = new_date
+                new_year = current_year
+                new_month = current_month - 1
+            
+            st.session_state.current_year = new_year
+            st.session_state.current_month = new_month
             st.rerun()
     
     with col2:
-        st.write(f"**{st.session_state.get('current_month', date.today()).strftime('%B %Y')}**")
+        st.write(f"**{current_date.strftime('%B %Y')}**")
     
     with col3:
         if st.button("Next Month →"):
-            current_date = st.session_state.get("current_month", date.today())
-            if current_date.month == 12:
-                new_date = current_date.replace(year=current_date.year + 1, month=1)
+            if current_month == 12:
+                new_year = current_year + 1
+                new_month = 1
             else:
-                new_date = current_date.replace(month=current_date.month + 1)
-            st.session_state.current_month = new_date
+                new_year = current_year
+                new_month = current_month + 1
+            
+            st.session_state.current_year = new_year
+            st.session_state.current_month = new_month
             st.rerun()
     
-    current_date = st.session_state.get("current_month", date.today())
-    return current_date.year, current_date.month#initial file
+    return current_year, current_month

@@ -108,7 +108,7 @@ def _can_provider_take_shift(provider: str, day: date, shift_type: str,
     # Check rest days between shifts
     if last_shift_date:
         days_since_last = (day - last_shift_date).days
-        if days_since_last < global_rules.min_rest_days_between_shifts:
+        if days_since_last < global_rules.min_days_between_shifts:
             return False
     
     # Check if provider already has a shift on this day
@@ -123,13 +123,8 @@ def validate_rules(events: List[SEvent], providers: List[str],
     """
     Validate scheduling rules and return violations.
     """
-    violations = {
-        "min_shifts": [],
-        "max_shifts": [],
-        "rest_days": [],
-        "weekend_coverage": [],
-        "night_shifts": []
-    }
+    violations = []
+    provider_violations = {}
     
     # Count shifts per provider
     provider_shift_counts = {p: 0 for p in providers}
@@ -156,36 +151,48 @@ def validate_rules(events: List[SEvent], providers: List[str],
         provider_rule = provider_rules.get(provider, {})
         
         # Get min/max from provider-specific rules or global rules
-        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_provider)
-        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_provider)
+        min_shifts = provider_rule.get("min_shifts", global_rules.min_shifts_per_month)
+        max_shifts = provider_rule.get("max_shifts", global_rules.max_shifts_per_month)
+        
+        provider_violations[provider] = []
         
         if shift_count < min_shifts:
-            violations["min_shifts"].append({
-                "provider": provider,
-                "current": shift_count,
-                "required": min_shifts
-            })
+            violation = f"{provider}: {shift_count} shifts (min {min_shifts} required)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
         
         if shift_count > max_shifts:
-            violations["max_shifts"].append({
-                "provider": provider,
-                "current": shift_count,
-                "allowed": max_shifts
-            })
+            violation = f"{provider}: {shift_count} shifts (max {max_shifts} allowed)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
         
         # Check weekend coverage
-        if global_rules.require_at_least_one_weekend and provider_weekend_shifts[provider] == 0:
-            violations["weekend_coverage"].append(provider)
+        if provider_weekend_shifts[provider] < global_rules.min_weekend_shifts_per_month:
+            violation = f"{provider}: {provider_weekend_shifts[provider]} weekend shifts (min {global_rules.min_weekend_shifts_per_month} required)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
+        
+        if provider_weekend_shifts[provider] > global_rules.max_weekend_shifts_per_month:
+            violation = f"{provider}: {provider_weekend_shifts[provider]} weekend shifts (max {global_rules.max_weekend_shifts_per_month} allowed)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
         
         # Check night shift limits
-        if global_rules.max_nights_per_provider and provider_night_shifts[provider] > global_rules.max_nights_per_provider:
-            violations["night_shifts"].append({
-                "provider": provider,
-                "current": provider_night_shifts[provider],
-                "allowed": global_rules.max_nights_per_provider
-            })
+        if provider_night_shifts[provider] < global_rules.min_night_shifts_per_month:
+            violation = f"{provider}: {provider_night_shifts[provider]} night shifts (min {global_rules.min_night_shifts_per_month} required)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
+        
+        if provider_night_shifts[provider] > global_rules.max_night_shifts_per_month:
+            violation = f"{provider}: {provider_night_shifts[provider]} night shifts (max {global_rules.max_night_shifts_per_month} allowed)"
+            violations.append(violation)
+            provider_violations[provider].append(violation)
     
-    return violations
+    return {
+        "is_valid": len(violations) == 0,
+        "violations": violations,
+        "provider_violations": provider_violations
+    }
 
 def generate_schedule(year: int, month: int, providers: List[str], 
                      shift_types: List[Dict], shift_capacity: Dict[str, int],
