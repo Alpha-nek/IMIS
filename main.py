@@ -90,6 +90,295 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+def render_header_with_logo():
+    """Render the main header with logo and branding."""
+    st.markdown("""
+    <style>
+        /* Brown color palette */
+        :root {
+            --primary-brown: #8B4513;
+            --secondary-brown: #A0522D;
+            --light-brown: #DEB887;
+            --warm-brown: #D2691E;
+            --cream: #F5F5DC;
+            --dark-brown: #654321;
+            --accent-brown: #CD853F;
+        }
+        
+        /* Header styling with logo */
+        .main-header {
+            background: linear-gradient(135deg, var(--primary-brown) 0%, var(--secondary-brown) 50%, var(--warm-brown) 100%);
+            padding: 1.5rem;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            color: white;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(139, 69, 19, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .main-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .header-content {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+        }
+        
+        .logo-container {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 0.5rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .logo-container img {
+            height: 60px;
+            width: auto;
+            border-radius: 8px;
+        }
+        
+        .header-text {
+            text-align: left;
+        }
+        
+        .header-text h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            color: var(--cream);
+        }
+        
+        .header-text p {
+            font-size: 1.1rem;
+            margin: 0.5rem 0 0 0;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+        
+        .header-subtitle {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-top: 0.25rem;
+        }
+        
+        /* Mobile responsive header */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .header-text {
+                text-align: center;
+            }
+            
+            .header-text h1 {
+                font-size: 2rem;
+            }
+            
+            .logo-container img {
+                height: 50px;
+            }
+        }
+        
+        /* Global brown theme styling */
+        .stButton > button {
+            background-color: var(--primary-brown) !important;
+            border-color: var(--primary-brown) !important;
+            color: white !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stButton > button:hover {
+            background-color: var(--secondary-brown) !important;
+            border-color: var(--secondary-brown) !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 12px rgba(139, 69, 19, 0.3) !important;
+        }
+        
+        .stButton > button:active {
+            transform: translateY(0) !important;
+        }
+        
+        /* Secondary button styling */
+        .stButton > button[kind="secondary"] {
+            background-color: transparent !important;
+            border-color: var(--primary-brown) !important;
+            color: var(--primary-brown) !important;
+        }
+        
+        .stButton > button[kind="secondary"]:hover {
+            background-color: var(--primary-brown) !important;
+            color: white !important;
+        }
+        
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            background-color: var(--cream);
+            border-radius: 10px;
+            padding: 0.5rem;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 8px;
+            font-weight: 500;
+            color: var(--dark-brown);
+            transition: all 0.3s ease;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background-color: var(--primary-brown) !important;
+            color: white !important;
+            box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
+        }
+        
+        .stTabs [aria-selected="false"]:hover {
+            background-color: var(--light-brown) !important;
+            color: var(--dark-brown) !important;
+        }
+        
+        /* Metric cards */
+        .metric-card {
+            background: linear-gradient(135deg, var(--cream) 0%, white 100%);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 0.5rem 0;
+            border-left: 4px solid var(--primary-brown);
+            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(139, 69, 19, 0.2);
+        }
+        
+        /* Status indicators */
+        .status-success {
+            border-left-color: #28a745;
+            background: linear-gradient(135deg, #d4edda 0%, #f8f9fa 100%);
+        }
+        
+        .status-error {
+            border-left-color: #dc3545;
+            background: linear-gradient(135deg, #f8d7da 0%, #f8f9fa 100%);
+        }
+        
+        .status-warning {
+            border-left-color: #ffc107;
+            background: linear-gradient(135deg, #fff3cd 0%, #f8f9fa 100%);
+        }
+        
+        /* Data editor styling */
+        [data-testid="stDataFrame"] {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+        }
+        
+        /* Calendar styling */
+        .calendar-container {
+            background: var(--cream);
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 4px 12px rgba(139, 69, 19, 0.1);
+        }
+        
+        /* Form styling */
+        .stTextInput > div > div > input {
+            border-color: var(--light-brown) !important;
+            border-radius: 8px !important;
+        }
+        
+        .stTextInput > div > div > input:focus {
+            border-color: var(--primary-brown) !important;
+            box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.2) !important;
+        }
+        
+        .stSelectbox > div > div > div {
+            border-color: var(--light-brown) !important;
+            border-radius: 8px !important;
+        }
+        
+        .stSelectbox > div > div > div:focus-within {
+            border-color: var(--primary-brown) !important;
+            box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.2) !important;
+        }
+        
+        /* Expander styling */
+        .streamlit-expanderHeader {
+            background-color: var(--cream) !important;
+            border-radius: 8px !important;
+            color: var(--dark-brown) !important;
+            font-weight: 500 !important;
+        }
+        
+        .streamlit-expanderHeader:hover {
+            background-color: var(--light-brown) !important;
+        }
+        
+        /* Success/Error messages */
+        .stAlert {
+            border-radius: 8px !important;
+            border-left: 4px solid !important;
+        }
+        
+        .stAlert[data-baseweb="notification"] {
+            border-left-color: var(--primary-brown) !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header with logo
+    st.markdown("""
+    <div class="main-header">
+        <div class="header-content">
+            <div class="logo-container">
+                <img src="data:image/png;base64,{}" alt="IMIS Logo">
+            </div>
+            <div class="header-text">
+                <h1>🏥 IMIS Scheduler</h1>
+                <p>Hospitalist Management & Scheduling System</p>
+                <div class="header-subtitle">Professional • Efficient • Reliable</div>
+            </div>
+        </div>
+    </div>
+    """.format(get_base64_logo()), unsafe_allow_html=True)
+
+def get_base64_logo():
+    """Convert the logo to base64 for embedding in HTML."""
+    import base64
+    
+    try:
+        with open("brown logo.png", "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode()
+        return encoded_string
+    except FileNotFoundError:
+        # Fallback if logo not found
+        return ""
+    except Exception as e:
+        st.warning(f"Could not load logo: {e}")
+        return ""
+
 def initialize_session_state():
     """Initialize Streamlit session state variables with automatic data loading."""
     try:
@@ -220,356 +509,227 @@ def render_mobile_interface():
 
 def render_desktop_interface():
     """Render desktop interface."""
-    # Custom CSS for professional styling
+    # Render the new header with logo
+    render_header_with_logo()
+    
+    # Get current date info
+    year = st.session_state.current_year
+    month = st.session_state.current_month
+    
+    # Main content area with brown theme
     st.markdown("""
-    <style>
-        /* Mobile-first responsive design */
-        @media (max-width: 768px) {
-            .main-header {
-                padding: 0.5rem;
-                margin-bottom: 1rem;
-            }
-            .main-header h1 {
-                font-size: 1.5rem;
-            }
-            .main-header p {
-                font-size: 0.9rem;
-            }
-            .metric-card {
-                padding: 0.75rem;
-                margin: 0.25rem 0;
-            }
-            .stButton > button {
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-        }
-        
-        .main-header {
-            background: linear-gradient(90deg, #1f77b4 0%, #ff7f0e 100%);
-            padding: 1rem;
-            border-radius: 10px;
-            margin-bottom: 2rem;
-            color: white;
-            text-align: center;
-        }
-        
-        .status-card {
-            background: white;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 0.5rem 0;
-            border-left: 4px solid;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .status-success {
-            border-left-color: #28a745;
-        }
-        
-        .status-error {
-            border-left-color: #dc3545;
-        }
-        
-        .stButton > button {
-            border-radius: 6px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-        
-        .stButton > button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
-        
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
-        }
-        
-        .stTabs [data-baseweb="tab"] {
-            border-radius: 6px 6px 0 0;
-            font-weight: 500;
-        }
-        
-        .stTabs [aria-selected="true"] {
-            background-color: #1f77b4;
-            color: white;
-        }
-    </style>
+    <div style="background: linear-gradient(135deg, #F5F5DC 0%, #FFFFFF 100%); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
     """, unsafe_allow_html=True)
     
-    # Professional header
-    st.markdown("""
-    <div class="main-header">
-        <h1>🏥 IMIS Hospitalist Scheduler</h1>
-        <p>Intelligent Medical Inpatient Scheduling System</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Quick stats row
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Main tabs
+    with col1:
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            total_providers = len(st.session_state.providers_df)
+            st.metric("👥 Total Providers", total_providers)
+        else:
+            st.metric("👥 Total Providers", 0)
+    
+    with col2:
+        if "events" in st.session_state:
+            total_events = len(st.session_state.events)
+            st.metric("📅 Scheduled Events", total_events)
+        else:
+            st.metric("📅 Scheduled Events", 0)
+    
+    with col3:
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            physician_count = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "Physician"])
+            st.metric("👨‍⚕️ Physicians", physician_count)
+        else:
+            st.metric("👨‍⚕️ Physicians", 0)
+    
+    with col4:
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            app_count = len(st.session_state.providers_df[st.session_state.providers_df["type"] == "APP"])
+            st.metric("👩‍⚕️ APPs", app_count)
+        else:
+            st.metric("👩‍⚕️ APPs", 0)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Main tabs with brown theme
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", "📅 Google Sync", "📝 Requests", "💾 Data"
+        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", 
+        "🔄 Sync", "📝 Requests", "💾 Data"
     ])
     
     # Calendar Tab
     with tab1:
-        st.header("📅 Schedule Calendar")
+        st.markdown("### 📅 Schedule Calendar")
         
         # Month navigation
-        try:
-            year, month = render_month_navigation()
-            st.session_state.current_year = year
-            st.session_state.current_month = month
-        except Exception as e:
-            st.error(f"Failed to render month navigation: {e}")
-            year, month = datetime.now().year, datetime.now().month
-            st.session_state.current_year = year
-            st.session_state.current_month = month
+        render_month_navigation(year, month)
         
-        # Generate schedule button
-        col1, col2, col3 = st.columns([1, 1, 1])
+        # Calendar display
+        if st.session_state.events:
+            st.markdown('<div class="calendar-container">', unsafe_allow_html=True)
+            render_calendar(st.session_state.events, year, month)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("No schedule available. Generate a schedule first.")
+        
+        # Schedule generation
+        st.markdown("### 🚀 Generate Schedule")
+        col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("🔄 Generate Schedule", type="primary", use_container_width=True):
-                if st.session_state.providers_df.empty:
-                    st.error("Please load providers first!")
-                else:
-                    try:
+            if st.button("🎯 Generate New Schedule", type="primary", use_container_width=True):
+                try:
+                    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
                         providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
                         
                         # Generate schedule
                         events = generate_schedule(
-                            year=year,
-                            month=month,
-                            providers=providers,
-                            shift_types=st.session_state.shift_types,
-                            shift_capacity=st.session_state.shift_capacity,
-                            provider_rules=st.session_state.provider_rules,
-                            global_rules=st.session_state.global_rules
+                            year, month, providers, 
+                            st.session_state.shift_types, 
+                            st.session_state.shift_capacity,
+                            st.session_state.provider_rules, 
+                            st.session_state.global_rules
                         )
                         
-                        # Convert SEvent objects to dictionaries for JSON compatibility
-                        st.session_state.events = [event.to_json_event() for event in events]
-                        
-                        # Auto-save the generated schedule
-                        save_schedule(year, month, st.session_state.events)
+                        st.session_state.events = events
                         
                         # Validate rules
                         validation_results = validate_rules(
-                            events=events,
-                            providers=providers,
-                            global_rules=st.session_state.global_rules,
-                            provider_rules=st.session_state.provider_rules
+                            events, providers, 
+                            st.session_state.global_rules, 
+                            st.session_state.provider_rules
                         )
-                        
                         st.session_state.validation_results = validation_results
                         
-                        if validation_results["is_valid"]:
-                            st.success("✅ Schedule generated and saved successfully!")
-                            st.info("💡 **Tip:** Go to the Grid View tab to edit assignments or view the schedule in grid format.")
-                        else:
-                            st.warning("⚠️ Schedule generated with violations. Check validation results.")
-                            st.info("💡 **Tip:** Go to the Grid View tab to manually adjust assignments and fix violations.")
+                        # Auto-save
+                        auto_save_session_state()
                         
+                        st.success("✅ Schedule generated successfully!")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to generate schedule: {e}")
-                        st.error(f"Error details: {traceback.format_exc()}")
+                    else:
+                        st.error("❌ No providers loaded. Please load providers first.")
+                except Exception as e:
+                    st.error(f"❌ Failed to generate schedule: {e}")
+                    st.error(f"Error details: {traceback.format_exc()}")
         
         with col2:
-            if st.button("✅ Validate Rules", type="secondary", use_container_width=True):
-                if st.session_state.events:
-                    try:
-                        # Convert back to SEvent objects for validation
-                        events = []
-                        for event_dict in st.session_state.events:
-                            event = SEvent(
-                                id=event_dict["id"],
-                                title=event_dict["title"],
-                                start=datetime.fromisoformat(event_dict["start"]),
-                                end=datetime.fromisoformat(event_dict["end"]),
-                                extendedProps=event_dict["extendedProps"]
-                            )
-                            events.append(event)
-                        
+            if st.button("🔄 Regenerate Schedule", type="secondary", use_container_width=True):
+                try:
+                    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
                         providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
                         
-                        validation_results = validate_rules(
-                            events=events,
-                            providers=providers,
-                            global_rules=st.session_state.global_rules,
-                            provider_rules=st.session_state.provider_rules
+                        # Clear existing events
+                        st.session_state.events = []
+                        
+                        # Generate new schedule
+                        events = generate_schedule(
+                            year, month, providers, 
+                            st.session_state.shift_types, 
+                            st.session_state.shift_capacity,
+                            st.session_state.provider_rules, 
+                            st.session_state.global_rules
                         )
                         
+                        st.session_state.events = events
+                        
+                        # Validate rules
+                        validation_results = validate_rules(
+                            events, providers, 
+                            st.session_state.global_rules, 
+                            st.session_state.provider_rules
+                        )
                         st.session_state.validation_results = validation_results
                         
-                        if validation_results["is_valid"]:
-                            st.success("✅ All rules validated successfully!")
-                        else:
-                            st.warning("⚠️ Rule violations found. Check details below.")
+                        # Auto-save
+                        auto_save_session_state()
                         
+                        st.success("✅ Schedule regenerated successfully!")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to validate rules: {e}")
-                        st.error(f"Error details: {traceback.format_exc()}")
-                else:
-                    st.error("No schedule to validate!")
+                    else:
+                        st.error("❌ No providers loaded. Please load providers first.")
+                except Exception as e:
+                    st.error(f"❌ Failed to regenerate schedule: {e}")
+                    st.error(f"Error details: {traceback.format_exc()}")
         
-        with col3:
-            if st.button("🗑️ Clear Schedule", type="secondary", use_container_width=True):
-                st.session_state.events = []
-                st.session_state.validation_results = None
-                st.success("Schedule cleared!")
-                st.rerun()
-        
-        # Display validation results if available
+        # Validation results display
         if hasattr(st.session_state, 'validation_results') and st.session_state.validation_results:
-            results = st.session_state.validation_results
+            validation = st.session_state.validation_results
             
-            if not results["is_valid"]:
-                # Compact validation summary with visual status
-                st.markdown("### ⚠️ Schedule Validation Results")
-                
-                # Visual status indicator
-                total_violations = len(results.get("violations", []))
-                provider_violations = sum(len(violations) for violations in results.get("provider_violations", {}).values())
-                total_issues = total_violations + provider_violations
-                
-                # Status badge
-                if total_issues == 0:
-                    status_color = "🟢"
-                    status_text = "Valid"
-                elif total_issues <= 5:
-                    status_color = "🟡"
-                    status_text = "Minor Issues"
-                elif total_issues <= 15:
-                    status_color = "🟠"
-                    status_text = "Moderate Issues"
+            st.markdown("### 📊 Schedule Validation")
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if validation["is_valid"]:
+                    st.metric("✅ Status", "Valid", delta_color="normal")
                 else:
-                    status_color = "🔴"
-                    status_text = "Major Issues"
-                
-                st.markdown(f"""
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
-                    <span style="font-size: 24px;">{status_color}</span>
-                    <span style="font-size: 18px; font-weight: bold;">{status_text}</span>
-                    <span style="color: #666;">({total_issues} issues found)</span>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Summary metrics
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Total Issues", total_issues, delta=f"-{total_issues}" if total_issues > 0 else None)
-                
-                with col2:
-                    st.metric("Global Violations", total_violations)
-                
-                with col3:
-                    st.metric("Provider Violations", provider_violations)
-                
-                with col4:
-                    providers_with_issues = len(results.get("provider_violations", {}))
-                    st.metric("Providers Affected", providers_with_issues)
-                
-                # Detailed violations in organized format
-                with st.expander("📋 View Detailed Issues", expanded=False):
-                    # Global violations
-                    if results.get("violations"):
-                        st.markdown("#### 🌐 Global Rule Violations")
-                        violations_df = pd.DataFrame([
-                            {"Type": "Global Rule", "Issue": violation, "Provider": "N/A", "Severity": "High"}
-                            for violation in results["violations"]
-                        ])
-                        st.dataframe(
-                            violations_df,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Type": st.column_config.TextColumn("Type", width="medium"),
-                                "Issue": st.column_config.TextColumn("Issue", width="large"),
-                                "Provider": st.column_config.TextColumn("Provider", width="small"),
-                                "Severity": st.column_config.TextColumn("Severity", width="small")
-                            }
-                        )
+                    st.metric("❌ Status", "Issues Found", delta_color="inverse")
+            
+            with col2:
+                violation_count = len(validation["violations"])
+                st.metric("⚠️ Violations", violation_count)
+            
+            with col3:
+                if "events" in st.session_state:
+                    total_events = len(st.session_state.events)
+                    st.metric("📅 Total Events", total_events)
+                else:
+                    st.metric("📅 Total Events", 0)
+            
+            with col4:
+                if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+                    providers_used = len(set(
+                        event.extendedProps.get("provider", "") 
+                        for event in st.session_state.events 
+                        if hasattr(event, 'extendedProps')
+                    ))
+                    st.metric("👥 Providers Used", providers_used)
+                else:
+                    st.metric("👥 Providers Used", 0)
+            
+            # Detailed violations
+            if not validation["is_valid"]:
+                with st.expander("🔍 View Detailed Violations", expanded=False):
+                    for violation in validation["violations"]:
+                        st.markdown(f"• {violation}")
                     
                     # Provider-specific violations
-                    if results.get("provider_violations"):
-                        st.markdown("#### 👥 Provider-Specific Issues")
-                        provider_issues = []
-                        for provider, violations in results["provider_violations"].items():
-                            for violation in violations:
-                                provider_issues.append({
-                                    "Provider": provider,
-                                    "Issue": violation,
-                                    "Type": "Provider Rule",
-                                    "Severity": "Medium"
-                                })
-                        
-                        if provider_issues:
-                            provider_violations_df = pd.DataFrame(provider_issues)
-                            st.dataframe(
-                                provider_violations_df,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={
-                                    "Provider": st.column_config.TextColumn("Provider", width="small"),
-                                    "Issue": st.column_config.TextColumn("Issue", width="large"),
-                                    "Type": st.column_config.TextColumn("Type", width="medium"),
-                                    "Severity": st.column_config.TextColumn("Severity", width="small")
-                                }
-                            )
-                
-                # Quick action buttons
-                st.markdown("#### 🔧 Quick Actions")
-                col1, col2, col3 = st.columns(3)
+                    if validation["provider_violations"]:
+                        st.markdown("#### Provider-Specific Issues:")
+                        for provider, violations in validation["provider_violations"].items():
+                            if violations:
+                                st.markdown(f"**{provider}:**")
+                                for violation in violations:
+                                    st.markdown(f"  - {violation}")
+            
+            # Quick action buttons
+            if not validation["is_valid"]:
+                st.markdown("### 🔧 Quick Actions")
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    if st.button("🔄 Regenerate Schedule", type="secondary", use_container_width=True):
-                        st.info("Click 'Generate Schedule' button above to create a new schedule with fewer violations.")
+                    if st.button("🔄 Regenerate to Fix Issues", type="primary"):
+                        st.rerun()
                 
                 with col2:
-                    if st.button("⚙️ Adjust Rules", type="secondary", use_container_width=True):
-                        st.info("Go to the Settings tab to modify scheduling rules.")
-                
-                with col3:
-                    if st.button("📊 View Grid", type="secondary", use_container_width=True):
-                        st.info("Go to the Grid View tab to manually adjust assignments.")
-                
-            else:
-                # Success state with visual indicator
-                st.markdown("### ✅ Schedule Validation Results")
-                
-                st.markdown("""
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
-                    <span style="font-size: 24px;">🟢</span>
-                    <span style="font-size: 18px; font-weight: bold; color: #28a745;">Valid Schedule</span>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Status", "Valid", delta="✓")
-                
-                with col2:
-                    st.metric("Issues Found", 0)
-                
-                with col3:
-                    st.metric("Compliance", "100%")
-                
-                st.markdown("🎉 **All scheduling rules have been satisfied!** The schedule is ready for use.")
+                    if st.button("📊 View Grid for Manual Fixes", type="secondary"):
+                        st.rerun()
         
         # Provider statistics section
-        if st.session_state.get("providers_loaded", False) and not st.session_state.providers_df.empty:
-            st.markdown("### 📊 Provider Statistics")
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            st.markdown("### 📈 Provider Statistics")
             
             providers_df = st.session_state.providers_df
+            
+            # Count by type
             physician_count = len(providers_df[providers_df["type"] == "Physician"])
             app_count = len(providers_df[providers_df["type"] == "APP"])
             
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric("Total Providers", len(providers_df))
@@ -579,38 +739,6 @@ def render_desktop_interface():
             
             with col3:
                 st.metric("APPs", app_count)
-            
-            with col4:
-                if st.session_state.events:
-                    unique_providers = set()
-                    for event in st.session_state.events:
-                        if isinstance(event, dict) and 'extendedProps' in event:
-                            provider = event['extendedProps'].get("provider", "")
-                            if provider:
-                                unique_providers.add(provider)
-                    st.metric("Providers Scheduled", len(unique_providers))
-                else:
-                    st.metric("Providers Scheduled", 0)
-        
-            # Debug information
-            with st.expander("🔍 Debug Information", expanded=False):
-                st.write("**Providers DataFrame:**")
-                st.dataframe(providers_df.head(10))
-                st.write(f"**Total rows in providers_df:** {len(providers_df)}")
-                st.write(f"**Events count:** {len(st.session_state.events) if st.session_state.events else 0}")
-                if st.session_state.events:
-                    st.write("**Sample event:**")
-                    st.json(st.session_state.events[0] if st.session_state.events else {})
-        
-        # Render calendar
-        if st.session_state.events:
-            try:
-                render_calendar(st.session_state.events)
-            except Exception as e:
-                st.error(f"Failed to render calendar: {e}")
-                st.error(f"Error details: {traceback.format_exc()}")
-        else:
-            st.info("No schedule available. Generate a schedule to view it here.")
     
     # Settings Tab
     with tab2:
