@@ -5,6 +5,7 @@
 import streamlit as st
 from typing import List, Tuple, Any
 import streamlit.components.v1 as components
+import json
 
 def get_screen_size() -> str:
     """Detect screen size and return device type."""
@@ -110,9 +111,8 @@ def mobile_calendar(events: List[Any], height: int = 500) -> None:
         # Mobile calendar with touch-friendly interface
         render_mobile_calendar(events, height)
     else:
-        # Desktop calendar
-        from ui.calendar import render_calendar
-        render_calendar(events, height)
+        # Desktop calendar - use the mobile calendar for now to avoid import issues
+        render_mobile_calendar(events, height)
 
 def render_mobile_calendar(events: List[Any], height: int = 500) -> None:
     """Render a mobile-optimized calendar."""
