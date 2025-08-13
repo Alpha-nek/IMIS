@@ -86,17 +86,20 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         # Create shift type mapping
         shift_type_keys = [st.get("key", st.get("name", "")) for st in shift_types]
         
-        print(f"🔄 SCHEDULER DEBUG: Starting assignment for {len(providers)} providers")
-        print(f"📋 Providers: {providers}")
-        print(f"⚙️ Shift types: {shift_type_keys}")
-        print(f"📊 Shift capacity: {shift_capacity}")
-        print(f"📅 Month days: {len(month_days)}")
+        from core.debug_logger import debug_logger
+        debug_logger.clear()  # Clear previous debug messages
+        
+        debug_logger.log(f"🔄 SCHEDULER DEBUG: Starting assignment for {len(providers)} providers")
+        debug_logger.log(f"📋 Providers: {providers}")
+        debug_logger.log(f"⚙️ Shift types: {shift_type_keys}")
+        debug_logger.log(f"📊 Shift capacity: {shift_capacity}")
+        debug_logger.log(f"📅 Month days: {len(month_days)}")
         
         # Ensure provider rules are set up
-        print("🔧 Setting up provider rules...")
+        debug_logger.log("🔧 Setting up provider rules...")
         from core.provider_rules import ensure_default_provider_rules
         provider_rules = ensure_default_provider_rules(providers, provider_rules)
-        print(f"✅ Provider rules initialized for {len(provider_rules)} providers")
+        debug_logger.log(f"✅ Provider rules initialized for {len(provider_rules)} providers")
         
         # Add randomness for variety while maintaining deterministic scoring
         random.seed(year * 100 + month)
@@ -104,33 +107,33 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         random.shuffle(providers_shuffled)
         
         # Main assignment loop - assign shifts day by day using scoring
-        print("🔄 Starting main assignment loop...")
+        debug_logger.log("🔄 Starting main assignment loop...")
         day_count = 0
         total_days = len(month_days)
         
         for current_day in month_days:
             day_count += 1
-            print(f"📅 Processing day {day_count}/{total_days}: {current_day}")
+            debug_logger.log(f"📅 Processing day {day_count}/{total_days}: {current_day}")
             
             for shift_type_dict in shift_types:
                 shift_key = shift_type_dict.get("key", shift_type_dict.get("name", ""))
-                print(f"  🎯 Processing shift type: {shift_key}")
+                debug_logger.log(f"  🎯 Processing shift type: {shift_key}")
                 
                 # Get capacity for this shift type on this day
                 capacity = get_shift_capacity(shift_key, current_day, shift_capacity)
-                print(f"  📊 Capacity for {shift_key}: {capacity}")
+                debug_logger.log(f"  📊 Capacity for {shift_key}: {capacity}")
                 
                 # Assign shifts up to capacity
                 for slot in range(capacity):
-                    print(f"    🔸 Assigning slot {slot + 1}/{capacity} for {shift_key}")
+                    debug_logger.log(f"    🔸 Assigning slot {slot + 1}/{capacity} for {shift_key}")
                     
                     # Create scorer with current events - optimize by reusing
                     if 'scorer' not in locals() or len(events) % 10 == 0:  # Update scorer every 10 events
-                        print("    🧮 Creating/updating scorer...")
+                        debug_logger.log("    🧮 Creating/updating scorer...")
                         scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
                     
                     # Find feasible candidates
-                    print("    🔍 Checking provider feasibility...")
+                    debug_logger.log("    🔍 Checking provider feasibility...")
                     candidates = []
                     feasible_providers = []
                     
@@ -143,10 +146,10 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                             simple_score = 1.0  # All feasible candidates get equal weight
                             candidates.append((provider, simple_score))
                     
-                    print(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
+                    debug_logger.log(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
                     
                     if not candidates:
-                        print(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
+                        debug_logger.log(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
                         continue  # Skip this slot if no candidates
                     
                     # Sort by score (highest first) and add some randomness for close scores
@@ -163,12 +166,12 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                         best_provider = candidates[0][0]
                     
                     # Create and add the shift event
-                    print(f"    ✅ Assigning {shift_key} to {best_provider}")
+                    debug_logger.log(f"    ✅ Assigning {shift_key} to {best_provider}")
                     event = create_shift_event(best_provider, shift_key, current_day)
                     events.append(event)
-                    print(f"    📝 Total events so far: {len(events)}")
+                    debug_logger.log(f"    📝 Total events so far: {len(events)}")
         
-        print(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
+        debug_logger.log(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
         
         # Skip validation for speed during testing
         # events = validate_and_adjust_schedule(events, providers, provider_rules, global_rules, year, month)
