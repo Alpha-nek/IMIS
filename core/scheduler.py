@@ -331,14 +331,23 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                          global_rules: RuleConfig, provider_shifts: Dict,
                          year: int = None, month: int = None) -> List[SEvent]:
     """
-    Fill any remaining unfilled shifts to ensure maximum coverage.
-    This ensures all shift slots are filled when possible.
+    Fill remaining unfilled shifts while respecting expected shift limits.
+    This function is more conservative to prevent over-assignment.
     """
     events = []
     
     # Define all shift types - prioritize rounder shifts to avoid gaps
     # Order: Rounder shifts first, then admitting, then night shifts, then APP
     priority_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
+    
+    # Pre-calculate expected shifts for all providers to avoid repeated calculations
+    provider_expected_shifts = {}
+    for provider in providers:
+        if provider not in APP_PROVIDER_INITIALS:
+            from core.utils import get_adjusted_expected_shifts
+            provider_expected_shifts[provider] = get_adjusted_expected_shifts(
+                provider, year, month, provider_rules, global_rules
+            )
     
     for day in month_days:
         for shift_type in priority_shift_types:
@@ -350,33 +359,77 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             # Count how many shifts of this type are already assigned on this day
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
             
-            # Fill remaining slots
+            # Fill remaining slots, but be more conservative
             remaining_slots = capacity - assigned_count
             
-            for _ in range(remaining_slots):
-                # Get available providers for this shift type
-                available_providers = get_available_providers_for_shift(
-                    day, shift_type, providers, provider_shifts, provider_rules
+            # Limit the number of slots we try to fill to prevent over-assignment
+            # Only fill if we have enough providers who are well below their expected shifts
+            slots_to_fill = 0
+            available_providers_for_day = []
+            
+            # First, get all available providers for this shift type on this day
+            all_available = get_available_providers_for_shift(
+                day, shift_type, providers, provider_shifts, provider_rules
+            )
+            
+            # Filter providers based on their current shift count vs expected
+            for provider in all_available:
+                if provider in APP_PROVIDER_INITIALS:
+                    available_providers_for_day.append(provider)
+                else:
+                    current_shifts = len(provider_shifts.get(provider, []))
+                    expected_shifts = provider_expected_shifts.get(provider, 15)
+                    tolerance = 2
+                    max_acceptable = expected_shifts + tolerance
+                    
+                    # Only include providers who are significantly below their expected shifts
+                    # This prevents over-assignment
+                    if current_shifts < expected_shifts - 1:  # More conservative threshold
+                        available_providers_for_day.append(provider)
+            
+            # Only fill slots if we have enough available providers
+            if len(available_providers_for_day) >= remaining_slots:
+                slots_to_fill = remaining_slots
+            else:
+                # Only fill what we can reasonably cover
+                slots_to_fill = min(remaining_slots, len(available_providers_for_day))
+            
+            for _ in range(slots_to_fill):
+                if not available_providers_for_day:
+                    break
+                    
+                # Select provider (prefer those with fewer shifts)
+                provider = select_provider_with_fewer_shifts(available_providers_for_day, provider_shifts)
+                if not provider:
+                    break
+                
+                # Remove selected provider from available list for this iteration
+                available_providers_for_day.remove(provider)
+                
+                # Create shift event
+                shift_config = get_shift_config(shift_type)
+                start_time = datetime.combine(day, parse_time(shift_config["start"]))
+                end_time = datetime.combine(day, parse_time(shift_config["end"]))
+                
+                # Handle overnight shifts
+                if shift_config["end"] < shift_config["start"]:
+                    end_time += timedelta(days=1)
+                
+                event = SEvent(
+                    id=str(uuid.uuid4()),
+                    title=f"{shift_config['label']} - {provider}",
+                    start=start_time,
+                    end=end_time,
+                    backgroundColor=shift_config["color"],
+                    extendedProps={
+                        "provider": provider,
+                        "shift_type": shift_type,
+                        "shift_label": shift_config["label"]
+                    }
                 )
                 
-                # Filter out providers who have reached their maximum shifts
-                filtered_providers = []
-                for provider in available_providers:
-                    if provider in APP_PROVIDER_INITIALS:
-                        # APP providers have different rules
-                        filtered_providers.append(provider)
-                    else:
-                        # Check if provider has reached expected shifts (with tolerance, adjusted for vacation)
-                        current_shifts = len(provider_shifts.get(provider, []))
-                        from core.utils import get_adjusted_expected_shifts
-                        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
-                        tolerance = 2
-                        max_acceptable = expected_shifts + tolerance
-                        
-                        if current_shifts < max_acceptable:
-                            filtered_providers.append(provider)
-                
-                if filtered_providers:
+                events.append(event)
+                provider_shifts[provider].append(event)
                     # Select provider (prefer those with fewer shifts)
                     provider = select_provider_with_fewer_shifts(filtered_providers, provider_shifts)
                     

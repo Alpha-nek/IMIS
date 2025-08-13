@@ -522,6 +522,7 @@ def provider_rules_panel():
     # Initialize provider rules if not exists
     if selected_provider not in st.session_state.provider_rules:
         st.session_state.provider_rules[selected_provider] = {
+            "fte": 1.0,  # Default to 100% full time
             "min_shifts": 8,
             "max_shifts": 16,
             "min_weekend_shifts": 1,
@@ -595,6 +596,31 @@ def provider_rules_panel():
                 key=f"max_night_{selected_provider}",
                 help="Maximum number of night shifts this provider can work per month"
             )
+        
+        # FTE (Full Time Employment) setting
+        st.markdown("#### FTE (Full Time Employment)")
+        st.markdown("Set the provider's FTE percentage to determine expected shifts:")
+        
+        fte_percentage = st.slider(
+            "FTE Percentage",
+            min_value=0.1, max_value=2.0, step=0.1,
+            value=provider_rules.get("fte", 1.0),
+            key=f"fte_{selected_provider}",
+            help="Full Time Employment percentage. 1.0 = 100% full time (15-16 shifts), 0.8 = 80% (12-13 shifts), etc."
+        )
+        provider_rules["fte"] = fte_percentage
+        
+        # Calculate and display expected shifts based on FTE
+        from core.utils import get_expected_shifts_for_month
+        from datetime import datetime
+        current_date = datetime.now()
+        base_expected_30 = get_expected_shifts_for_month(current_date.year, 4)  # April has 30 days
+        base_expected_31 = get_expected_shifts_for_month(current_date.year, 1)  # January has 31 days
+        
+        expected_30 = int(round(base_expected_30 * fte_percentage))
+        expected_31 = int(round(base_expected_31 * fte_percentage))
+        
+        st.info(f"📊 **Expected Shifts:** {expected_30} shifts (30-day months), {expected_31} shifts (31-day months)")
         
         # Day/Night distribution
         st.markdown("#### Day vs Night Shift Distribution")
