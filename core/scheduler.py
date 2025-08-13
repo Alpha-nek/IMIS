@@ -83,6 +83,11 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                              global_rules, provider_shifts)
     events.extend(physician_events)
     
+    # Step 4: Fill any remaining unfilled shifts
+    fill_events = fill_remaining_shifts(month_days, providers, shift_capacity, 
+                                       provider_rules, global_rules, provider_shifts)
+    events.extend(fill_events)
+    
     return events
 
 def assign_night_shifts_to_nocturnists(month_days: List[date], nocturnists: List[str], 
@@ -252,6 +257,88 @@ def assign_physician_shifts(month_days: List[date], physician_providers: List[st
     
     return events
 
+def fill_remaining_shifts(month_days: List[date], providers: List[str], 
+                         shift_capacity: Dict[str, int], provider_rules: Dict, 
+                         global_rules: RuleConfig, provider_shifts: Dict) -> List[SEvent]:
+    """
+    Fill any remaining unfilled shifts to ensure maximum coverage.
+    This ensures all shift slots are filled when possible.
+    """
+    events = []
+    
+    # Define all shift types
+    all_shift_types = ["R12", "A12", "A10", "N12", "NB", "APP"]
+    
+    for day in month_days:
+        for shift_type in all_shift_types:
+            if shift_type not in shift_capacity:
+                continue
+                
+            capacity = shift_capacity[shift_type]
+            
+            # Count how many shifts of this type are already assigned on this day
+            assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
+            
+            # Fill remaining slots
+            remaining_slots = capacity - assigned_count
+            
+            for _ in range(remaining_slots):
+                # Get available providers for this shift type
+                available_providers = get_available_providers_for_shift(
+                    day, shift_type, providers, provider_shifts, provider_rules
+                )
+                
+                if available_providers:
+                    # Select provider (prefer those with fewer shifts)
+                    provider = select_provider_with_fewer_shifts(available_providers, provider_shifts)
+                    
+                    # Create shift event
+                    shift_config = get_shift_config(shift_type)
+                    start_time = datetime.combine(day, parse_time(shift_config["start"]))
+                    end_time = datetime.combine(day, parse_time(shift_config["end"]))
+                    
+                    # Handle overnight shifts
+                    if shift_config["end"] < shift_config["start"]:
+                        end_time += timedelta(days=1)
+                    
+                    event = SEvent(
+                        id=str(uuid.uuid4()),
+                        title=f"{shift_config['label']} - {provider}",
+                        start=start_time,
+                        end=end_time,
+                        backgroundColor=shift_config["color"],
+                        extendedProps={
+                            "provider": provider,
+                            "shift_type": shift_type,
+                            "shift_label": shift_config["label"]
+                        }
+                    )
+                    
+                    events.append(event)
+                    provider_shifts[provider].append(event)
+    
+    return events
+
+def select_provider_with_fewer_shifts(available_providers: List[str], 
+                                    provider_shifts: Dict) -> str:
+    """
+    Select a provider from the available list, preferring those with fewer shifts.
+    """
+    if not available_providers:
+        return None
+    
+    # Find provider with minimum shifts
+    min_shifts = float('inf')
+    selected_provider = available_providers[0]
+    
+    for provider in available_providers:
+        current_shifts = len(provider_shifts.get(provider, []))
+        if current_shifts < min_shifts:
+            min_shifts = current_shifts
+            selected_provider = provider
+    
+    return selected_provider
+
 def get_available_providers_for_shift(day: date, shift_type: str, providers: List[str], 
                                      provider_shifts: Dict, provider_rules: Dict) -> List[str]:
     """
@@ -316,17 +403,41 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
     - Maximum 7 shifts per block
     - 3-day rest between blocks
     - Rounders should end on rounding shifts
+    - Ensure minimum shifts per provider (15-16 shifts)
     """
     physician_blocks = {p: [] for p in physician_providers}
     
     # Define shift types for physicians (exclude APP and night shifts for non-nocturnists)
     physician_shift_types = ["R12", "A12", "A10"]
     
+    # Calculate total available shifts for the month
+    total_available_shifts = 0
+    for day in month_days:
+        for shift_type in physician_shift_types:
+            if shift_type in shift_capacity:
+                total_available_shifts += shift_capacity[shift_type]
+    
+    # Calculate minimum shifts per provider based on month length
+    days_in_month = len(month_days)
+    min_shifts_per_provider = 15 if days_in_month == 30 else 16
+    
+    # Ensure we have enough providers to cover all shifts
+    if len(physician_providers) == 0:
+        return physician_blocks
+    
+    # Calculate target shifts per provider to fill all slots
+    target_shifts_per_provider = max(min_shifts_per_provider, 
+                                   total_available_shifts // len(physician_providers))
+    
     for provider in physician_providers:
         # Get provider preferences
         provider_rule = provider_rules.get(provider, {})
-        min_shifts = provider_rule.get("min_shifts", 8)
-        max_shifts = provider_rule.get("max_shifts", 16)
+        provider_min_shifts = provider_rule.get("min_shifts", min_shifts_per_provider)
+        provider_max_shifts = provider_rule.get("max_shifts", target_shifts_per_provider + 4)
+        
+        # Ensure minimum shifts requirement
+        min_shifts = max(provider_min_shifts, min_shifts_per_provider)
+        max_shifts = max(provider_max_shifts, min_shifts + 4)
         
         # Determine target number of shifts for this provider
         target_shifts = random.randint(min_shifts, max_shifts)

@@ -186,7 +186,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "Shift Type",
             disabled=True,
             help="Shift type color indicator",
-            width="medium"
+            width="large"
         )
     }
     
@@ -234,71 +234,52 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             font-weight: bold;
         }
         
-        /* Make first column sticky - updated selectors for Streamlit data editor */
-        [data-testid="stDataFrame"] > div:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 200px !important;
-        }
-
-        /* Ensure sticky column has proper styling */
-        [data-testid="stDataFrame"] > div:first-child th,
-        [data-testid="stDataFrame"] > div:first-child td {
-            background: white !important;
-            border-right: 3px solid #FF674D !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-        }
-        
-        /* Alternative selectors for data editor */
-        .stDataFrame > div:first-child {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 1000 !important;
-            background: white !important;
-            min-width: 200px !important;
-        }
-
-        .stDataFrame > div:first-child th,
-        .stDataFrame > div:first-child td {
-            background: white !important;
-            border-right: 3px solid #FF674D !important;
-            min-width: 200px !important;
-            max-width: 250px !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-        }
-        
-        /* Make the data editor container scrollable */
+        /* Comprehensive sticky column CSS for Streamlit data editor */
+        /* Target the data editor container */
         [data-testid="stDataFrame"] {
             overflow-x: auto !important;
             max-width: 100% !important;
+            position: relative !important;
         }
         
-        /* Ensure proper cell sizing */
-        [data-testid="stDataFrame"] td {
-            min-width: 120px !important;
-            max-width: 150px !important;
+        /* Target the table element inside data editor */
+        [data-testid="stDataFrame"] table {
+            border-collapse: collapse !important;
+            width: 100% !important;
         }
         
-        /* Additional sticky column selectors */
-        .stDataFrame {
-            overflow-x: auto !important;
-            max-width: 100% !important;
+        /* Make the first column sticky */
+        [data-testid="stDataFrame"] th:first-child,
+        [data-testid="stDataFrame"] td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
         }
         
-        .stDataFrame td {
-            min-width: 120px !important;
-            max-width: 150px !important;
+        /* Ensure header stays on top */
+        [data-testid="stDataFrame"] thead th:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1001 !important;
+            background: white !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
         }
         
-        /* Target the first column specifically */
+        /* Alternative selectors for different Streamlit versions */
         .stDataFrame th:first-child,
         .stDataFrame td:first-child {
             position: sticky !important;
@@ -308,6 +289,128 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             min-width: 200px !important;
             max-width: 250px !important;
             border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        .stDataFrame thead th:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1001 !important;
+            background: white !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Ensure proper cell sizing for other columns */
+        [data-testid="stDataFrame"] td:not(:first-child) {
+            min-width: 120px !important;
+            max-width: 150px !important;
+        }
+        
+        .stDataFrame td:not(:first-child) {
+            min-width: 120px !important;
+            max-width: 150px !important;
+        }
+        
+        /* Additional selectors for data editor specific elements */
+        [data-testid="stDataFrame"] [data-testid="stDataFrame"] th:first-child,
+        [data-testid="stDataFrame"] [data-testid="stDataFrame"] td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 200px !important;
+            max-width: 250px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Force horizontal scrolling */
+        [data-testid="stDataFrame"] > div {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        
+        .stDataFrame > div {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        
+        /* Additional selectors for data editor table structure */
+        [data-testid="stDataFrame"] table thead tr th:first-child,
+        [data-testid="stDataFrame"] table tbody tr td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 250px !important;
+            max-width: 300px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Target the actual table cells more specifically */
+        [data-testid="stDataFrame"] table th:first-child,
+        [data-testid="stDataFrame"] table td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 250px !important;
+            max-width: 300px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Ensure the table container allows horizontal scrolling */
+        [data-testid="stDataFrame"] > div > div {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        
+        /* Target any element with role="grid" (data editor uses this) */
+        [role="grid"] th:first-child,
+        [role="grid"] td:first-child {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            min-width: 250px !important;
+            max-width: 300px !important;
+            border-right: 3px solid #FF674D !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Force the container to be scrollable */
+        [data-testid="stDataFrame"] {
+            overflow-x: scroll !important;
+            max-width: 100% !important;
+        }
+        
+        /* Ensure the table doesn't wrap */
+        [data-testid="stDataFrame"] table {
+            white-space: nowrap !important;
+            min-width: max-content !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -373,16 +476,21 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.metric("Providers Used", len(unique_providers))
     
     with col3:
-        # Count days with events
-        days_with_events = 0
+        # Count filled slots vs total available slots
+        total_slots = 0
+        filled_slots = 0
+        
         for date_col in date_cols:
-            if any(df[date_col] != ""):
-                days_with_events += 1
-        st.metric("Days with Events", days_with_events)
+            for idx, row in df.iterrows():
+                total_slots += 1
+                if row[date_col] and row[date_col] != "":
+                    filled_slots += 1
+        
+        st.metric("Filled Slots", f"{filled_slots}/{total_slots}")
     
     with col4:
-        total_days = len(date_cols)
-        coverage_percent = (days_with_events / total_days * 100) if total_days > 0 else 0
+        # Calculate coverage based on filled slots
+        coverage_percent = (filled_slots / total_slots * 100) if total_slots > 0 else 0
         st.metric("Coverage", f"{coverage_percent:.1f}%")
     
     # Provider statistics
@@ -408,6 +516,11 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         
         # Show enhanced provider utilization
         st.markdown("#### 📊 Enhanced Provider Utilization")
+        
+        # Add warning for providers with insufficient shifts
+        days_in_month = len(date_cols)
+        min_required_shifts = 15 if days_in_month == 30 else 16
+        
         provider_stats = {}
         
         for event in events:
@@ -472,6 +585,15 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 })
             
             utilization_df = pd.DataFrame(utilization_data).sort_values("Total Shifts", ascending=False)
+            
+            # Add warning for providers with insufficient shifts
+            insufficient_providers = []
+            for _, row in utilization_df.iterrows():
+                if row["Total Shifts"] < min_required_shifts:
+                    insufficient_providers.append(f"{row['Provider']} ({row['Total Shifts']} shifts)")
+            
+            if insufficient_providers:
+                st.warning(f"⚠️ **Providers with insufficient shifts (need {min_required_shifts}):** {', '.join(insufficient_providers)}")
             
             st.dataframe(
                 utilization_df,
