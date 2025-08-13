@@ -61,6 +61,20 @@ def initialize_session_state():
     if "shift_types" not in st.session_state:
         st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
     
+    # Ensure shift_types is properly structured
+    if not isinstance(st.session_state.shift_types, list):
+        st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
+    else:
+        # Validate each shift type
+        for i, shift_type in enumerate(st.session_state.shift_types):
+            if not isinstance(shift_type, dict) or 'name' not in shift_type:
+                st.session_state.shift_types[i] = DEFAULT_SHIFT_TYPES[i] if i < len(DEFAULT_SHIFT_TYPES) else {
+                    'name': f'Shift {i+1}',
+                    'start_time': '08:00',
+                    'end_time': '16:00',
+                    'color': '#1f77b4'
+                }
+    
     if "shift_capacity" not in st.session_state:
         st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
     
@@ -410,40 +424,56 @@ def render_desktop_interface():
         st.subheader("🔄 Shift Types")
         
         for i, shift_type in enumerate(st.session_state.shift_types):
-            with st.expander(f"Shift Type: {shift_type['name']}", expanded=True):
+            # Safety check for shift_type structure
+            if not isinstance(shift_type, dict) or 'name' not in shift_type:
+                # Reset to default if corrupted
+                st.session_state.shift_types[i] = DEFAULT_SHIFT_TYPES[i] if i < len(DEFAULT_SHIFT_TYPES) else {
+                    'name': f'Shift {i+1}',
+                    'start_time': '08:00',
+                    'end_time': '16:00',
+                    'color': '#1f77b4'
+                }
+                shift_type = st.session_state.shift_types[i]
+            
+            with st.expander(f"Shift Type: {shift_type.get('name', f'Shift {i+1}')}", expanded=True):
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     st.session_state.shift_types[i]['name'] = st.text_input(
-                        "Name", value=shift_type['name'], key=f"shift_name_{i}"
+                        "Name", value=shift_type.get('name', f'Shift {i+1}'), key=f"shift_name_{i}"
                     )
                 
                 with col2:
                     st.session_state.shift_types[i]['start_time'] = st.text_input(
-                        "Start Time", value=shift_type['start_time'], key=f"shift_start_{i}"
+                        "Start Time", value=shift_type.get('start_time', '08:00'), key=f"shift_start_{i}"
                     )
                 
                 with col3:
                     st.session_state.shift_types[i]['end_time'] = st.text_input(
-                        "End Time", value=shift_type['end_time'], key=f"shift_end_{i}"
+                        "End Time", value=shift_type.get('end_time', '16:00'), key=f"shift_end_{i}"
                     )
                 
                 # Color picker for shift type
                 st.session_state.shift_types[i]['color'] = st.color_picker(
-                    "Color", value=shift_type['color'], key=f"shift_color_{i}"
+                    "Color", value=shift_type.get('color', '#1f77b4'), key=f"shift_color_{i}"
                 )
         
         # Shift Capacity Configuration
         st.subheader("📊 Shift Capacity")
         
         for shift_type in st.session_state.shift_types:
+            # Safety check for shift_type structure
+            if not isinstance(shift_type, dict) or 'name' not in shift_type:
+                continue  # Skip corrupted shift types
+            
+            shift_name = shift_type.get('name', 'Unknown')
             capacity = st.number_input(
-                f"Capacity for {shift_type['name']}", 
+                f"Capacity for {shift_name}", 
                 min_value=1, max_value=10, 
-                value=st.session_state.shift_capacity.get(shift_type['name'], 1),
-                key=f"capacity_{shift_type['name']}"
+                value=st.session_state.shift_capacity.get(shift_name, 1),
+                key=f"capacity_{shift_name}"
             )
-            st.session_state.shift_capacity[shift_type['name']] = capacity
+            st.session_state.shift_capacity[shift_name] = capacity
     
     # Providers Tab
     with tab3:
