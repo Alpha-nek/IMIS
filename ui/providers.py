@@ -53,7 +53,7 @@ def providers_panel():
         
         # Provider rules section
         st.subheader("⚙️ Provider Rules")
-        provider_selector()
+        provider_rules_selector()
         provider_rules_panel()
     else:
         st.info("No providers loaded. Please load a CSV file with provider data.")
@@ -109,7 +109,7 @@ def load_providers_from_csv():
         except Exception as e:
             st.error(f"Error loading CSV file: {str(e)}")
 
-def provider_selector():
+def provider_rules_selector():
     """Provider selection for rules editing."""
     if st.session_state.providers_df.empty:
         st.warning("No providers available.")
@@ -119,14 +119,14 @@ def provider_selector():
     selected_provider = st.selectbox(
         "Select Provider to Edit Rules",
         options=providers,
-        key="provider_selector"
+        key="provider_rules_selector"
     )
     
     return selected_provider
 
 def provider_rules_panel():
     """Panel for editing provider-specific rules."""
-    selected_provider = provider_selector()
+    selected_provider = provider_rules_selector()
     
     if not selected_provider:
         return

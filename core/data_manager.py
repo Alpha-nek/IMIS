@@ -52,6 +52,7 @@ def get_default_providers() -> pd.DataFrame:
     
     # Define the current active providers (based on your original list)
     # Only include providers that are actually in the text file
+    # Updated: SC, CI, BD, DD no longer work with us
     active_providers = [
         {"initials": "AA", "type": "Physician"},
         {"initials": "AD", "type": "Physician"},
@@ -67,7 +68,11 @@ def get_default_providers() -> pd.DataFrame:
     default_providers = []
     for provider in active_providers:
         initials = provider["initials"]
-        full_name = provider_names.get(initials, f"Dr. {initials}") if provider["type"] == "Physician" else f"APP {initials}"
+        # Check if we have the real name, otherwise use fallback
+        if initials in provider_names:
+            full_name = provider_names[initials]
+        else:
+            full_name = f"Dr. {initials}" if provider["type"] == "Physician" else f"APP {initials}"
         
         default_providers.append({
             "initials": initials,

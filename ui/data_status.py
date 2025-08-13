@@ -26,31 +26,31 @@ def render_data_status():
         if os.path.exists(PROVIDERS_FILE):
             providers_df, _ = load_providers()
             if not providers_df.empty:
-                st.success(f"✅ Providers: {len(providers_df)}")
+                st.success(f"Providers: {len(providers_df)}")
             else:
-                st.warning("⚠️ Providers: Empty")
+                st.warning("Providers: Empty")
         else:
-            st.error("❌ Providers: Not saved")
+            st.error("Providers: Not saved")
     
     with col2:
         if os.path.exists(RULES_FILE):
             _, shift_types, _ = load_rules()
             if shift_types:
-                st.success(f"✅ Rules: {len(shift_types)} shift types")
+                st.success(f"Rules: {len(shift_types)} shift types")
             else:
-                st.warning("⚠️ Rules: Empty")
+                st.warning("Rules: Empty")
         else:
-            st.error("❌ Rules: Not saved")
+            st.error("Rules: Not saved")
     
     with col3:
         if os.path.exists(SCHEDULES_FILE):
             schedules = load_all_schedules()
             if schedules:
-                st.success(f"✅ Schedules: {len(schedules)} months")
+                st.success(f"Schedules: {len(schedules)} months")
             else:
-                st.warning("⚠️ Schedules: Empty")
+                st.warning("Schedules: Empty")
         else:
-            st.error("❌ Schedules: Not saved")
+            st.error("Schedules: Not saved")
     
     with col4:
         # Show last modified time

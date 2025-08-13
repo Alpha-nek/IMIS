@@ -7,29 +7,80 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Any
 import json
 import os
+import traceback
+import sys
 
-# Import our modular components
-from models.constants import (
-    DEFAULT_SHIFT_TYPES, DEFAULT_SHIFT_CAPACITY, APP_PROVIDER_INITIALS,
-    PROVIDER_INITIALS_DEFAULT, HOLIDAY_RULES
-)
-from models.data_models import RuleConfig, Provider, SEvent
-from core.utils import (
-    is_holiday, get_holiday_adjusted_capacity, parse_time, 
-    date_range, month_start_end, make_month_days,
-    _expand_vacation_dates, is_provider_unavailable_on_date,
-    get_global_rules
-)
-from core.scheduler import generate_schedule, validate_rules
-from ui.calendar import render_calendar, render_month_navigation
-from ui.grid import render_schedule_grid, apply_grid_changes_to_calendar
-from ui.providers import providers_panel, load_providers_from_csv
-from ui.requests import provider_requests_panel
-from ui.data_status import render_data_status
-from core.data_manager import (
-    initialize_default_data, auto_load_session_state, auto_save_session_state,
-    save_providers, save_rules, save_schedule
-)
+# Import our modular components with error handling
+try:
+    from models.constants import (
+        DEFAULT_SHIFT_TYPES, DEFAULT_SHIFT_CAPACITY, APP_PROVIDER_INITIALS,
+        PROVIDER_INITIALS_DEFAULT, HOLIDAY_RULES
+    )
+except ImportError as e:
+    st.error(f"Failed to import constants: {e}")
+    st.stop()
+
+try:
+    from models.data_models import RuleConfig, Provider, SEvent
+except ImportError as e:
+    st.error(f"Failed to import data models: {e}")
+    st.stop()
+
+try:
+    from core.utils import (
+        is_holiday, get_holiday_adjusted_capacity, parse_time, 
+        date_range, month_start_end, make_month_days,
+        _expand_vacation_dates, is_provider_unavailable_on_date,
+        get_global_rules
+    )
+except ImportError as e:
+    st.error(f"Failed to import core utils: {e}")
+    st.stop()
+
+try:
+    from core.scheduler import generate_schedule, validate_rules
+except ImportError as e:
+    st.error(f"Failed to import scheduler: {e}")
+    st.stop()
+
+try:
+    from ui.calendar import render_calendar, render_month_navigation
+except ImportError as e:
+    st.error(f"Failed to import calendar UI: {e}")
+    st.stop()
+
+try:
+    from ui.grid import render_schedule_grid, apply_grid_changes_to_calendar
+except ImportError as e:
+    st.error(f"Failed to import grid UI: {e}")
+    st.stop()
+
+try:
+    from ui.providers import providers_panel, load_providers_from_csv
+except ImportError as e:
+    st.error(f"Failed to import providers UI: {e}")
+    st.stop()
+
+try:
+    from ui.requests import provider_requests_panel
+except ImportError as e:
+    st.error(f"Failed to import requests UI: {e}")
+    st.stop()
+
+try:
+    from ui.data_status import render_data_status
+except ImportError as e:
+    st.error(f"Failed to import data status UI: {e}")
+    st.stop()
+
+try:
+    from core.data_manager import (
+        initialize_default_data, auto_load_session_state, auto_save_session_state,
+        save_providers, save_rules, save_schedule
+    )
+except ImportError as e:
+    st.error(f"Failed to import data manager: {e}")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -41,60 +92,79 @@ st.set_page_config(
 
 def initialize_session_state():
     """Initialize Streamlit session state variables with automatic data loading."""
-    # Initialize default data files if they don't exist
-    initialize_default_data()
+    try:
+        # Initialize default data files if they don't exist
+        initialize_default_data()
+    except Exception as e:
+        st.error(f"Failed to initialize default data: {e}")
+        st.stop()
     
-    # Basic session state initialization
-    if "events" not in st.session_state:
-        st.session_state.events = []
-    
-    if "current_year" not in st.session_state:
-        st.session_state.current_year = datetime.now().year
-    
-    if "current_month" not in st.session_state:
-        st.session_state.current_month = datetime.now().month
-    
-    if "providers_df" not in st.session_state:
-        st.session_state.providers_df = pd.DataFrame()
-    
-    if "providers_loaded" not in st.session_state:
-        st.session_state.providers_loaded = False
-    
-    if "global_rules" not in st.session_state:
-        st.session_state.global_rules = RuleConfig()
-    
-    if "shift_types" not in st.session_state:
-        st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
-    
-    if "shift_capacity" not in st.session_state:
-        st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
-    
-    if "provider_rules" not in st.session_state:
-        st.session_state.provider_rules = {}
-    
-    if "mobile_view" not in st.session_state:
-        st.session_state.mobile_view = "home"
+    # Basic session state initialization with error handling
+    try:
+        if "events" not in st.session_state:
+            st.session_state.events = []
+        
+        if "current_year" not in st.session_state:
+            st.session_state.current_year = datetime.now().year
+        
+        if "current_month" not in st.session_state:
+            st.session_state.current_month = datetime.now().month
+        
+        if "providers_df" not in st.session_state:
+            st.session_state.providers_df = pd.DataFrame()
+        
+        if "providers_loaded" not in st.session_state:
+            st.session_state.providers_loaded = False
+        
+        if "global_rules" not in st.session_state:
+            st.session_state.global_rules = RuleConfig()
+        
+        if "shift_types" not in st.session_state:
+            st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
+        
+        if "shift_capacity" not in st.session_state:
+            st.session_state.shift_capacity = DEFAULT_SHIFT_CAPACITY.copy()
+        
+        if "provider_rules" not in st.session_state:
+            st.session_state.provider_rules = {}
+        
+        if "mobile_view" not in st.session_state:
+            st.session_state.mobile_view = "home"
+        
+        if "validation_results" not in st.session_state:
+            st.session_state.validation_results = None
+            
+    except Exception as e:
+        st.error(f"Failed to initialize session state: {e}")
+        st.stop()
     
     # Auto-load data from saved files
-    auto_load_session_state()
+    try:
+        auto_load_session_state()
+    except Exception as e:
+        st.warning(f"Failed to auto-load session state: {e}")
     
     # Ensure all required attributes exist after loading
-    if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
-        st.session_state.global_rules = RuleConfig()
-    
-    # Ensure shift_types is properly structured
-    if not isinstance(st.session_state.shift_types, list):
-        st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
-    else:
-        # Validate each shift type
-        for i, shift_type in enumerate(st.session_state.shift_types):
-            if not isinstance(shift_type, dict) or 'name' not in shift_type:
-                st.session_state.shift_types[i] = DEFAULT_SHIFT_TYPES[i] if i < len(DEFAULT_SHIFT_TYPES) else {
-                    'name': f'Shift {i+1}',
-                    'start_time': '08:00',
-                    'end_time': '16:00',
-                    'color': '#1f77b4'
-                }
+    try:
+        if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
+            st.session_state.global_rules = RuleConfig()
+        
+        # Ensure shift_types is properly structured
+        if not isinstance(st.session_state.shift_types, list):
+            st.session_state.shift_types = DEFAULT_SHIFT_TYPES.copy()
+        else:
+            # Validate each shift type
+            for i, shift_type in enumerate(st.session_state.shift_types):
+                if not isinstance(shift_type, dict) or 'name' not in shift_type:
+                    st.session_state.shift_types[i] = DEFAULT_SHIFT_TYPES[i] if i < len(DEFAULT_SHIFT_TYPES) else {
+                        'name': f'Shift {i+1}',
+                        'start_time': '08:00',
+                        'end_time': '16:00',
+                        'color': '#1f77b4'
+                    }
+    except Exception as e:
+        st.error(f"Failed to validate session state structure: {e}")
+        st.stop()
 
 def render_mobile_interface():
     """Render mobile-optimized interface."""
@@ -267,9 +337,15 @@ def render_desktop_interface():
         st.header("📅 Schedule Calendar")
         
         # Month navigation
-        year, month = render_month_navigation()
-        st.session_state.current_year = year
-        st.session_state.current_month = month
+        try:
+            year, month = render_month_navigation()
+            st.session_state.current_year = year
+            st.session_state.current_month = month
+        except Exception as e:
+            st.error(f"Failed to render month navigation: {e}")
+            year, month = datetime.now().year, datetime.now().month
+            st.session_state.current_year = year
+            st.session_state.current_month = month
         
         # Generate schedule button
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -279,74 +355,82 @@ def render_desktop_interface():
                 if st.session_state.providers_df.empty:
                     st.error("Please load providers first!")
                 else:
-                    providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-                    
-                    # Generate schedule
-                    events = generate_schedule(
-                        year=year,
-                        month=month,
-                        providers=providers,
-                        shift_types=st.session_state.shift_types,
-                        shift_capacity=st.session_state.shift_capacity,
-                        provider_rules=st.session_state.provider_rules,
-                        global_rules=st.session_state.global_rules
-                    )
-                    
-                    # Convert SEvent objects to dictionaries for JSON compatibility
-                    st.session_state.events = [event.to_json_event() for event in events]
-                    
-                    # Auto-save the generated schedule
-                    save_schedule(year, month, st.session_state.events)
-                    
-                    # Validate rules
-                    validation_results = validate_rules(
-                        events=events,
-                        providers=providers,
-                        global_rules=st.session_state.global_rules,
-                        provider_rules=st.session_state.provider_rules
-                    )
-                    
-                    st.session_state.validation_results = validation_results
-                    
-                    if validation_results["is_valid"]:
-                        st.success("✅ Schedule generated and saved successfully!")
-                    else:
-                        st.warning("⚠️ Schedule generated with violations. Check validation results.")
-                    
-                    st.rerun()
+                    try:
+                        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+                        
+                        # Generate schedule
+                        events = generate_schedule(
+                            year=year,
+                            month=month,
+                            providers=providers,
+                            shift_types=st.session_state.shift_types,
+                            shift_capacity=st.session_state.shift_capacity,
+                            provider_rules=st.session_state.provider_rules,
+                            global_rules=st.session_state.global_rules
+                        )
+                        
+                        # Convert SEvent objects to dictionaries for JSON compatibility
+                        st.session_state.events = [event.to_json_event() for event in events]
+                        
+                        # Auto-save the generated schedule
+                        save_schedule(year, month, st.session_state.events)
+                        
+                        # Validate rules
+                        validation_results = validate_rules(
+                            events=events,
+                            providers=providers,
+                            global_rules=st.session_state.global_rules,
+                            provider_rules=st.session_state.provider_rules
+                        )
+                        
+                        st.session_state.validation_results = validation_results
+                        
+                        if validation_results["is_valid"]:
+                            st.success("✅ Schedule generated and saved successfully!")
+                        else:
+                            st.warning("⚠️ Schedule generated with violations. Check validation results.")
+                        
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to generate schedule: {e}")
+                        st.error(f"Error details: {traceback.format_exc()}")
         
         with col2:
             if st.button("✅ Validate Rules", type="secondary", use_container_width=True):
                 if st.session_state.events:
-                    # Convert back to SEvent objects for validation
-                    events = []
-                    for event_dict in st.session_state.events:
-                        event = SEvent(
-                            id=event_dict["id"],
-                            title=event_dict["title"],
-                            start=datetime.fromisoformat(event_dict["start"]),
-                            end=datetime.fromisoformat(event_dict["end"]),
-                            extendedProps=event_dict["extendedProps"]
+                    try:
+                        # Convert back to SEvent objects for validation
+                        events = []
+                        for event_dict in st.session_state.events:
+                            event = SEvent(
+                                id=event_dict["id"],
+                                title=event_dict["title"],
+                                start=datetime.fromisoformat(event_dict["start"]),
+                                end=datetime.fromisoformat(event_dict["end"]),
+                                extendedProps=event_dict["extendedProps"]
+                            )
+                            events.append(event)
+                        
+                        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+                        
+                        validation_results = validate_rules(
+                            events=events,
+                            providers=providers,
+                            global_rules=st.session_state.global_rules,
+                            provider_rules=st.session_state.provider_rules
                         )
-                        events.append(event)
-                    
-                    providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-                    
-                    validation_results = validate_rules(
-                        events=events,
-                        providers=providers,
-                        global_rules=st.session_state.global_rules,
-                        provider_rules=st.session_state.provider_rules
-                    )
-                    
-                    st.session_state.validation_results = validation_results
-                    
-                    if validation_results["is_valid"]:
-                        st.success("✅ All rules validated successfully!")
-                    else:
-                        st.warning("⚠️ Rule violations found. Check details below.")
-                    
-                    st.rerun()
+                        
+                        st.session_state.validation_results = validation_results
+                        
+                        if validation_results["is_valid"]:
+                            st.success("✅ All rules validated successfully!")
+                        else:
+                            st.warning("⚠️ Rule violations found. Check details below.")
+                        
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to validate rules: {e}")
+                        st.error(f"Error details: {traceback.format_exc()}")
                 else:
                     st.error("No schedule to validate!")
         
@@ -380,7 +464,11 @@ def render_desktop_interface():
         
         # Render calendar
         if st.session_state.events:
-            render_calendar(st.session_state.events)
+            try:
+                render_calendar(st.session_state.events)
+            except Exception as e:
+                st.error(f"Failed to render calendar: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
         else:
             st.info("No schedule available. Generate a schedule to view it here.")
     
@@ -506,26 +594,38 @@ def render_desktop_interface():
     
     # Providers Tab
     with tab3:
-        providers_panel()
+        try:
+            providers_panel()
+        except Exception as e:
+            st.error(f"Failed to render providers panel: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
     
     # Grid View Tab
     with tab4:
         st.header("📊 Schedule Grid View")
         
         if st.session_state.events:
-            # Render grid view
-            grid_df = render_schedule_grid(st.session_state.events, year, month)
-            
-            # Apply changes button
-            if st.button("🔄 Apply Grid Changes to Calendar", type="primary"):
-                updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
-                st.session_state.events = updated_events
+            try:
+                # Render grid view
+                grid_df = render_schedule_grid(st.session_state.events, year, month)
                 
-                # Auto-save the updated schedule
-                save_schedule(year, month, st.session_state.events)
-                
-                st.success("Grid changes applied to calendar and saved!")
-                st.rerun()
+                # Apply changes button
+                if st.button("🔄 Apply Grid Changes to Calendar", type="primary"):
+                    try:
+                        updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
+                        st.session_state.events = updated_events
+                        
+                        # Auto-save the updated schedule
+                        save_schedule(year, month, st.session_state.events)
+                        
+                        st.success("Grid changes applied to calendar and saved!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to apply grid changes: {e}")
+                        st.error(f"Error details: {traceback.format_exc()}")
+            except Exception as e:
+                st.error(f"Failed to render grid view: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
         else:
             st.info("No schedule available. Generate a schedule to view it in grid format.")
     
@@ -537,15 +637,28 @@ def render_desktop_interface():
     
     # Provider Requests Tab
     with tab6:
-        provider_requests_panel()
+        try:
+            provider_requests_panel()
+        except Exception as e:
+            st.error(f"Failed to render requests panel: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
     
     # Data Management Tab
     with tab7:
-        render_data_status()
+        try:
+            render_data_status()
+        except Exception as e:
+            st.error(f"Failed to render data status: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
 
 def main():
     """Main application function."""
-    initialize_session_state()
+    try:
+        initialize_session_state()
+    except Exception as e:
+        st.error(f"Failed to initialize application: {e}")
+        st.error(f"Error details: {traceback.format_exc()}")
+        st.stop()
     
     # Mobile detection
     try:
@@ -556,7 +669,21 @@ def main():
             render_desktop_interface()
     except ImportError:
         # Fallback to desktop interface if mobile components don't exist
-        render_desktop_interface()
+        try:
+            render_desktop_interface()
+        except Exception as e:
+            st.error(f"Failed to render desktop interface: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
+            st.stop()
+    except Exception as e:
+        st.error(f"Failed to detect mobile/desktop: {e}")
+        st.error(f"Error details: {traceback.format_exc()}")
+        st.stop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Application failed to start: {e}")
+        st.error(f"Error details: {traceback.format_exc()}")
+        st.stop()
