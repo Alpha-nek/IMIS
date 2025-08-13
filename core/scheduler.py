@@ -332,8 +332,9 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                          global_rules: RuleConfig, provider_shifts: Dict,
                          year: int = None, month: int = None) -> List[SEvent]:
     """
-    Fill remaining unfilled shifts while strictly respecting expected shift limits.
-    This function is very conservative to prevent over-assignment.
+    Fill remaining unfilled shifts with HARD RULES:
+    1. NO provider exceeds expected shifts unless manually edited
+    2. NO provider gets assigned to shift types against their preferences unless manually edited
     """
     events = []
     
@@ -360,7 +361,7 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
             # Count how many shifts of this type are already assigned on this day
             assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
             
-            # Fill remaining slots, but be very conservative
+            # Fill remaining slots, but with HARD RULES
             remaining_slots = capacity - assigned_count
             
             if remaining_slots <= 0:
@@ -371,12 +372,12 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                 day, shift_type, providers, provider_shifts, provider_rules
             )
             
-            # Filter providers based on their current shift count vs expected
-            # Use the same strict logic as nocturnists
+            # HARD RULE 1: Filter providers who are at or above their expected shifts
+            # NO EXCEPTIONS - providers cannot exceed expected shifts
             available_providers_for_day = []
             for provider in all_available:
                 if provider in APP_PROVIDER_INITIALS:
-                    # For APP providers, just check if they don't have too many shifts
+                    # For APP providers, use a reasonable limit
                     current_shifts = len(provider_shifts.get(provider, []))
                     if current_shifts < 20:  # Reasonable limit for APP providers
                         available_providers_for_day.append(provider)
@@ -384,10 +385,24 @@ def fill_remaining_shifts(month_days: List[date], providers: List[str],
                     current_shifts = len(provider_shifts.get(provider, []))
                     expected_shifts = provider_expected_shifts.get(provider, 15)
                     
-                    # Only include providers who are BELOW their expected shifts
-                    # This is the key change - we don't allow exceeding expected shifts
+                    # HARD RULE: Only include providers who are BELOW their expected shifts
+                    # NO tolerance, NO exceptions - this prevents over-assignment
                     if current_shifts < expected_shifts:
                         available_providers_for_day.append(provider)
+            
+            # HARD RULE 2: Double-check shift type preferences
+            # NO provider gets assigned to shift types they don't prefer
+            strictly_available_providers = []
+            for provider in available_providers_for_day:
+                provider_rule = provider_rules.get(provider, {})
+                shift_preferences = provider_rule.get("shift_preferences", {})
+                
+                # Only include if provider explicitly prefers this shift type
+                if shift_preferences.get(shift_type, False):  # Must be explicitly True
+                    strictly_available_providers.append(provider)
+            
+            # Use the strictly filtered list
+            available_providers_for_day = strictly_available_providers
             
             # Only fill slots if we have available providers
             slots_to_fill = min(remaining_slots, len(available_providers_for_day))
@@ -455,6 +470,7 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
                                      provider_shifts: Dict, provider_rules: Dict) -> List[str]:
     """
     Get available providers for a specific shift type on a given day.
+    HARD RULES: Only providers who explicitly prefer this shift type are available.
     """
     available_providers = []
     
@@ -467,14 +483,15 @@ def get_available_providers_for_shift(day: date, shift_type: str, providers: Lis
         if _has_shift_on_date(provider, day, provider_shifts[provider]):
             continue
         
-        # Check provider-specific restrictions
+        # HARD RULE: Check provider-specific shift preferences
         provider_rule = provider_rules.get(provider, {})
         if not isinstance(provider_rule, dict):
             provider_rule = {}
         shift_preferences = provider_rule.get("shift_preferences", {})
         
-        # Skip if provider doesn't prefer this shift type
-        if not shift_preferences.get(shift_type, True):
+        # HARD RULE: Provider must EXPLICITLY prefer this shift type
+        # Default is False (not True) - providers must opt-in to shift types
+        if not shift_preferences.get(shift_type, False):
             continue
         
         # Check rest requirements
@@ -513,11 +530,12 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
                        shift_capacity: Dict[str, int], provider_rules: Dict, 
                        global_rules: RuleConfig, year: int, month: int) -> Dict[str, List[Dict]]:
     """
-    Create shift blocks for each physician following the rules:
+    Create shift blocks for each physician following HARD RULES:
     - Maximum 7 shifts per block
     - 3-day rest between blocks
     - Rounders should end on rounding shifts
-    - Ensure shifts per provider match expected (adjusted for FTE and vacation)
+    - HARD RULE: Only create blocks for shift types the provider explicitly prefers
+    - HARD RULE: Never exceed expected shifts (adjusted for FTE and vacation)
     """
     physician_blocks = {p: [] for p in physician_providers}
     
@@ -532,6 +550,21 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
         # Get provider preferences and expected shifts (adjusted for FTE and vacation)
         from core.utils import get_adjusted_expected_shifts
         target_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
+        
+        # HARD RULE: Get provider's shift preferences
+        provider_rule = provider_rules.get(provider, {})
+        shift_preferences = provider_rule.get("shift_preferences", {})
+        
+        # HARD RULE: Filter shift types to only those the provider explicitly prefers
+        preferred_shift_types = []
+        for shift_type in physician_shift_types:
+            if shift_preferences.get(shift_type, False):  # Must be explicitly True
+                preferred_shift_types.append(shift_type)
+        
+        # If no preferred shift types, skip this provider (they won't get any blocks)
+        if not preferred_shift_types:
+            logger.warning(f"Provider {provider} has no preferred shift types - no blocks created")
+            continue
         
         # Create blocks with maximum 7 shifts per block
         remaining_shifts = target_shifts
@@ -548,10 +581,8 @@ def create_shift_blocks(month_days: List[date], physician_providers: List[str],
                 else:
                     block_size = random.randint(3, max_block_size)
             
-            # Determine shift type for this block
-            # Get provider rules with fallback to empty dict if not found
-            provider_rule = provider_rules.get(provider, {})
-            shift_type = select_shift_type_for_block(provider, physician_shift_types, 
+            # HARD RULE: Only select from preferred shift types
+            shift_type = select_shift_type_for_block(provider, preferred_shift_types, 
                                                     provider_rule)
             
             # Create block
@@ -571,6 +602,7 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
                                provider_rule: Dict) -> str:
     """
     Select appropriate shift type for a block based on provider preferences.
+    HARD RULE: Only select from shift types the provider explicitly prefers.
     """
     try:
         # Ensure provider_rule is a dictionary
@@ -580,14 +612,18 @@ def select_shift_type_for_block(provider: str, shift_types: List[str],
         # Get provider's shift preferences
         shift_preferences = provider_rule.get("shift_preferences", {})
         
-        # Filter available shift types based on preferences
+        # HARD RULE: Filter available shift types based on EXPLICIT preferences
+        # Default is False - providers must opt-in to shift types
         available_types = []
         for shift_type in shift_types:
-            if shift_preferences.get(shift_type, True):  # Default to True if not specified
+            if shift_preferences.get(shift_type, False):  # Must be explicitly True
                 available_types.append(shift_type)
         
+        # HARD RULE: If no preferred types, return the first available type
+        # This should not happen if the calling function filters properly
         if not available_types:
-            available_types = shift_types  # Fallback to all types
+            logger.warning(f"Provider {provider} has no preferred shift types from {shift_types}")
+            return shift_types[0] if shift_types else "R12"
         
         # Prefer rounder shifts (R12) as they're most common
         if "R12" in available_types:

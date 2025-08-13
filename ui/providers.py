@@ -206,24 +206,24 @@ def add_new_provider():
         shift_types = [shift["key"] for shift in DEFAULT_SHIFT_TYPES]
         shift_labels = [shift["label"] for shift in DEFAULT_SHIFT_TYPES]
         
-        # Create shift preference checkboxes with smart defaults
+        # Create shift preference checkboxes with HARD RULE defaults
         shift_preferences = {}
         cols = st.columns(3)
         
         for i, (shift_key, shift_label) in enumerate(zip(shift_types, shift_labels)):
             with cols[i % 3]:
-                # Smart defaults based on provider type
+                # HARD RULE: Default to False - providers must opt-in to shift types
+                # Only set to True for obvious cases (APP providers for APP shifts)
                 default_value = False
                 if provider_type == "APP" and shift_key == "APP":
                     default_value = True
-                elif provider_type == "Physician" and shift_key != "APP":
-                    default_value = True
+                # Note: Physician providers must explicitly choose their shift types
                 
                 shift_preferences[shift_key] = st.checkbox(
                     f"{shift_label} ({shift_key})",
                     value=default_value,
                     key=f"shift_pref_{shift_key}",
-                    help=f"Can this provider work {shift_label} shifts?"
+                    help=f"Can this provider work {shift_label} shifts? (HARD RULE: Must be checked to assign this shift type)"
                 )
         
         st.markdown("---")
@@ -231,22 +231,28 @@ def add_new_provider():
         # Workload Preferences
         st.markdown("**Workload Preferences**")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
         with col1:
-            min_shifts = st.number_input(
-                "Min Shifts per Month",
-                min_value=0, max_value=31,
-                value=8,
-                help="Minimum number of shifts this provider should work per month"
+            # FTE (Full Time Employment) setting
+            fte_percentage = st.slider(
+                "FTE Percentage",
+                min_value=0.1, max_value=2.0, step=0.1,
+                value=1.0,
+                help="Full Time Employment percentage. 1.0 = 100% full time (15-16 shifts), 0.8 = 80% (12-13 shifts), etc."
             )
             
-            max_shifts = st.number_input(
-                "Max Shifts per Month",
-                min_value=1, max_value=31,
-                value=16,
-                help="Maximum number of shifts this provider can work per month"
-            )
+            # Calculate and display expected shifts based on FTE
+            from core.utils import get_expected_shifts_for_month
+            from datetime import datetime
+            current_date = datetime.now()
+            base_expected_30 = get_expected_shifts_for_month(current_date.year, 4)  # April has 30 days
+            base_expected_31 = get_expected_shifts_for_month(current_date.year, 1)  # January has 31 days
+            
+            expected_30 = int(round(base_expected_30 * fte_percentage))
+            expected_31 = int(round(base_expected_31 * fte_percentage))
+            
+            st.info(f"📊 **Expected Shifts:** {expected_30} (30-day), {expected_31} (31-day)")
         
         with col2:
             min_weekend_shifts = st.number_input(
@@ -261,21 +267,6 @@ def add_new_provider():
                 min_value=0, max_value=10,
                 value=4,
                 help="Maximum number of weekend shifts per month"
-            )
-        
-        with col3:
-            min_night_shifts = st.number_input(
-                "Min Night Shifts",
-                min_value=0, max_value=31,
-                value=2,
-                help="Minimum number of night shifts per month"
-            )
-            
-            max_night_shifts = st.number_input(
-                "Max Night Shifts",
-                min_value=0, max_value=31,
-                value=8,
-                help="Maximum number of night shifts per month"
             )
         
         st.markdown("---")
@@ -339,12 +330,11 @@ def add_new_provider():
                 st.session_state.provider_rules = {}
             
             st.session_state.provider_rules[initials] = {
-                "min_shifts": min_shifts,
-                "max_shifts": max_shifts,
+                "fte": fte_percentage,
                 "min_weekend_shifts": min_weekend_shifts,
                 "max_weekend_shifts": max_weekend_shifts,
-                "min_night_shifts": min_night_shifts,
-                "max_night_shifts": max_night_shifts,
+                "min_night_shifts": 2,  # Will be calculated based on FTE and day/night percentage
+                "max_night_shifts": 8,  # Will be calculated based on FTE and day/night percentage
                 "day_percentage": day_percentage,
                 "night_percentage": night_percentage,
                 "day_night_preference": day_night_preference,
@@ -523,8 +513,6 @@ def provider_rules_panel():
     if selected_provider not in st.session_state.provider_rules:
         st.session_state.provider_rules[selected_provider] = {
             "fte": 1.0,  # Default to 100% full time
-            "min_shifts": 8,
-            "max_shifts": 16,
             "min_weekend_shifts": 1,
             "max_weekend_shifts": 4,
             "min_night_shifts": 2,
@@ -532,7 +520,15 @@ def provider_rules_panel():
             "day_percentage": 70,
             "night_percentage": 30,
             "day_night_preference": "No Preference",
-            "shift_preferences": {},
+            "shift_preferences": {
+                # HARD RULE: All shift types default to False - providers must opt-in
+                "R12": False,
+                "A12": False,
+                "A10": False,
+                "N12": False,
+                "NB": False,
+                "APP": False
+            },
             "unavailable_dates": [],
             "vacations": []
         }
@@ -543,61 +539,6 @@ def provider_rules_panel():
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Shift Limits", "🎯 Shift Preferences", "🚫 Unavailable Dates", "🏖️ Vacations"])
     
     with tab1:
-        st.markdown("#### Monthly Shift Limits")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            provider_rules["min_shifts"] = st.number_input(
-                "Min Shifts per Month",
-                min_value=0, max_value=31,
-                value=provider_rules.get("min_shifts", 8),
-                key=f"min_shifts_{selected_provider}",
-                help="Minimum number of shifts this provider should work per month"
-            )
-            
-            provider_rules["min_weekend_shifts"] = st.number_input(
-                "Min Weekend Shifts per Month",
-                min_value=0, max_value=10,
-                value=provider_rules.get("min_weekend_shifts", 1),
-                key=f"min_weekend_{selected_provider}",
-                help="Minimum number of weekend shifts this provider should work per month"
-            )
-            
-            provider_rules["min_night_shifts"] = st.number_input(
-                "Min Night Shifts per Month",
-                min_value=0, max_value=31,
-                value=provider_rules.get("min_night_shifts", 2),
-                key=f"min_night_{selected_provider}",
-                help="Minimum number of night shifts this provider should work per month"
-            )
-        
-        with col2:
-            provider_rules["max_shifts"] = st.number_input(
-                "Max Shifts per Month",
-                min_value=1, max_value=31,
-                value=provider_rules.get("max_shifts", 16),
-                key=f"max_shifts_{selected_provider}",
-                help="Maximum number of shifts this provider can work per month"
-            )
-            
-            provider_rules["max_weekend_shifts"] = st.number_input(
-                "Max Weekend Shifts per Month",
-                min_value=0, max_value=10,
-                value=provider_rules.get("max_weekend_shifts", 4),
-                key=f"max_weekend_{selected_provider}",
-                help="Maximum number of weekend shifts this provider can work per month"
-            )
-            
-            provider_rules["max_night_shifts"] = st.number_input(
-                "Max Night Shifts per Month",
-                min_value=0, max_value=31,
-                value=provider_rules.get("max_night_shifts", 8),
-                key=f"max_night_{selected_provider}",
-                help="Maximum number of night shifts this provider can work per month"
-            )
-        
-        # FTE (Full Time Employment) setting
         st.markdown("#### FTE (Full Time Employment)")
         st.markdown("Set the provider's FTE percentage to determine expected shifts:")
         
@@ -626,7 +567,7 @@ def provider_rules_panel():
         st.markdown("#### Day vs Night Shift Distribution")
         st.markdown("Set the preferred percentage of day shifts (night shifts will be the remainder):")
         
-        provider_rules["day_percentage"] = st.slider(
+        day_percentage = st.slider(
             "Day Shifts Percentage",
             min_value=0, max_value=100,
             value=provider_rules.get("day_percentage", 70),
@@ -634,9 +575,47 @@ def provider_rules_panel():
             help="Percentage of shifts that should be day shifts (7am-7pm). Night shifts will be 100% minus this value."
         )
         
-        provider_rules["night_percentage"] = 100 - provider_rules["day_percentage"]
+        provider_rules["day_percentage"] = day_percentage
+        provider_rules["night_percentage"] = 100 - day_percentage
         
-        st.info(f"📊 **Distribution:** {provider_rules['day_percentage']}% Day Shifts, {provider_rules['night_percentage']}% Night Shifts")
+        st.info(f"📊 **Distribution:** {day_percentage}% Day Shifts, {100-day_percentage}% Night Shifts")
+        
+        # Calculate and display night shift limits based on FTE and day/night percentage
+        night_percentage = 100 - day_percentage
+        night_shifts_30 = int(round(expected_30 * night_percentage / 100))
+        night_shifts_31 = int(round(expected_31 * night_percentage / 100))
+        
+        st.markdown("#### Calculated Night Shift Limits")
+        st.info(f"🌙 **Night Shifts:** {night_shifts_30} shifts (30-day months), {night_shifts_31} shifts (31-day months)")
+        
+        # Store the calculated values
+        provider_rules["min_night_shifts"] = max(0, night_shifts_30 - 2)  # Allow some flexibility
+        provider_rules["max_night_shifts"] = night_shifts_31 + 2  # Allow some flexibility
+        
+        # Weekend shift limits
+        st.markdown("#### Weekend Shift Limits")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            provider_rules["min_weekend_shifts"] = st.number_input(
+                "Min Weekend Shifts per Month",
+                min_value=0, max_value=10,
+                value=provider_rules.get("min_weekend_shifts", 1),
+                key=f"min_weekend_{selected_provider}",
+                help="Minimum number of weekend shifts this provider should work per month"
+            )
+        
+        with col2:
+            provider_rules["max_weekend_shifts"] = st.number_input(
+                "Max Weekend Shifts per Month",
+                min_value=0, max_value=10,
+                value=provider_rules.get("max_weekend_shifts", 4),
+                key=f"max_weekend_{selected_provider}",
+                help="Maximum number of weekend shifts this provider can work per month"
+            )
+        
+
         
         # Day/Night preference
         provider_rules["day_night_preference"] = st.selectbox(
@@ -651,7 +630,7 @@ def provider_rules_panel():
     
     with tab2:
         st.markdown("#### Shift Type Preferences")
-        st.markdown("Select which types of shifts this provider can work:")
+        st.markdown("**HARD RULE:** Select which types of shifts this provider can work. Only checked shift types will be assigned to this provider.")
         
         # Get shift types from constants
         from models.constants import DEFAULT_SHIFT_TYPES
@@ -660,23 +639,29 @@ def provider_rules_panel():
         
         # Initialize shift preferences if not exists
         if "shift_preferences" not in provider_rules:
-            provider_rules["shift_preferences"] = {}
+            provider_rules["shift_preferences"] = {
+                # HARD RULE: All shift types default to False - providers must opt-in
+                "R12": False,
+                "A12": False,
+                "A10": False,
+                "N12": False,
+                "NB": False,
+                "APP": False
+            }
         
         # Create shift preference checkboxes
         cols = st.columns(3)
         
         for i, (shift_key, shift_label) in enumerate(zip(shift_types, shift_labels)):
             with cols[i % 3]:
-                current_value = provider_rules["shift_preferences"].get(shift_key, 
-                    True if provider_type == "APP" and shift_key == "APP" else 
-                    True if provider_type == "Physician" and shift_key != "APP" else False
-                )
+                # HARD RULE: Default to False unless explicitly set
+                current_value = provider_rules["shift_preferences"].get(shift_key, False)
                 
                 provider_rules["shift_preferences"][shift_key] = st.checkbox(
                     f"{shift_label} ({shift_key})",
                     value=current_value,
                     key=f"shift_pref_{selected_provider}_{shift_key}",
-                    help=f"Can this provider work {shift_label} shifts?"
+                    help=f"HARD RULE: Must be checked to assign {shift_label} shifts to this provider"
                 )
     
     with tab3:
