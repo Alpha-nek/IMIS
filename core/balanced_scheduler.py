@@ -107,22 +107,58 @@ def create_provider_shift_blocks(providers: List[str], provider_expected_shifts:
 def determine_shift_type_for_block(provider: str, provider_rules: Dict) -> str:
     """
     Determine the best shift type for a provider's block.
+    BALANCED APPROACH: Distribute shift types across providers.
     """
+    from core.provider_types import get_provider_type, get_allowed_shift_types
+    
+    # Get provider's type and allowed shift types
+    provider_type = get_provider_type(provider)
+    allowed_shift_types = get_allowed_shift_types(provider)
+    
     # Get provider's shift preferences
     provider_rule = provider_rules.get(provider, {})
     shift_preferences = provider_rule.get("shift_preferences", {})
     
-    # Prefer admitting shifts for blocks (better continuity)
-    if shift_preferences.get("A12", False):
-        return "A12"
-    elif shift_preferences.get("A10", False):
-        return "A10"
-    elif shift_preferences.get("R12", False):
-        return "R12"
-    elif shift_preferences.get("N12", False):
-        return "N12"
+    # For regular providers, use a balanced approach
+    if provider_type == "REGULAR":
+        # Check if provider has explicit preferences
+        preferred_shifts = [shift for shift, preferred in shift_preferences.items() 
+                          if preferred and shift in allowed_shift_types]
+        
+        if preferred_shifts:
+            # If they have preferences, use them
+            return random.choice(preferred_shifts)
+        else:
+            # BALANCED DISTRIBUTION: Distribute shift types evenly
+            # Use a weighted random selection to ensure good distribution
+            shift_weights = {
+                "R12": 0.4,  # 40% rounding shifts
+                "A12": 0.25, # 25% 7am admitting
+                "A10": 0.2,  # 20% 10am admitting  
+                "N12": 0.15  # 15% night shifts
+            }
+            
+            # Filter to only allowed shift types
+            available_shifts = [shift for shift in allowed_shift_types if shift in shift_weights]
+            if available_shifts:
+                # Normalize weights for available shifts
+                total_weight = sum(shift_weights[shift] for shift in available_shifts)
+                if total_weight > 0:
+                    normalized_weights = [shift_weights[shift] / total_weight for shift in available_shifts]
+                    return random.choices(available_shifts, weights=normalized_weights)[0]
+            
+            # Fallback to random selection from allowed types
+            return random.choice(allowed_shift_types)
+    
+    # For other provider types, use their specific rules
+    elif provider_type == "SENIOR":
+        return "R12"  # Seniors only do rounding
+    elif provider_type == "NOCTURNIST":
+        return random.choice(["N12", "NB"])  # Nocturnists do night shifts
+    elif provider_type == "APP":
+        return "APP"  # APPs do APP shifts
     else:
-        # Default to rounding if no preferences
+        # Default fallback
         return "R12"
 
 def assign_blocks_with_proper_spacing(provider_blocks: Dict[str, List[Dict]], month_days: List[date],
@@ -237,11 +273,15 @@ def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
     """
     Fill any remaining gaps with individual shifts (only if absolutely necessary).
     This should be minimal with proper block assignment.
+    IMPROVED: Better coverage of all shift types.
     """
     events = []
     
+    # Define priority order for shift types (most important first)
+    shift_priority = ["N12", "A12", "A10", "R12", "NB", "APP"]
+    
     for day in month_days:
-        for shift_type in ["R12", "A12", "A10", "N12"]:
+        for shift_type in shift_priority:
             if shift_type not in shift_capacity:
                 continue
                 
@@ -250,7 +290,7 @@ def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
             remaining_slots = capacity - assigned_count
             
             for slot in range(remaining_slots):
-                # Find best available provider
+                # Find best available provider for this shift type
                 best_provider = find_best_provider_for_single_shift(day, shift_type, providers,
                                                                   provider_shifts, provider_rules,
                                                                   global_rules, provider_expected_shifts, year, month)
@@ -259,6 +299,7 @@ def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
                     event = create_shift_event(best_provider, shift_type, day)
                     events.append(event)
                     provider_shifts[best_provider].append(event)
+                    logger.info(f"✅ Gap fill: Assigned {shift_type} to {best_provider} on {day}")
     
     return events
 
@@ -268,11 +309,19 @@ def find_best_provider_for_single_shift(day: date, shift_type: str, providers: L
                                       year: int, month: int) -> Optional[str]:
     """
     Find the best provider for a single shift.
+    IMPROVED: Better provider selection for different shift types.
     """
+    from core.provider_types import get_provider_type, get_allowed_shift_types
+    
     best_provider = None
     best_score = float('inf')
     
     for provider in providers:
+        # Check if provider can do this shift type
+        allowed_shifts = get_allowed_shift_types(provider)
+        if shift_type not in allowed_shifts:
+            continue
+        
         # Basic availability checks
         if is_provider_unavailable_on_date(provider, day, provider_rules):
             continue
@@ -296,7 +345,20 @@ def find_best_provider_for_single_shift(day: date, shift_type: str, providers: L
             continue
         
         # Calculate score (lower is better)
+        # Prefer providers with fewer shifts
         score = current_shifts / expected_shifts
+        
+        # Bonus for providers who prefer this shift type
+        provider_rule = provider_rules.get(provider, {})
+        shift_preferences = provider_rule.get("shift_preferences", {})
+        if shift_preferences.get(shift_type, False):
+            score -= 0.1  # Small bonus for preference
+        
+        # Bonus for providers who haven't done this shift type recently
+        recent_shifts = [s for s in provider_shifts[provider] if hasattr(s, 'extendedProps')]
+        recent_shift_types = [s.extendedProps.get("shift_type") for s in recent_shifts[-3:]]  # Last 3 shifts
+        if shift_type not in recent_shift_types:
+            score -= 0.05  # Small bonus for variety
         
         if score < best_score:
             best_score = score
