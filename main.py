@@ -29,7 +29,7 @@ from ui.requests import provider_requests_panel
 # Page configuration
 st.set_page_config(
     page_title="IMIS Scheduler",
-    page_icon="��",
+    page_icon="🏥",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -105,7 +105,7 @@ def render_mobile_interface():
     
     # Mobile view routing
     if current_view == "home" or current_view == "calendar":
-        st.markdown("### �� Schedule")
+        st.markdown("### 📅 Schedule")
         if st.session_state.events:
             mobile_calendar(st.session_state.events, height=400)
         else:
@@ -212,7 +212,7 @@ def render_desktop_interface():
     # Professional header and provider status indicator
     st.markdown("""
     <div class="main-header">
-        <h1>�� IMIS Hospitalist Scheduler</h1>
+        <h1>🏥 IMIS Hospitalist Scheduler</h1>
         <p>Intelligent Medical Inpatient Scheduling System</p>
     </div>
     """, unsafe_allow_html=True)
@@ -454,14 +454,14 @@ def render_desktop_interface():
     
     # Grid View Tab
     with tab4:
-        st.header("�� Schedule Grid View")
+        st.header("📊 Schedule Grid View")
         
         if st.session_state.events:
             # Render grid view
             grid_df = render_schedule_grid(st.session_state.events, year, month)
             
             # Apply changes button
-            if st.button("�� Apply Grid Changes to Calendar", type="primary"):
+            if st.button("🔄 Apply Grid Changes to Calendar", type="primary"):
                 updated_events = apply_grid_changes_to_calendar(grid_df, st.session_state.events)
                 st.session_state.events = updated_events
                 st.success("Grid changes applied to calendar!")
