@@ -2,6 +2,9 @@
 data/
 *.json
 
+# Provider information (contains sensitive data)
+provider full name.txt
+
 # Python
 __pycache__/
 *.py[cod]

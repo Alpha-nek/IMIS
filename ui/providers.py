@@ -12,8 +12,14 @@ def providers_panel():
     """Main providers management panel."""
     st.header("👥 Provider Management")
     
+    # Provider selector section
+    from ui.provider_selector import render_provider_selector
+    render_provider_selector()
+    
+    st.markdown("---")
+    
     # Load providers section
-    with st.expander("📁 Load Providers from CSV", expanded=True):
+    with st.expander("📁 Load Providers from CSV", expanded=False):
         load_providers_from_csv()
     
     # Provider list section

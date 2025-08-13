@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 Data Manager for IMIS Scheduler
 Handles automatic saving and loading of app data
@@ -21,6 +20,62 @@ def ensure_data_directory():
     """Ensure the data directory exists."""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
+
+def load_provider_names() -> Dict[str, str]:
+    """Load provider full names from the text file."""
+    provider_names = {}
+    
+    # Try to load from the text file
+    try:
+        if os.path.exists("provider full name.txt"):
+            with open("provider full name.txt", 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '\t' in line:
+                        parts = line.split('\t')
+                        if len(parts) >= 6:  # Ensure we have enough columns
+                            initials = parts[0].strip().upper()
+                            provider_type = parts[2].strip()  # MD, NP, PA
+                            full_name = parts[5].strip()  # Full name is in column 6
+                            
+                            if initials and full_name and initials != "Moonlighter":
+                                provider_names[initials] = full_name
+    except Exception as e:
+        print(f"Error loading provider names: {e}")
+    
+    return provider_names
+
+def get_default_providers() -> pd.DataFrame:
+    """Get default provider data with actual full names from the text file."""
+    # Load actual provider names
+    provider_names = load_provider_names()
+    
+    # Define the current active providers (based on your original list)
+    # Only include providers that are actually in the text file
+    active_providers = [
+        {"initials": "AA", "type": "Physician"},
+        {"initials": "AD", "type": "Physician"},
+        {"initials": "AI", "type": "Physician"},
+        {"initials": "JA", "type": "APP"},
+        {"initials": "DN", "type": "APP"},
+        {"initials": "KP", "type": "APP"},
+        {"initials": "AR", "type": "APP"},
+        {"initials": "JL", "type": "APP"},
+    ]
+    
+    # Create provider list with actual names
+    default_providers = []
+    for provider in active_providers:
+        initials = provider["initials"]
+        full_name = provider_names.get(initials, f"Dr. {initials}") if provider["type"] == "Physician" else f"APP {initials}"
+        
+        default_providers.append({
+            "initials": initials,
+            "name": full_name,
+            "type": provider["type"]
+        })
+    
+    return pd.DataFrame(default_providers)
 
 def save_providers(providers_df: pd.DataFrame, provider_rules: Dict) -> None:
     """Save providers and their rules to JSON file."""
@@ -170,20 +225,6 @@ def load_settings() -> Dict:
         print(f"Error loading settings: {e}")
         return {}
 
-def get_default_providers() -> pd.DataFrame:
-    """Get default provider data that was built into the original app."""
-    default_providers = [
-        {"initials": "AA", "name": "Dr. A. A.", "type": "Physician"},
-        {"initials": "AD", "name": "Dr. A. D.", "type": "Physician"},
-        {"initials": "AI", "name": "Dr. A. I.", "type": "Physician"},
-        {"initials": "JA", "name": "APP A.", "type": "APP"},
-        {"initials": "DN", "name": "APP D.", "type": "APP"},
-        {"initials": "KP", "name": "APP K.", "type": "APP"},
-        {"initials": "AR", "name": "APP A.", "type": "APP"},
-        {"initials": "JL", "name": "APP J.", "type": "APP"},
-    ]
-    return pd.DataFrame(default_providers)
-
 def initialize_default_data():
     """Initialize default data if no saved data exists."""
     ensure_data_directory()
@@ -254,6 +295,3 @@ def auto_load_session_state():
             
     except Exception as e:
         print(f"Error in auto load: {e}")
-=======
-#placeholder
->>>>>>> 688115275780d875a519276c05565fdf07cb61b6
