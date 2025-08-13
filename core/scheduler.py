@@ -48,7 +48,7 @@ def assign_greedy(year: int, month: int, providers: List[str],
         
         # Assign shifts for this day
         for shift_type in shift_types:
-            shift_key = shift_type["key"]
+            shift_key = shift_type["name"]
             capacity = get_holiday_adjusted_capacity(shift_capacity.get(shift_key, 1), day)
             
             # Determine which providers can take this shift
@@ -72,11 +72,11 @@ def assign_greedy(year: int, month: int, providers: List[str],
                 eligible_providers.remove(provider)
                 
                 # Create shift event
-                start_time = datetime.combine(day, parse_time(shift_type["start"]))
-                end_time = datetime.combine(day, parse_time(shift_type["end"]))
+                start_time = datetime.combine(day, parse_time(shift_type["start_time"]))
+                end_time = datetime.combine(day, parse_time(shift_type["end_time"]))
                 
                 # Handle overnight shifts
-                if shift_type["end"] < shift_type["start"]:
+                if shift_type["end_time"] < shift_type["start_time"]:
                     end_time += timedelta(days=1)
                 
                 event = SEvent(

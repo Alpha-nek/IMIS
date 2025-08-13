@@ -53,7 +53,7 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         
         # Group events by shift type
         for shift_type in shift_types:
-            shift_key = shift_type["key"]
+            shift_key = shift_type["name"]
             shift_events = []
             for e in day_events:
                 # Handle both SEvent objects and dictionaries

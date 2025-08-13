@@ -439,7 +439,7 @@ def render_desktop_interface():
         for shift_type in st.session_state.shift_types:
             capacity = st.number_input(
                 f"Capacity for {shift_type['name']}", 
-                min_value=1, max_value=10, 
+                min_value=1, max_value=20, 
                 value=st.session_state.shift_capacity.get(shift_type['name'], 1),
                 key=f"capacity_{shift_type['name']}"
             )

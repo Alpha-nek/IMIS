@@ -13,12 +13,12 @@ APP_TIMEZONE = 'America/New_York'       # Application timezone
 
 # Default Shift Types Configuration
 DEFAULT_SHIFT_TYPES = [
-    {"key": "R12", "label": "7am–7pm Rounder",   "start": "07:00", "end": "19:00", "color": "#16a34a"},
-    {"key": "A12", "label": "7am–7pm Admitter",  "start": "07:00", "end": "19:00", "color": "#f59e0b"},
-    {"key": "A10", "label": "10am–10pm Admitter", "start": "10:00", "end": "22:00", "color": "#ef4444"},
-    {"key": "N12", "label": "7pm–7am (Night)", "start": "19:00", "end": "07:00", "color": "#7c3aed"},
-    {"key": "NB",  "label": "Night Bridge",     "start": "23:00", "end": "07:00", "color": "#06b6d4"},
-    {"key": "APP", "label": "APP Provider",      "start": "07:00", "end": "19:00", "color": "#8b5cf6"},
+    {"name": "R12", "label": "7am–7pm Rounder", "start_time": "07:00", "end_time": "19:00", "color": "#16a34a"},
+    {"name": "A12", "label": "7am–7pm Admitter", "start_time": "07:00", "end_time": "19:00", "color": "#f59e0b"},
+    {"name": "A10", "label": "10am–10pm Admitter", "start_time": "10:00", "end_time": "22:00", "color": "#ef4444"},
+    {"name": "N12", "label": "7pm–7am (Night)", "start_time": "19:00", "end_time": "07:00", "color": "#7c3aed"},
+    {"name": "NB", "label": "Night Bridge", "start_time": "23:00", "end_time": "07:00", "color": "#06b6d4"},
+    {"name": "APP", "label": "APP Provider", "start_time": "07:00", "end_time": "19:00", "color": "#8b5cf6"},
 ]
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

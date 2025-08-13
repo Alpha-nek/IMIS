@@ -164,7 +164,7 @@ def get_shift_label_maps():
     import streamlit as st
     from models.constants import DEFAULT_SHIFT_TYPES
     stypes = st.session_state.get("shift_types", DEFAULT_SHIFT_TYPES.copy())
-    label_for_key = {s["key"]: s["label"] for s in stypes}
+    label_for_key = {s["name"]: s["label"] for s in stypes}
     key_for_label = {v: k for k, v in label_for_key.items()}
     return label_for_key, key_for_label
 
