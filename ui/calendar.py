@@ -15,6 +15,35 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
     Render the calendar using Streamlit components with full width and improved styling.
     Handles both SEvent objects and dictionaries.
     """
+    # Add provider filter
+    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+        all_providers = ["All Providers"] + providers
+        
+        selected_provider = st.selectbox(
+            "Filter by Provider",
+            options=all_providers,
+            index=0,
+            key="calendar_provider_filter"
+        )
+        
+        # Filter events by selected provider
+        if selected_provider != "All Providers":
+            filtered_events = []
+            for event in events:
+                if hasattr(event, 'extendedProps'):
+                    event_provider = event.extendedProps.get("provider", "")
+                elif isinstance(event, dict) and 'extendedProps' in event:
+                    event_provider = event['extendedProps'].get("provider", "")
+                else:
+                    continue
+                
+                if event_provider == selected_provider:
+                    filtered_events.append(event)
+            events = filtered_events
+    else:
+        events = events  # No filtering if no providers loaded
+    
     # Convert events to JSON format
     events_json = []
     for event in events:

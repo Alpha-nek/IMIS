@@ -366,8 +366,10 @@ def render_desktop_interface():
                         
                         if validation_results["is_valid"]:
                             st.success("✅ Schedule generated and saved successfully!")
+                            st.info("💡 **Tip:** Go to the Grid View tab to edit assignments or view the schedule in grid format.")
                         else:
                             st.warning("⚠️ Schedule generated with violations. Check validation results.")
+                            st.info("💡 **Tip:** Go to the Grid View tab to manually adjust assignments and fix violations.")
                         
                         st.rerun()
                     except Exception as e:

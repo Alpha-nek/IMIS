@@ -109,8 +109,31 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     st.markdown("**Shift Types:** 7am–7pm Rounder | 7am–7pm Admitter | 10am–10pm Admitter | 7pm–7am (Night) | Night Bridge | APP Provider")
     st.markdown("**Instructions:** Use the dropdowns below to assign providers to shifts. Changes will be applied when you click 'Apply Grid Changes to Calendar'.")
     
+    # Add CSS for better grid styling
+    st.markdown("""
+    <style>
+        .grid-container {
+            overflow-x: auto;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .stSelectbox > div > div {
+            min-width: 120px;
+        }
+        .stButton > button {
+            margin: 5px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Create editable grid with dropdowns
     st.markdown("#### Edit Schedule")
+    
+    # Wrap the grid in a container for better scrolling
+    with st.container():
+        st.markdown('<div class="grid-container">', unsafe_allow_html=True)
     
     # Create a form for the grid
     with st.form("schedule_grid_form"):
@@ -124,8 +147,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             "APP Provider": "#8b5cf6"
         }
         
-        # Create header row with dates
-        header_cols = st.columns([2] + [1] * len(date_cols))
+        # Create header row with dates - use wider columns
+        header_cols = st.columns([3] + [2] * len(date_cols))
         with header_cols[0]:
             st.markdown("**Shift Type**")
         for i, date_col in enumerate(date_cols):
@@ -139,8 +162,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             shift_type = row["Shift Type"]
             shift_key = row["Shift Key"]
             
-            # Create columns for this row
-            cols = st.columns([2] + [1] * len(date_cols))
+            # Create columns for this row - use wider columns
+            cols = st.columns([3] + [2] * len(date_cols))
             
             # Shift type label with color
             with cols[0]:
@@ -159,7 +182,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                     # Create unique key for each dropdown
                     dropdown_key = f"grid_{shift_key}_{date_col}"
                     
-                    # Create dropdown
+                    # Create dropdown with better styling
                     selected_provider = st.selectbox(
                         "Provider",
                         options=provider_options,
@@ -188,6 +211,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             
             st.success("Grid changes applied to calendar and saved!")
             st.rerun()
+    
+    # Close the grid container
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Display read-only summary
     st.markdown("---")

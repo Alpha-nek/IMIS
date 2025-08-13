@@ -53,7 +53,6 @@ def providers_panel():
         
         # Provider rules section
         st.subheader("⚙️ Provider Rules")
-        provider_rules_selector()
         provider_rules_panel()
     else:
         st.info("No providers loaded. Please load a CSV file with provider data.")
