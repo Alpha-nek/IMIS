@@ -369,13 +369,109 @@ def validate_rules(events: List[SEvent], providers: List[str],
     """
     ENHANCED VALIDATION: Comprehensive debugging and validation of scheduling rules.
     """
-    # TODO: Implement comprehensive validation
+    violations = []
+    provider_violations = {}
+    coverage_gaps = []
+    preference_violations = []
+    rest_violations = []
+    
+    # Track provider statistics
+    provider_stats = {}
+    for provider in providers:
+        provider_stats[provider] = {
+            'total_shifts': 0,
+            'expected_shifts': 'N/A',
+            'shift_types': [],
+            'weekend_shifts': 0,
+            'night_shifts': 0,
+            'rounder_shifts': 0,
+            'admitting_shifts': 0,
+            'shift_dates': []
+        }
+    
+    # Analyze events
+    for event in events:
+        provider = event.extendedProps.get("provider")
+        shift_type = event.extendedProps.get("shift_type")
+        event_date = event.start.date()
+        
+        if provider and provider in provider_stats:
+            provider_stats[provider]['total_shifts'] += 1
+            provider_stats[provider]['shift_dates'].append(event_date)
+            
+            if shift_type not in provider_stats[provider]['shift_types']:
+                provider_stats[provider]['shift_types'].append(shift_type)
+            
+            # Categorize shift types
+            if shift_type in ["N12", "NB"]:
+                provider_stats[provider]['night_shifts'] += 1
+            elif shift_type == "R12":
+                provider_stats[provider]['rounder_shifts'] += 1
+            elif shift_type in ["A12", "A10"]:
+                provider_stats[provider]['admitting_shifts'] += 1
+            
+            # Check for weekend shifts
+            if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+                provider_stats[provider]['weekend_shifts'] += 1
+    
+    # Calculate expected shifts for each provider
+    for provider in providers:
+        try:
+            from core.utils import get_adjusted_expected_shifts
+            expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
+            provider_stats[provider]['expected_shifts'] = expected_shifts
+            
+            # Check if provider exceeds expected shifts
+            current_shifts = provider_stats[provider]['total_shifts']
+            if current_shifts > expected_shifts:
+                violation_msg = f"Provider {provider} has {current_shifts} shifts but expected {expected_shifts}"
+                violations.append(violation_msg)
+                if provider not in provider_violations:
+                    provider_violations[provider] = []
+                provider_violations[provider].append(violation_msg)
+        except Exception as e:
+            logger.warning(f"Could not calculate expected shifts for {provider}: {e}")
+    
+    # Check for rest violations
+    for provider in providers:
+        shift_dates = sorted(provider_stats[provider]['shift_dates'])
+        for i in range(1, len(shift_dates)):
+            days_between = (shift_dates[i] - shift_dates[i-1]).days
+            if days_between < 1:  # Minimum 1 day rest
+                violation_msg = f"Provider {provider} has insufficient rest between {shift_dates[i-1]} and {shift_dates[i]}"
+                rest_violations.append(violation_msg)
+                violations.append(violation_msg)
+    
+    # Check for preference violations
+    for provider in providers:
+        provider_rule = provider_rules.get(provider, {})
+        shift_preferences = provider_rule.get("shift_preferences", {})
+        
+        for event in events:
+            if event.extendedProps.get("provider") == provider:
+                shift_type = event.extendedProps.get("shift_type")
+                if shift_preferences and shift_type in shift_preferences and not shift_preferences[shift_type]:
+                    violation_msg = f"Provider {provider} assigned {shift_type} but doesn't prefer it"
+                    preference_violations.append(violation_msg)
+                    violations.append(violation_msg)
+    
+    # Calculate summary statistics
+    total_violations = len(violations)
+    coverage_gaps_count = len(coverage_gaps)
+    is_valid = total_violations == 0
+    
     return {
-        "violations": [],
-        "provider_violations": {},
-        "coverage_gaps": [],
-        "preference_violations": [],
-        "rest_violations": []
+        "violations": violations,
+        "provider_violations": provider_violations,
+        "coverage_gaps": coverage_gaps,
+        "preference_violations": preference_violations,
+        "rest_violations": rest_violations,
+        "is_valid": is_valid,
+        "summary": {
+            "total_violations": total_violations,
+            "coverage_gaps_count": coverage_gaps_count,
+            "provider_stats": provider_stats
+        }
     }
 
 

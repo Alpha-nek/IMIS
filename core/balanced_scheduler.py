@@ -1,10 +1,10 @@
 # =============================================================================
-# Balanced Scheduling Algorithm - Block-Based Approach
+# Balanced Scheduling Algorithm - Day-by-Day with Smart Block Building
 # =============================================================================
 
 import logging
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from datetime import date, timedelta
 from models.data_models import SEvent, RuleConfig
 from core.utils import count_shifts_on_date, get_adjusted_expected_shifts, is_provider_unavailable_on_date
@@ -20,13 +20,13 @@ def fill_remaining_shifts_balanced(month_days: List[date], providers: List[str],
                                  global_rules: RuleConfig, provider_shifts: Dict,
                                  year: int = None, month: int = None) -> List[SEvent]:
     """
-    BLOCK-BASED ALGORITHM: Create shift blocks for regular providers.
+    DAY-BY-DAY ALGORITHM with SMART BLOCK BUILDING: Assign shifts day by day with sophisticated scoring.
     
     Algorithm:
-    1. Calculate expected shifts for each regular provider
-    2. Create shift blocks (3-7 shifts) with admitting → rounding pattern
-    3. Assign blocks with proper spacing (2+ days rest between blocks)
-    4. Fill any remaining gaps with individual shifts only if necessary
+    1. Process each day and shift type
+    2. Use smart scoring to naturally build blocks (4-7 days preferred)
+    3. Enforce shift type consistency within blocks
+    4. Ensure proper rest periods and provider limits
     """
     events = []
     
@@ -39,315 +39,268 @@ def fill_remaining_shifts_balanced(month_days: List[date], providers: List[str],
                 provider, year, month, provider_rules, global_rules
             )
     
-    logger.info(f"Starting block-based algorithm for {len(providers)} providers")
+    logger.info(f"Starting day-by-day algorithm for {len(providers)} providers")
     logger.info(f"Provider expected shifts: {provider_expected_shifts}")
     
-    # Step 1: Create shift blocks for each provider
-    provider_blocks = create_provider_shift_blocks(providers, provider_expected_shifts, 
-                                                 month_days, provider_rules, global_rules)
+    # Track provider statistics
+    provider_counts = {p: 0 for p in providers}
+    provider_nights = {p: 0 for p in providers}
+    provider_days = {p: set() for p in providers}  # Track assigned days
     
-    # Step 2: Assign blocks with proper spacing (2+ days rest between blocks)
-    events.extend(assign_blocks_with_proper_spacing(provider_blocks, month_days, shift_capacity,
-                                                  provider_rules, global_rules, provider_shifts, year, month))
+    # Get block size preferences
+    min_block_size = getattr(global_rules, 'min_block_size', 3)
+    max_block_size = getattr(global_rules, 'max_block_size', 7)
     
-    # Step 3: Fill any remaining gaps with individual shifts (only if absolutely necessary)
-    events.extend(fill_remaining_gaps_individual(month_days, providers, shift_capacity,
-                                               provider_rules, global_rules, provider_shifts,
-                                               provider_expected_shifts, year, month))
+    # Define shift priority (most important first)
+    shift_priority = ["N12", "A12", "A10", "R12", "NB"]
+    
+    # Add randomness to provider selection
+    providers_shuffled = providers.copy()
+    random.shuffle(providers_shuffled)
+    
+    # Process each day
+    for current_day in month_days:
+        logger.info(f"Processing day: {current_day}")
+        
+        # Process each shift type
+        for shift_key in shift_priority:
+            if shift_key not in shift_capacity:
+                continue
+                
+            capacity = shift_capacity[shift_key]
+            assigned_count = count_shifts_on_date(current_day, shift_key, provider_shifts)
+            remaining_slots = capacity - assigned_count
+            
+            logger.info(f"  {shift_key}: {assigned_count}/{capacity} slots filled, {remaining_slots} remaining")
+            
+            # Fill remaining slots
+            for slot in range(remaining_slots):
+                candidates = [prov for prov in providers_shuffled if is_provider_available(
+                    prov, current_day, shift_key, provider_shifts, provider_rules, 
+                    global_rules, provider_expected_shifts, provider_counts, provider_nights, year, month
+                )]
+                
+                if not candidates:
+                    logger.warning(f"    ❌ No provider available for {shift_key} on {current_day}")
+                    continue
+                
+                # Score candidates and select best
+                if len(candidates) > 1:
+                    scores = [(prov, calculate_provider_score(
+                        prov, current_day, shift_key, provider_shifts, provider_rules,
+                        global_rules, provider_expected_shifts, provider_counts, 
+                        provider_nights, provider_days, min_block_size, max_block_size
+                    )) for prov in candidates]
+                    scores.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Add randomness when scores are close
+                    if len(scores) >= 2 and scores[0][1] > 0 and (scores[0][1] - scores[1][1]) / scores[0][1] < 0.1:
+                        best_provider = random.choice(scores[:2])[0]
+                    else:
+                        best_provider = scores[0][0]
+                else:
+                    best_provider = candidates[0]
+                
+                # Assign the shift
+                event = create_shift_event(best_provider, shift_key, current_day)
+                events.append(event)
+                provider_shifts[best_provider].append(event)
+                provider_counts[best_provider] += 1
+                provider_days[best_provider].add(current_day)
+                
+                if shift_key == "N12":
+                    provider_nights[best_provider] += 1
+                
+                logger.info(f"    ✅ Assigned {shift_key} to {best_provider}")
     
     return events
 
-def create_provider_shift_blocks(providers: List[str], provider_expected_shifts: Dict,
-                               month_days: List[date], provider_rules: Dict, 
-                               global_rules: RuleConfig) -> Dict[str, List[Dict]]:
+def is_provider_available(provider: str, day: date, shift_key: str, provider_shifts: Dict,
+                         provider_rules: Dict, global_rules: RuleConfig, 
+                         provider_expected_shifts: Dict, provider_counts: Dict,
+                         provider_nights: Dict, year: int, month: int) -> bool:
     """
-    Create shift blocks for each provider based on their expected shifts.
-    BLOCK PATTERN: 1-2 admitting shifts → rounding shifts
-    """
-    provider_blocks = {}
-    
-    for provider in providers:
-        expected_shifts = provider_expected_shifts.get(provider, 15)
-        current_shifts = 0
-        blocks = []
-        
-        logger.info(f"Creating blocks for {provider} (expected: {expected_shifts} shifts)")
-        
-        # Create blocks of 3-7 shifts until we reach expected shifts
-        while current_shifts < expected_shifts:
-            remaining_shifts = expected_shifts - current_shifts
-            
-            # Determine block size (3-7 shifts, but no more than remaining shifts)
-            if remaining_shifts < 3:
-                # If less than 3 shifts remain, create a small block
-                block_size = remaining_shifts
-            else:
-                # Prefer larger blocks (5-7 shifts) for better continuity
-                max_block_size = min(7, remaining_shifts)
-                if max_block_size >= 5:
-                    # 70% chance of larger blocks (5-7), 30% chance of smaller blocks (3-4)
-                    if random.random() < 0.7:
-                        block_size = random.randint(5, max_block_size)
-                    else:
-                        block_size = random.randint(3, min(4, max_block_size))
-                else:
-                    block_size = random.randint(3, max_block_size)
-            
-            # Create block with admitting → rounding pattern
-            block = create_admitting_to_rounding_block(provider, block_size, provider_rules)
-            blocks.append(block)
-            
-            current_shifts += block_size
-            logger.info(f"  Created {block_size}-shift block: {block['shift_sequence']}")
-        
-        provider_blocks[provider] = blocks
-    
-    return provider_blocks
-
-def create_admitting_to_rounding_block(provider: str, block_size: int, provider_rules: Dict) -> Dict:
-    """
-    Create a block with diverse shift pattern for regular providers.
-    Pattern: 1-2 admitting shifts → rounding shifts → night shifts (if needed)
+    Check if a provider is available for a specific shift on a given day.
     """
     from core.provider_types import get_allowed_shift_types
     
+    # Check if provider can do this shift type
     allowed_shifts = get_allowed_shift_types(provider)
-    admitting_shifts = [shift for shift in ["A12", "A10"] if shift in allowed_shifts]
-    rounding_shifts = [shift for shift in ["R12"] if shift in allowed_shifts]
-    night_shifts = [shift for shift in ["N12"] if shift in allowed_shifts]
+    if shift_key not in allowed_shifts:
+        return False
     
-    # Determine shift types (prefer A12, fallback to A10)
-    admitting_shift = "A12" if "A12" in admitting_shifts else "A10" if "A10" in admitting_shifts else "R12"
-    rounding_shift = "R12" if "R12" in rounding_shifts else admitting_shift
-    night_shift = "N12" if "N12" in night_shifts else rounding_shift
+    # Check if provider is unavailable on this date
+    if is_provider_unavailable_on_date(provider, day, provider_rules):
+        return False
     
-    # Create shift sequence based on block size
-    shift_sequence = []
+    # Check if provider already has a shift on this day
+    if has_shift_on_date(provider, day, provider_shifts[provider]):
+        return False
     
-    if block_size >= 5:
-        # Large block: 1-2 admitting → 2-3 rounding → 1 night
-        num_admitting = min(2, block_size - 3)  # At least 2 rounding + 1 night
-        num_rounding = block_size - num_admitting - 1  # Leave room for 1 night
-        num_night = 1
-        
-        for i in range(num_admitting):
-            shift_sequence.append(admitting_shift)
-        for i in range(num_rounding):
-            shift_sequence.append(rounding_shift)
-        for i in range(num_night):
-            shift_sequence.append(night_shift)
-            
-    elif block_size >= 3:
-        # Medium block: 1 admitting → 1-2 rounding → 1 night (if space)
-        num_admitting = 1
-        num_rounding = block_size - num_admitting - 1 if block_size > 3 else block_size - num_admitting
-        num_night = block_size - num_admitting - num_rounding
-        
-        for i in range(num_admitting):
-            shift_sequence.append(admitting_shift)
-        for i in range(num_rounding):
-            shift_sequence.append(rounding_shift)
-        for i in range(num_night):
-            shift_sequence.append(night_shift)
-    else:
-        # Small block: All rounding or admitting
-        for i in range(block_size):
-            shift_sequence.append(rounding_shift)
+    # Check shift type preference
+    if not validate_shift_type_preference(provider, shift_key, provider_rules):
+        return False
     
-    return {
-        "provider": provider,
-        "shift_sequence": shift_sequence,
-        "size": block_size,
-        "assigned": False
-    }
+    # Check rest requirements
+    min_rest_days = 1
+    if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
+        min_rest_days = max(1, global_rules.min_days_between_shifts)
+    
+    if not has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
+        return False
+    
+    # Check if assignment would exceed expected shifts
+    current_shifts = provider_counts[provider]
+    expected_shifts = provider_expected_shifts.get(provider, 15)
+    if current_shifts >= expected_shifts:
+        return False
+    
+    # Check night shift limits for regular providers
+    if shift_key == "N12":
+        max_nights = provider_rules.get(provider, {}).get("max_nights", 3)  # Default 3 nights/month
+        if provider_nights[provider] >= max_nights:
+            return False
+    
+    return True
 
-def assign_blocks_with_proper_spacing(provider_blocks: Dict[str, List[Dict]], month_days: List[date],
-                                    shift_capacity: Dict[str, int], provider_rules: Dict,
-                                    global_rules: RuleConfig, provider_shifts: Dict,
-                                    year: int, month: int) -> List[SEvent]:
+def calculate_provider_score(provider: str, day: date, shift_key: str, provider_shifts: Dict,
+                           provider_rules: Dict, global_rules: RuleConfig,
+                           provider_expected_shifts: Dict, provider_counts: Dict,
+                           provider_nights: Dict, provider_days: Dict[str, Set[date]],
+                           min_block_size: int, max_block_size: int) -> float:
     """
-    Assign blocks with proper spacing to ensure 2+ days rest between blocks.
+    Calculate a score for assigning a shift to a provider.
+    Higher scores are better.
     """
-    events = []
+    score = 0.0
     
-    # Sort providers by number of blocks (assign those with more blocks first)
-    sorted_providers = sorted(provider_blocks.keys(), 
-                            key=lambda p: len(provider_blocks[p]), reverse=True)
+    # Get provider's assigned days
+    days_set = provider_days[provider]
+    current_shifts = provider_counts[provider]
+    expected_shifts = provider_expected_shifts.get(provider, 15)
     
-    logger.info(f"Assigning blocks for providers: {sorted_providers}")
+    # 1. Load balancing - prefer providers with fewer shifts
+    if current_shifts < expected_shifts:
+        score += 4.0
+        # Bonus for building up to minimum block size
+        left_run = left_run_length(days_set, day)
+        if left_run > 0:
+            score += 2.0
+        if left_run < min_block_size:
+            score += 4.0
     
-    for provider in sorted_providers:
-        blocks = provider_blocks[provider]
+    # 2. Block size optimization - prefer 4-7 day blocks, avoid 1-2 day stretches
+    left_run = left_run_length(days_set, day)
+    right_run = right_run_length(days_set, day)
+    total_block_len = left_run + 1 + right_run
+    
+    # Penalty for standalone days or very short stretches
+    if left_run == 0 and right_run == 0:
+        score -= 6.0  # Strong penalty for standalone days
+    elif total_block_len <= 2:
+        score -= 3.0  # Penalty for short stretches
+    elif 4 <= total_block_len <= 7:
+        score += 2.0  # Bonus for optimal block size
+    
+    # 3. Shift type consistency within blocks - ENFORCE STRICT CONSISTENCY
+    if days_set:
+        # Classify shift types
+        night_shifts = {"N12", "NB"}
+        day_shifts = {"R12", "A12", "A10"}
         
-        for block in blocks:
-            if block["assigned"]:
-                continue
+        current_shift_type = "night" if shift_key in night_shifts else "day"
+        
+        # Check existing block for shift types
+        block_start = day - timedelta(days=left_run)
+        block_end = day + timedelta(days=right_run)
+        
+        block_shift_types = set()
+        for event in provider_shifts[provider]:
+            event_date = event.start.date()
+            if block_start <= event_date <= block_end:
+                block_shift_types.add(event.extendedProps.get("shift_type"))
+        
+        block_has_nights = any(s in night_shifts for s in block_shift_types)
+        block_has_days = any(s in day_shifts for s in block_shift_types)
+        
+        # STRICT CONSISTENCY ENFORCEMENT
+        if block_has_nights and block_has_days:
+            # Mixed block - strong penalty for adding different type
+            if (current_shift_type == "night" and not block_has_nights) or \
+               (current_shift_type == "day" and not block_has_days):
+                score -= 5.0
+        elif block_has_nights and current_shift_type == "day":
+            # Adding day shift to night block - very strong penalty
+            score -= 8.0
+        elif block_has_days and current_shift_type == "night":
+            # Adding night shift to day block - very strong penalty
+            score -= 8.0
+        else:
+            # Consistent block - strong bonus
+            score += 3.0
             
-            # Find available dates for this block with proper spacing
-            available_dates = find_available_dates_for_block_with_spacing(
-                provider, block["shift_sequence"], month_days,
-                provider_shifts, provider_rules, global_rules, year, month
-            )
-            
-            if len(available_dates) >= block["size"]:
-                # Assign the block
-                block_events = assign_shift_block(provider, block["shift_sequence"], 
-                                                available_dates[:block["size"]], provider_shifts)
-                events.extend(block_events)
-                block["assigned"] = True
-                
-                logger.info(f"✅ Assigned {block['size']}-shift block to {provider} starting {available_dates[0]}")
-                logger.info(f"   Shift sequence: {block['shift_sequence']}")
-            else:
-                logger.warning(f"❌ Could not assign {block['size']}-shift block to {provider} (only {len(available_dates)} dates available)")
+        # Bonus for extending existing consistent blocks
+        if left_run > 0 or right_run > 0:
+            if (current_shift_type == "night" and block_has_nights and not block_has_days) or \
+               (current_shift_type == "day" and block_has_days and not block_has_nights):
+                score += 2.0
     
-    return events
-
-def find_available_dates_for_block_with_spacing(provider: str, shift_sequence: List[str], 
-                                              month_days: List[date], provider_shifts: Dict,
-                                              provider_rules: Dict, global_rules: RuleConfig,
-                                              year: int, month: int) -> List[date]:
-    """
-    Find available dates for a block with proper spacing (2+ days rest between blocks).
-    """
-    from core.utils import is_provider_unavailable_on_date
-    from core.shift_validation import has_shift_on_date, validate_shift_type_preference, has_sufficient_rest
+    # 4. Gentle load balancing
+    score += max(0, 20 - current_shifts) * 0.01
     
-    available_dates = []
+    # 5. Soft penalty if this hits max block size
+    if max_block_size and total_block_len == max_block_size:
+        score -= 0.2
     
-    for start_idx in range(len(month_days) - len(shift_sequence) + 1):
-        # Check if we can place the block starting at this date
-        block_dates = month_days[start_idx:start_idx + len(shift_sequence)]
-        can_place_block = True
-        
-        for i, (day, shift_type) in enumerate(zip(block_dates, shift_sequence)):
-            # Check if provider is available on this day
-            if is_provider_unavailable_on_date(provider, day, provider_rules):
-                can_place_block = False
-                break
-            
-            # Check if provider already has a shift on this day
-            if has_shift_on_date(provider, day, provider_shifts[provider]):
-                can_place_block = False
-                break
-            
-            # Check shift type preference
-            if not validate_shift_type_preference(provider, shift_type, provider_rules):
-                can_place_block = False
-                break
-            
-            # Check rest requirements - ENFORCE 2+ days rest between blocks
-            min_rest_days = 2
-            if global_rules and hasattr(global_rules, 'min_days_between_shifts'):
-                min_rest_days = max(2, global_rules.min_days_between_shifts)
-            
-            if not has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
-                can_place_block = False
-                break
-        
-        if can_place_block:
-            available_dates = block_dates
-            break
+    # 6. Weekend incentive
+    weekend_required = provider_rules.get(provider, {}).get("require_weekend", False)
+    if day.weekday() >= 5 and weekend_required and provider_weekend_count(provider, provider_shifts) == 0:
+        score += 3.0
     
-    return available_dates
-
-def assign_shift_block(provider: str, shift_sequence: List[str], dates: List[date], 
-                      provider_shifts: Dict) -> List[SEvent]:
-    """
-    Assign a block of shifts to a provider.
-    """
-    events = []
-    
-    for day, shift_type in zip(dates, shift_sequence):
-        event = create_shift_event(provider, shift_type, day)
-        events.append(event)
-        provider_shifts[provider].append(event)
-    
-    return events
-
-def fill_remaining_gaps_individual(month_days: List[date], providers: List[str],
-                                 shift_capacity: Dict[str, int], provider_rules: Dict,
-                                 global_rules: RuleConfig, provider_shifts: Dict,
-                                 provider_expected_shifts: Dict, year: int, month: int) -> List[SEvent]:
-    """
-    Fill any remaining gaps with individual shifts (only if absolutely necessary).
-    This should be minimal with proper block assignment.
-    """
-    events = []
-    
-    # Define priority order for shift types (most important first)
-    shift_priority = ["N12", "A12", "A10", "R12", "NB", "APP"]
-    
-    for day in month_days:
-        for shift_type in shift_priority:
-            if shift_type not in shift_capacity:
-                continue
-                
-            capacity = shift_capacity[shift_type]
-            assigned_count = count_shifts_on_date(day, shift_type, provider_shifts)
-            remaining_slots = capacity - assigned_count
-            
-            for slot in range(remaining_slots):
-                # Find best available provider for this shift type
-                best_provider = find_best_provider_for_single_shift(day, shift_type, providers,
-                                                                  provider_shifts, provider_rules,
-                                                                  global_rules, provider_expected_shifts, year, month)
-                
-                if best_provider:
-                    event = create_shift_event(best_provider, shift_type, day)
-                    events.append(event)
-                    provider_shifts[best_provider].append(event)
-                    logger.info(f"✅ Gap fill: Assigned {shift_type} to {best_provider} on {day}")
-    
-    return events
-
-def find_best_provider_for_single_shift(day: date, shift_type: str, providers: List[str],
-                                      provider_shifts: Dict, provider_rules: Dict,
-                                      global_rules: RuleConfig, provider_expected_shifts: Dict,
-                                      year: int, month: int) -> Optional[str]:
-    """
-    Find the best provider for a single shift (for gap filling only).
-    """
-    from core.provider_types import get_provider_type, get_allowed_shift_types
-    
-    best_provider = None
-    best_score = float('inf')
-    
-    for provider in providers:
-        # Check if provider can do this shift type
-        allowed_shifts = get_allowed_shift_types(provider)
-        if shift_type not in allowed_shifts:
-            continue
-        
-        # Basic availability checks
-        if is_provider_unavailable_on_date(provider, day, provider_rules):
-            continue
-        
-        if has_shift_on_date(provider, day, provider_shifts[provider]):
-            continue
-        
-        # Check rest requirements (1 day minimum for individual shifts)
-        if not has_sufficient_rest(provider, day, provider_shifts[provider], 1):
-            continue
-        
-        # Check if assignment would exceed expected shifts
-        current_shifts = len(provider_shifts[provider])
-        expected_shifts = provider_expected_shifts.get(provider, 15)
-        
-        if current_shifts >= expected_shifts:
-            continue
-        
-        # Calculate score (lower is better)
-        score = current_shifts / expected_shifts
-        
-        # Bonus for providers who prefer this shift type
+    # 7. Day/night ratio preference
+    try:
         provider_rule = provider_rules.get(provider, {})
-        shift_preferences = provider_rule.get("shift_preferences", {})
-        if shift_preferences.get(shift_type, False):
-            score -= 0.1  # Small bonus for preference
-        
-        if score < best_score:
-            best_score = score
-            best_provider = provider
+        ratio = provider_rule.get("day_night_ratio", None)  # percent of day shifts
+        if ratio is not None:
+            desired_night_frac = max(0.0, (100.0 - float(ratio)) / 100.0)
+            cur_nights = provider_nights[provider]
+            est_total = current_shifts + 1
+            est_nights = cur_nights + (1 if shift_key == "N12" else 0)
+            est_night_frac = est_nights / max(1, est_total)
+            
+            # Penalize if assigning night would push above desired fraction
+            if shift_key == "N12" and est_night_frac > desired_night_frac + 0.05:
+                score -= 2.0
+            # Small bonus if assigning day reduces night fraction toward target
+            if shift_key != "N12" and est_night_frac < desired_night_frac - 0.10:
+                score += 0.5
+    except Exception:
+        pass
     
-    return best_provider
+    return score
+
+def left_run_length(days_set: Set[date], day: date) -> int:
+    """Calculate the length of consecutive days to the left of the given day."""
+    run = 0
+    current = day - timedelta(days=1)
+    while current in days_set:
+        run += 1
+        current -= timedelta(days=1)
+    return run
+
+def right_run_length(days_set: Set[date], day: date) -> int:
+    """Calculate the length of consecutive days to the right of the given day."""
+    run = 0
+    current = day + timedelta(days=1)
+    while current in days_set:
+        run += 1
+        current += timedelta(days=1)
+    return run
+
+def provider_weekend_count(provider: str, provider_shifts: Dict) -> int:
+    """Count weekend shifts for a provider."""
+    count = 0
+    for event in provider_shifts[provider]:
+        if event.start.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            count += 1
+    return count
