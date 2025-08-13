@@ -4,7 +4,7 @@
 
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict
 from models.data_models import RuleConfig, SEvent
 from models.constants import APP_PROVIDER_INITIALS
@@ -61,8 +61,8 @@ def assign_advanced(year: int, month: int, providers: List[str],
         if not isinstance(provider_rules, dict):
             logger.warning("Provider rules is not a dictionary, initializing empty dict")
             provider_rules = {}
-    
-            # Initialize
+        
+        # Initialize
         events = []
         month_days = make_month_days(year, month)
         
@@ -91,7 +91,7 @@ def assign_advanced(year: int, month: int, providers: List[str],
                                                          shift_capacity, provider_rules, 
                                                          global_rules, provider_shifts, year, month)
         events.extend(night_events)
-    
+        
         # Step 3: Assign senior providers to rounding shifts only
         senior_events = assign_senior_rounding_shifts(month_days, seniors, shift_capacity,
                                                     provider_rules, global_rules, provider_shifts, year, month)
@@ -234,7 +234,7 @@ def assign_night_shift_block(nocturnist: str, shift_type: str, dates: List[date]
 
 def assign_senior_rounding_shifts(month_days: List[date], seniors: List[str], shift_capacity: Dict[str, int],
                                 provider_rules: Dict, global_rules: RuleConfig, provider_shifts: Dict, 
-                          year: int, month: int) -> List[SEvent]:
+                                year: int, month: int) -> List[SEvent]:
     """
     Assign R12 shifts to senior providers only.
     """
@@ -270,7 +270,7 @@ def assign_senior_rounding_shifts(month_days: List[date], seniors: List[str], sh
                     block_events = assign_shift_block(senior, "R12", available_dates, provider_shifts)
                     events.extend(block_events)
                     remaining_shifts -= len(available_dates)
-                                    else:
+                else:
                     break
     
     return events
@@ -314,8 +314,8 @@ def find_available_dates_for_block(provider: str, shift_type: str, block_size: i
         
         if not has_sufficient_rest(provider, day, provider_shifts[provider], min_rest_days):
             consecutive_count = 0
-                continue
-            
+            continue
+        
         # Check if assignment would exceed expected shifts
         current_shifts = len(provider_shifts[provider])
         from core.utils import get_adjusted_expected_shifts
@@ -341,8 +341,8 @@ def assign_shift_block(provider: str, shift_type: str, dates: List[date], provid
     
     for day in dates:
         event = create_shift_event(provider, shift_type, day)
-            events.append(event)
-            provider_shifts[provider].append(event)
+        events.append(event)
+        provider_shifts[provider].append(event)
     
     return events
 
