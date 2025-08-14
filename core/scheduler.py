@@ -105,6 +105,41 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                 # Fallback to global default if computation fails
                 expected_shifts_by_provider[p] = getattr(global_rules, 'expected_shifts_per_month', 15)
         
+        # Pre-fill approved moonlighting events (seeded assignments)
+        try:
+            for provider in providers:
+                ml_items = provider_rules.get(provider, {}).get("moonlighting", [])
+                for it in ml_items:
+                    d_str = it.get("date")
+                    shift_key = it.get("shift_type")
+                    if not d_str or not shift_key:
+                        continue
+                    try:
+                        d = datetime.fromisoformat(d_str).date()
+                    except Exception:
+                        # Accept plain YYYY-MM-DD
+                        try:
+                            from datetime import date as _date
+                            parts = [int(x) for x in str(d_str).split('-')]
+                            d = _date(parts[0], parts[1], parts[2])
+                        except Exception:
+                            continue
+                    if d.year != year or d.month != month:
+                        continue
+                    # Avoid duplicates
+                    already = any(
+                        (e.start.date() == d and (e.extendedProps.get("shift_type") or e.extendedProps.get("shift_key")) == shift_key and e.extendedProps.get("provider") == provider)
+                        for e in events
+                    )
+                    if not already:
+                        try:
+                            pre_event = create_shift_event(provider, shift_key, d)
+                            events.append(pre_event)
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+
         # Main assignment loop - assign shifts day by day
         total_days = len(month_days)
         for day_index, current_day in enumerate(month_days, start=1):

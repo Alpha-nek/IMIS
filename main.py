@@ -646,9 +646,9 @@ def render_desktop_interface():
     st.markdown("</div>", unsafe_allow_html=True)
     
     # Main tabs with brown theme
+    # Tabs order: Calendar, Grid View, Providers, Requests, Sync, Data, Settings
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📅 Calendar", "⚙️ Settings", "👥 Providers", "📊 Grid View", 
-        "🔄 Sync", "📝 Requests", "💾 Data"
+        "📅 Calendar", "📊 Grid View", "👥 Providers", "📝 Requests", "🔄 Sync", "💾 Data", "⚙️ Settings"
     ])
     
     # Calendar Tab
@@ -658,8 +658,17 @@ def render_desktop_interface():
         # Month navigation
         render_month_navigation()
         
-        # Calendar display
-        if st.session_state.events:
+        # Calendar display with validation banner
+        violations = 0
+        try:
+            if hasattr(st.session_state, 'validation_results') and st.session_state.validation_results:
+                violations = st.session_state.validation_results.get("summary", {}).get("total_violations", 0)
+                if violations > 0:
+                    st.warning(f"⚠️ {violations} rule violation(s) detected. See details in Grid or below.")
+        except Exception:
+            pass
+
+        if st.session_state.get('events'):
             st.markdown('<div class="calendar-container">', unsafe_allow_html=True)
             render_calendar(st.session_state.events)
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1026,8 +1035,174 @@ def render_desktop_interface():
             with col3:
                 st.metric("APPs", app_count)
     
-    # Settings Tab
+    # Grid View Tab (moved to second)
     with tab2:
+        if st.session_state.events:
+            try:
+                # Render grid view (includes editing functionality)
+                render_schedule_grid(st.session_state.events, year, month)
+            except Exception as e:
+                st.error(f"Failed to render grid view: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
+        else:
+            st.info("No schedule available. Generate a schedule to view it in grid format.")
+
+    # Providers Tab
+    with tab3:
+        try:
+            providers_panel()
+        except Exception as e:
+            st.error(f"Failed to render providers panel: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
+
+    # Requests Tab
+    with tab4:
+        try:
+            provider_requests_panel()
+        except Exception as e:
+            st.error(f"Failed to render requests panel: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
+
+    # Sync Tab
+    with tab5:
+        st.header("📅 Google Calendar Sync")
+        st.info("Google Calendar integration will be implemented in the next phase.")
+        st.write("This tab will allow providers to sync their shifts to their Google Calendar.")
+
+    # Data Management Tab
+    with tab6:
+        try:
+            st.header("💾 Data Management")
+            st.caption("View and manage providers/rules, and saved schedules. Load/export JSON/CSV.")
+            from core.data_manager import load_providers, load_rules, save_providers, save_rules, load_schedule, save_schedule
+            # Providers and rules
+            st.subheader("👥 Providers & Rules")
+            providers_df, _ = load_providers()
+            global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Providers (CSV/JSON)")
+                if not providers_df.empty:
+                    st.dataframe(providers_df, use_container_width=True)
+                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers")
+                if uploaded_providers is not None:
+                    try:
+                        if uploaded_providers.name.endswith('.csv'):
+                            pdf = pd.read_csv(uploaded_providers)
+                        else:
+                            import json as _json
+                            pdf = pd.DataFrame(_json.load(uploaded_providers))
+                        save_providers(pdf, provider_rules)
+                        st.session_state.providers_df = pdf
+                        st.success("Providers file loaded and saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load providers: {e}")
+            with col2:
+                st.markdown("#### Provider Rules (JSON)")
+                st.json(provider_rules, expanded=False)
+                uploaded_rules = st.file_uploader("Upload rules JSON", type=["json"], key="upload_rules")
+                if uploaded_rules is not None:
+                    try:
+                        import json as _json
+                        new_rules = _json.load(uploaded_rules)
+                        st.session_state.provider_rules = new_rules
+                        save_rules(
+                            st.session_state.global_rules,
+                            st.session_state.shift_types,
+                            st.session_state.shift_capacity,
+                            new_rules
+                        )
+                        st.success("Provider rules loaded and saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load rules: {e}")
+            st.markdown("---")
+            # Saved schedules
+            st.subheader("📅 Saved Schedules")
+            year_val = st.session_state.get("current_year", datetime.now().year)
+            month_val = st.session_state.get("current_month", datetime.now().month)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                year_val = st.number_input("Year", min_value=2000, max_value=2100, value=year_val, step=1, key="dm_year")
+            with col2:
+                month_val = st.number_input("Month", min_value=1, max_value=12, value=month_val, step=1, key="dm_month")
+            with col3:
+                st.write("")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("⬇️ Load Saved Schedule"):
+                    try:
+                        ev = load_schedule(int(year_val), int(month_val))
+                        if ev:
+                            st.session_state.events = ev
+                            st.success("Loaded saved schedule into app.")
+                        else:
+                            st.info("No saved schedule found for that month.")
+                    except Exception as e:
+                        st.error(f"Failed to load schedule: {e}")
+            with c2:
+                if st.button("⬆️ Save Current Schedule"):
+                    try:
+                        save_schedule(int(year_val), int(month_val), st.session_state.get("events", []))
+                        st.success("Current schedule saved.")
+                    except Exception as e:
+                        st.error(f"Failed to save schedule: {e}")
+            with c3:
+                if st.button("📤 Export Current Schedule JSON"):
+                    import json as _json
+                    st.download_button(
+                        label="Download schedule.json",
+                        data=_json.dumps(st.session_state.get("events", []), default=str, indent=2),
+                        file_name="schedule.json",
+                        mime="application/json",
+                    )
+        except Exception as e:
+            st.error(f"Failed to render data status: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
+
+    # Settings Tab (moved to last)
+    with tab7:
+        st.header("⚙️ Global Settings")
+        # existing settings content moved here unchanged
+        # Global Rules Configuration
+        st.subheader("📋 Global Scheduling Rules")
+        if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
+            st.session_state.global_rules = RuleConfig()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.global_rules.max_consecutive_shifts = st.number_input(
+                "Max Consecutive Shifts", 
+                min_value=1, max_value=14, value=getattr(st.session_state.global_rules, 'max_consecutive_shifts', 7)
+            )
+            st.session_state.global_rules.min_days_between_shifts = st.number_input(
+                "Min Days Between Shifts", 
+                min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1)
+            )
+            st.session_state.global_rules.expected_shifts_per_month = st.number_input(
+                "Expected Shifts Per Month", 
+                min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'expected_shifts_per_month', 15),
+                help="Expected shifts per month (15 for 30-day months, 16 for 31-day months)"
+            )
+        with col2:
+            st.session_state.global_rules.max_weekend_shifts_per_month = st.number_input(
+                "Max Weekend Shifts Per Month", 
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'max_weekend_shifts_per_month', 4)
+            )
+            st.session_state.global_rules.min_weekend_shifts_per_month = st.number_input(
+                "Min Weekend Shifts Per Month", 
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'min_weekend_shifts_per_month', 1)
+            )
+            st.session_state.global_rules.max_night_shifts_per_month = st.number_input(
+                "Max Night Shifts Per Month", 
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'max_night_shifts_per_month', 8)
+            )
+            st.session_state.global_rules.min_night_shifts_per_month = st.number_input(
+                "Min Night Shifts Per Month", 
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_night_shifts_per_month', 2)
+            )
+        # Shift Types Configuration and Capacity - reuse existing blocks (omitted here for brevity)
+        # ... keep rest of settings content as before ...
         st.header("⚙️ Global Settings")
         
         # Global Rules Configuration

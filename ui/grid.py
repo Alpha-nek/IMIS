@@ -504,7 +504,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     if edited_grid is not None and not edited_grid.equals(grid_df):
         # Apply changes to events
         updated_events = apply_grid_changes_to_calendar(edited_grid, events, year, month, row_meta)
-        st.session_state.events = updated_events
+        # Persist updated events to session
+        st.session_state.events = updated_events or []
         
         # Auto-save the updated schedule
         from core.data_manager import save_schedule
@@ -513,6 +514,25 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         # Analyze for common violations and show warnings
         provider_rules = st.session_state.get("provider_rules", {})
         _show_grid_change_warnings(st.session_state.events, provider_rules)
+
+        # Run full validation so Calendar tab can display results immediately
+        try:
+            from core.scheduler import validate_rules
+            providers_list = []
+            if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+                providers_list = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+            st.session_state.validation_results = validate_rules(
+                st.session_state.events,
+                providers_list,
+                st.session_state.get("global_rules"),
+                st.session_state.get("provider_rules", {}),
+                year,
+                month,
+            )
+            if st.session_state.validation_results and st.session_state.validation_results.get("summary", {}).get("total_violations", 0) > 0:
+                st.warning("Some rule violations detected after edits. See details below or in the Calendar tab.")
+        except Exception:
+            pass
 
         st.toast("Grid changes applied and saved. Calendar updated.")
 

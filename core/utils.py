@@ -33,38 +33,62 @@ def is_provider_unavailable_on_date(provider: str, check_date: date, provider_ru
     """
     Check if a provider is unavailable on a specific date.
     Considers specific unavailable dates, unavailable days of week, and vacation periods.
+    Robust to both string and date object representations.
     """
     if not provider or provider not in provider_rules:
         return False
-    
+
     provider_rule = provider_rules[provider]
     if not isinstance(provider_rule, dict):
         return False
-    
-    # Check specific unavailable dates
+
+    # Check specific unavailable dates (accept either 'YYYY-MM-DD' strings or date objects)
     unavailable_dates = provider_rule.get("unavailable_dates", [])
-    date_str = check_date.strftime("%Y-%m-%d")
-    if date_str in unavailable_dates:
-        return True
-    
+    if unavailable_dates:
+        for ud in unavailable_dates:
+            try:
+                if hasattr(ud, 'strftime'):
+                    # It's a date/datetime object
+                    if ud == check_date:
+                        return True
+                else:
+                    # Assume it's a string
+                    if str(ud) == check_date.strftime("%Y-%m-%d"):
+                        return True
+            except Exception:
+                continue
+
     # Check unavailable days of the week (0=Monday, 6=Sunday)
     unavailable_days_of_week = provider_rule.get("unavailable_days_of_week", [])
-    day_of_week = check_date.weekday()  # 0=Monday, 6=Sunday
-    if day_of_week in unavailable_days_of_week:
+    if check_date.weekday() in unavailable_days_of_week:
         return True
-    
-    # Check vacation periods
-    vacations = provider_rule.get("vacations", [])
-    for vacation in vacations:
-        if isinstance(vacation, dict) and "start" in vacation and "end" in vacation:
-            try:
-                vacation_start = datetime.strptime(vacation["start"], "%Y-%m-%d").date()
-                vacation_end = datetime.strptime(vacation["end"], "%Y-%m-%d").date()
-                if vacation_start <= check_date <= vacation_end:
-                    return True
-            except (ValueError, TypeError):
-                continue
-    
+
+    # Check vacation periods, robust to string or date objects using the expander
+    try:
+        expanded = _expand_vacation_dates(provider_rule.get("vacations", []))
+        if check_date in expanded:
+            return True
+    except Exception:
+        # Fallback to direct range parsing if needed
+        vacations = provider_rule.get("vacations", [])
+        for vacation in vacations:
+            if isinstance(vacation, dict) and "start" in vacation and "end" in vacation:
+                try:
+                    s = vacation["start"]
+                    e = vacation["end"]
+                    if hasattr(s, 'strftime'):
+                        vacation_start = s
+                    else:
+                        vacation_start = datetime.strptime(str(s), "%Y-%m-%d").date()
+                    if hasattr(e, 'strftime'):
+                        vacation_end = e
+                    else:
+                        vacation_end = datetime.strptime(str(e), "%Y-%m-%d").date()
+                    if vacation_start <= check_date <= vacation_end:
+                        return True
+                except Exception:
+                    continue
+
     return False
 
 def calculate_shift_timing_score(provider: str, shift_date: date, provider_rules: Dict, 

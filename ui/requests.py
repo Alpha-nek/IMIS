@@ -15,7 +15,7 @@ def provider_requests_panel():
     # Request types
     request_type = st.selectbox(
         "Request Type",
-        options=["Vacation Request", "Blackout Date", "Shift Swap", "General Request"],
+        options=["Vacation Request", "Blackout Date", "Shift Swap", "Moonlighting", "General Request"],
         key="request_type"
     )
     
@@ -33,6 +33,8 @@ def provider_requests_panel():
         blackout_date_request_form(selected_provider)
     elif request_type == "Shift Swap":
         shift_swap_request_form(selected_provider)
+    elif request_type == "Moonlighting":
+        moonlighting_request_form(selected_provider)
     else:
         general_request_form(selected_provider)
     
@@ -146,7 +148,8 @@ def shift_swap_request_form(provider: str):
                 "desired_date": desired_date.isoformat(),
                 "desired_shift": desired_shift,
                 "swap_with": swap_with,
-                # Optional reason omitted
+                # Include reason key to avoid KeyError in display
+                "reason": "",
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -157,6 +160,61 @@ def shift_swap_request_form(provider: str):
             st.session_state.requests.append(request)
             st.success("Shift swap request submitted successfully!")
             st.rerun()
+
+def moonlighting_request_form(provider: str):
+    """Moonlighting request form: request specific dates or a date range for specific shift types."""
+    st.subheader("🌙 Moonlighting Request")
+    mode = st.radio("Request Mode", options=["Specific Dates", "Date Range"], horizontal=True, key="ml_mode")
+    shift_type = st.selectbox("Shift Type", options=["R12", "A12", "A10", "N12", "NB", "APP"], key="ml_shift_type")
+
+    if mode == "Specific Dates":
+        st.caption("Add one or more dates and desired shift type")
+        dates = st.date_input("Select Dates", key="ml_dates", value=[])
+        if st.button("Submit Moonlighting Request", type="primary"):
+            if not provider or not dates:
+                st.error("Please select provider and at least one date.")
+            else:
+                items = [{"date": d.isoformat(), "shift_type": shift_type} for d in (dates if isinstance(dates, list) else [dates])]
+                request = {
+                    "id": f"ml_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    "type": "Moonlighting",
+                    "provider": provider,
+                    "items": items,
+                    "status": "pending",
+                    "submitted_at": datetime.now().isoformat(),
+                    "reason": ""
+                }
+                if "requests" not in st.session_state:
+                    st.session_state.requests = []
+                st.session_state.requests.append(request)
+                st.success("Moonlighting request submitted!")
+                st.rerun()
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            s = st.date_input("Start Date", key="ml_start")
+        with col2:
+            e = st.date_input("End Date", key="ml_end")
+        if st.button("Submit Moonlighting Request", type="primary"):
+            if not provider or not s or not e or s > e:
+                st.error("Please select a valid provider and date range.")
+            else:
+                request = {
+                    "id": f"ml_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    "type": "Moonlighting",
+                    "provider": provider,
+                    "start_date": s.isoformat(),
+                    "end_date": e.isoformat(),
+                    "shift_type": shift_type,
+                    "status": "pending",
+                    "submitted_at": datetime.now().isoformat(),
+                    "reason": ""
+                }
+                if "requests" not in st.session_state:
+                    st.session_state.requests = []
+                st.session_state.requests.append(request)
+                st.success("Moonlighting request submitted!")
+                st.rerun()
 
 def general_request_form(provider: str):
     """General request form."""
@@ -193,8 +251,8 @@ def display_existing_requests():
         return
     
     # Filter requests by status
-    pending_requests = [req for req in st.session_state.requests if req["status"] == "pending"]
-    processed_requests = [req for req in st.session_state.requests if req["status"] != "pending"]
+    pending_requests = [req for req in st.session_state.requests if req.get("status") == "pending"]
+    processed_requests = [req for req in st.session_state.requests if req.get("status") != "pending"]
     
     # Display pending requests
     if pending_requests:
@@ -255,10 +313,21 @@ def display_request_details(request: Dict[str, Any]):
         st.write(f"**Desired:** {request['desired_date']} ({request['desired_shift']})")
         if request.get('swap_with'):
             st.write(f"**Swap with:** {request['swap_with']}")
+    elif request['type'] == "Moonlighting":
+        st.write("**Requested Moonlighting Dates & Shifts:**")
+        req_items = request.get('items', [])
+        if req_items:
+            for it in req_items:
+                st.write(f"• {it.get('date')} — {it.get('shift_type')}")
+        else:
+            # Range variant
+            st.write(f"• {request.get('start_date')} to {request.get('end_date')} — {request.get('shift_type')}")
     elif request['type'] == "General Request":
         st.write(f"**Title:** {request['title']}")
     
-    st.write(f"**Reason:** {request['reason']}")
+    # Reason may be optional/missing for some request types
+    if 'reason' in request and request['reason']:
+        st.write(f"**Reason:** {request['reason']}")
 
 def apply_approved_request(request: Dict[str, Any]):
     """Apply an approved request to the current schedule."""
@@ -311,6 +380,46 @@ def apply_approved_request(request: Dict[str, Any]):
     elif request["type"] == "Shift Swap":
         # Execute the shift swap
         execute_shift_swap(request)
+    elif request["type"] == "Moonlighting":
+        # Approving moonlighting marks preferred/allowed shifts on dates
+        try:
+            prov = request.get("provider", "").strip().upper()
+            if not prov:
+                return
+            if "provider_rules" not in st.session_state:
+                st.session_state.provider_rules = {}
+            rules = st.session_state.provider_rules.setdefault(prov, {})
+            # Store a set of preferred moonlighting dates with desired shift types
+            ml = rules.setdefault("moonlighting", [])
+            approved_items = []
+            if request.get("items"):
+                approved_items = request["items"]
+            else:
+                # Expand range into items
+                from datetime import datetime, timedelta
+                s = datetime.fromisoformat(request["start_date"]).date()
+                e = datetime.fromisoformat(request["end_date"]).date()
+                cur = s
+                while cur <= e:
+                    approved_items.append({"date": cur.isoformat(), "shift_type": request.get("shift_type")})
+                    cur += timedelta(days=1)
+            # Merge, avoiding duplicates
+            existing = {(x.get('date'), x.get('shift_type')) for x in ml}
+            for it in approved_items:
+                key = (it.get('date'), it.get('shift_type'))
+                if key not in existing:
+                    ml.append(it)
+                    existing.add(key)
+            # Persist rules
+            from core.data_manager import save_rules
+            save_rules(
+                st.session_state.global_rules,
+                st.session_state.shift_types,
+                st.session_state.shift_capacity,
+                st.session_state.provider_rules
+            )
+        except Exception:
+            pass
 
 def execute_shift_swap(request: Dict[str, Any]):
     """Execute a shift swap request."""
