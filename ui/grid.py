@@ -259,12 +259,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         </div>
         """, unsafe_allow_html=True)
     
-    # Add scroll hint
-    st.markdown(f"""
-    <div class="scroll-hint">
-        🔒 <strong>Freeze-Pane Active:</strong> The shift type column (width: {optimal_width}px) is frozen and will stay visible while you scroll horizontally through all {len(date_cols)} days.
-    </div>
-    """, unsafe_allow_html=True)
+    # Removed freeze-pane banner for a cleaner UI
     
     # Add custom CSS for sticky column, better styling, and provider highlighting
     st.markdown(f"""
@@ -277,16 +272,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             background: #f8f9fa;
         }}
         
-        .scroll-hint {{
-            background: #e3f2fd;
-            border: 1px solid #2196f3;
-            border-radius: 6px;
-            padding: 10px;
-            margin: 10px 0;
-            text-align: center;
-            color: #1565c0;
-            font-weight: bold;
-        }}
+        
         
         /* Enhanced freeze-pane functionality for first column */
         [data-testid="stDataFrame"] {{

@@ -17,53 +17,49 @@ def render_calendar(events: List[Any], height: int = 600, provider_filter_key: s
     """
     # Add provider filter with error handling
     try:
+        all_providers = ["All Providers"]
         if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
             # Check if 'initials' column exists
             if "initials" in st.session_state.providers_df.columns:
                 providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
                 all_providers = ["All Providers"] + providers
-                
-        selected_provider = st.selectbox(
-                    "Filter by Provider",
-                    options=all_providers,
-                    index=0,
-            key=provider_filter_key
-                )
-                
-                # Filter events by selected provider
-                if selected_provider != "All Providers":
-                    filtered_events = []
-                    for event in events:
-                        try:
-                            if hasattr(event, 'extendedProps'):
-                                event_provider = event.extendedProps.get("provider", "")
-                            elif isinstance(event, dict) and 'extendedProps' in event:
-                                event_provider = event['extendedProps'].get("provider", "")
-                            else:
-                                continue
-                            
-                            if event_provider == selected_provider:
-                                filtered_events.append(event)
-                        except Exception as e:
-                            # Skip problematic events but continue processing
-                            continue
-                    events = filtered_events
             else:
-                # If 'initials' column doesn't exist, show error
+                # If 'initials' column doesn't exist, show error but keep default option
                 st.error("Provider data is missing 'initials' column. Please check the provider setup.")
                 st.write("Available columns:", list(st.session_state.providers_df.columns))
-        else:
-            # No providers loaded - just continue without filtering
-            pass
+
+        selected_provider = st.selectbox(
+            "Filter by Provider",
+            options=all_providers,
+            index=0,
+            key=provider_filter_key
+        )
+
+        # Filter events by selected provider
+        if selected_provider != "All Providers":
+            filtered_events = []
+            for event in events:
+                try:
+                    if hasattr(event, 'extendedProps'):
+                        event_provider = event.extendedProps.get("provider", "")
+                    elif isinstance(event, dict) and 'extendedProps' in event:
+                        event_provider = event['extendedProps'].get("provider", "")
+                    else:
+                        continue
+                    if event_provider == selected_provider:
+                        filtered_events.append(event)
+                except Exception:
+                    # Skip problematic events but continue processing
+                    continue
+            events = filtered_events
     except Exception as e:
-        # Handle any unexpected errors gracefully
+        # Handle any unexpected errors gracefully and continue without filtering
         st.error(f"Error in provider filtering: {e}")
         st.write("Debug info:")
         st.write("- providers_df exists:", "providers_df" in st.session_state)
         if "providers_df" in st.session_state:
             st.write("- providers_df type:", type(st.session_state.providers_df))
             st.write("- providers_df shape:", getattr(st.session_state.providers_df, 'shape', 'No shape attribute'))
-        # Continue without filtering to prevent total crash
     
     # Convert events to JSON format
     events_json = []
@@ -236,19 +232,10 @@ def render_calendar(events: List[Any], height: int = 600, provider_filter_key: s
                 background: #e9ecef;
             }}
             
-            .fc-daygrid-day-events {{
+            /* Ensure calendar rows and event containers have adequate height */
+            .fc-daygrid-day-events {
                 min-height: 80px;
-            }}
-            
-            .fc-daygrid-day-frame {{
-                min-height: 120px;
-                height: auto;
-            }}
-            
-            .fc-daygrid-day {{
-                min-height: 120px;
-                height: auto;
-            }}
+            }
         </style>
     </head>
     <body>
