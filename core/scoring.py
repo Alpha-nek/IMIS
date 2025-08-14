@@ -261,7 +261,26 @@ class ScheduleScorer:
             if left_run < self.global_rules.min_block_size:
                 score += 4.0  # Building up to minimum block
         
-        # Day/night ratio preference
+        # Prefer block that starts with 1–2 admitting shifts then rounding for continuity
+        # If provider has no shifts yesterday, and today we choose an admitting shift, give a small bonus
+        existing_dates = stats.get('shift_dates', set())
+        yesterday = day - timedelta(days=1)
+        had_yesterday = yesterday in existing_dates
+        if not had_yesterday and shift_type in {"A12", "A10"}:
+            score += 1.5  # nudge to start block with admitting
+        
+        # If the provider had admitting yesterday and we choose rounding today, reward continuity
+        if had_yesterday:
+            # Find yesterday's type from events
+            y_type = None
+            for e in self.events:
+                if (e.extendedProps.get("provider") or "").upper() == provider.upper() and e.start.date() == yesterday:
+                    y_type = e.extendedProps.get("shift_type") or e.extendedProps.get("shift_key")
+                    break
+            if y_type in {"A12", "A10"} and shift_type == "R12":
+                score += 2.5  # admitting → rounding handoff
+        
+        # Night/day ratio preference
         if shift_type == "N12":
             night_ratio = self._calculate_night_ratio(provider, stats, provider_rule)
             desired_night_ratio = (100.0 - provider_rule.get("day_percentage", 80.0)) / 100.0
@@ -335,6 +354,11 @@ class ScheduleScorer:
                 # Additional bonus for extending consistent blocks
                 if left_run > 0 or right_run > 0:
                     score += 2.0
+                
+                # Prefer admitting → rounding continuity within a day-run block for regular providers
+                # If the block around this day already includes admitting types and the current is R12, small bonus
+                if not current_is_night and {"A12", "A10"} & block_shift_types and shift_type == "R12":
+                    score += 1.5
         
         return score
     

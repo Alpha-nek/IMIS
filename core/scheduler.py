@@ -212,6 +212,19 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
         if provider not in BRIDGE_QUALIFIED:
             return False
     
+    # Avoid immediate flips between night and day categories (safety/continuity)
+    try:
+        prev_date = day - timedelta(days=1)
+        prev_event = next((e for e in provider_events if e.start.date() == prev_date), None)
+        if prev_event is not None:
+            prev_type = prev_event.extendedProps.get("shift_type") or prev_event.extendedProps.get("shift_key")
+            night_types = {"N12", "NB"}
+            day_types = {"R12", "A12", "A10", "APP"}
+            if (prev_type in night_types and shift_key in day_types) or (prev_type in day_types and shift_key in night_types):
+                return False
+    except Exception:
+        pass
+
     # RE-ENABLED: Check shift preferences but be more lenient
     try:
         if not validate_shift_type_preference(provider, shift_key, provider_rules):
