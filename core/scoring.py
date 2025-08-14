@@ -279,6 +279,17 @@ class ScheduleScorer:
                     break
             if y_type in {"A12", "A10"} and shift_type == "R12":
                 score += 2.5  # admitting → rounding handoff
+
+        # Penalize admitting in the middle of an existing block (continuity of care)
+        if shift_type in {"A12", "A10"}:
+            left_run = self._left_run_length(existing_dates, day)
+            right_run = self._right_run_length(existing_dates, day)
+            # If we're not at the beginning of the block, discourage admitting
+            if left_run > 0:
+                score -= 4.0
+            # Stronger penalty if clearly in-between days of a running block
+            if left_run > 0 and right_run > 0:
+                score -= 2.0
         
         # Night/day ratio preference
         if shift_type == "N12":

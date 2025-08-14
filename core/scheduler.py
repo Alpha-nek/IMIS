@@ -106,7 +106,8 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                 expected_shifts_by_provider[p] = getattr(global_rules, 'expected_shifts_per_month', 15)
         
         # Main assignment loop - assign shifts day by day
-        for current_day in month_days:
+        total_days = len(month_days)
+        for day_index, current_day in enumerate(month_days, start=1):
             # Create/refresh scorer at the start of each day to reflect latest events
             scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
             for shift_type_dict in shift_types:
@@ -129,8 +130,13 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                             base_score = scorer.score_assignment(provider, current_day, shift_key)
                             current_shifts = sum(1 for e in events if e.extendedProps.get("provider") == provider)
                             expected_shifts = expected_shifts_by_provider.get(provider, getattr(global_rules, 'expected_shifts_per_month', 15))
-                            load_balance_bonus = max(0, expected_shifts - current_shifts) * 0.5
-                            total_score = base_score + load_balance_bonus
+                            # Urgency increases as month progresses
+                            urgency = 0.5 + (day_index / total_days)
+                            deficit = max(0, expected_shifts - current_shifts)
+                            # Stronger push to fulfill expected shifts; discourage overscheduling
+                            load_balance_bonus = deficit * urgency
+                            overschedule_penalty = max(0, current_shifts - expected_shifts) * 1.0
+                            total_score = base_score + load_balance_bonus - overschedule_penalty
                             candidates.append((provider, total_score))
                     
                     if not candidates:
@@ -783,6 +789,8 @@ def validate_rules(events: List[SEvent], providers: List[str],
     coverage_gaps_count = len(coverage_gaps)
     preference_violations_count = len(preference_violations)
     rest_violations_count = len(rest_violations)
+    # Providers used: number of providers who were assigned at least one shift
+    providers_used = sum(1 for p, stats in provider_stats.items() if stats.get('total_shifts', 0) > 0)
     is_valid = total_violations == 0
     
     return {
@@ -797,6 +805,7 @@ def validate_rules(events: List[SEvent], providers: List[str],
             "coverage_gaps_count": coverage_gaps_count,
             "preference_violations_count": preference_violations_count,
             "rest_violations_count": rest_violations_count,
+            "providers_used": providers_used,
             "provider_stats": provider_stats
         }
     }

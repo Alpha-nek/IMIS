@@ -187,13 +187,7 @@ def add_new_provider():
                 options=["Physician", "APP"],
                 help="Select whether this is a Physician or APP provider"
             )
-            
-            # Day/Night preference
-            day_night_preference = st.selectbox(
-                "Day/Night Preference",
-                options=["No Preference", "Day Shifts Preferred", "Night Shifts Preferred", "Day Shifts Only", "Night Shifts Only"],
-                help="Select the provider's preference for day vs night shifts"
-            )
+            # Removed duplicate quick day/night preference (exists in detailed rules below)
         
         st.markdown("---")
         
@@ -387,11 +381,7 @@ def add_new_provider():
                 "fte": fte_percentage,
                 "min_weekend_shifts": min_weekend_shifts,
                 "max_weekend_shifts": max_weekend_shifts,
-                "min_night_shifts": 2,  # Will be calculated based on FTE and day/night percentage
-                "max_night_shifts": 8,  # Will be calculated based on FTE and day/night percentage
                 "day_percentage": day_percentage,
-                "night_percentage": night_percentage,
-                "day_night_preference": day_night_preference,
                 "shift_preferences": shift_preferences,
                 "unavailable_dates": [],
                 "unavailable_days_of_week": unavailable_days_of_week,
