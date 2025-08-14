@@ -94,9 +94,21 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         random.seed(year * 100 + month)
         providers_shuffled = providers.copy()
         random.shuffle(providers_shuffled)
+
+        # Pre-compute expected shifts per provider (constant for given month/rules)
+        from core.utils import get_adjusted_expected_shifts
+        expected_shifts_by_provider: Dict[str, int] = {}
+        for p in providers:
+            try:
+                expected_shifts_by_provider[p] = get_adjusted_expected_shifts(p, year, month, provider_rules, global_rules)
+            except Exception:
+                # Fallback to global default if computation fails
+                expected_shifts_by_provider[p] = getattr(global_rules, 'expected_shifts_per_month', 15)
         
         # Main assignment loop - assign shifts day by day
         for current_day in month_days:
+            # Create/refresh scorer at the start of each day to reflect latest events
+            scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
             for shift_type_dict in shift_types:
                 shift_key = shift_type_dict.get("key", shift_type_dict.get("name", ""))
                 
@@ -106,20 +118,20 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                 # Assign shifts up to capacity
                 for slot in range(capacity):
                     
-                    # Find feasible candidates
-                    candidates = []
-                    feasible_providers = []
+                    # Find feasible candidates and score them using the scorer
+                    candidates: List[tuple[str, float]] = []
                     
                     for provider in providers_shuffled:
                         is_feasible = is_provider_feasible(provider, current_day, shift_key, events, 
                                                          provider_rules, global_rules, year, month)
                         if is_feasible:
-                            feasible_providers.append(provider)
-                            # IMPROVED: Score based on current shift count to balance load
-                            current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
-                            # Lower current shifts = higher score (prefer providers with fewer shifts)
-                            balance_score = 100 - current_shifts  # Higher score for fewer shifts
-                            candidates.append((provider, balance_score))
+                            # Scoring: domain-aware score + a gentle load-balance bonus
+                            base_score = scorer.score_assignment(provider, current_day, shift_key)
+                            current_shifts = sum(1 for e in events if e.extendedProps.get("provider") == provider)
+                            expected_shifts = expected_shifts_by_provider.get(provider, getattr(global_rules, 'expected_shifts_per_month', 15))
+                            load_balance_bonus = max(0, expected_shifts - current_shifts) * 0.5
+                            total_score = base_score + load_balance_bonus
+                            candidates.append((provider, total_score))
                     
                     if not candidates:
                         continue  # Skip this slot if no candidates
@@ -133,6 +145,10 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                     # Create and add the shift event
                     event = create_shift_event(best_provider, shift_key, current_day)
                     events.append(event)
+
+                    # Periodically refresh the scorer to reflect new assignments without excessive overhead
+                    if len(events) % 15 == 0:
+                        scorer = create_scorer(events, providers, provider_rules, global_rules, year, month)
         
         return events
         
