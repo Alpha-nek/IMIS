@@ -211,9 +211,28 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             grid_data[date_col].append(row[date_col] if row[date_col] else "")
     
     grid_df = pd.DataFrame(grid_data)
+
+    # Append On-Call row at the bottom based on same-day rounders excluding seniors
+    try:
+        from core.provider_types import SENIORS
+        oncall_row = {"Shift Type": "🟠 On-Call"}
+        for date_col in date_cols:
+            # Collect all rounders for that day from original df (Shift Key == R12)
+            day_rounders: List[str] = []
+            for idx, row in df.iterrows():
+                if row.get("Shift Key") == "R12":
+                    prov = row.get(date_col) or ""
+                    if prov and prov not in SENIORS:
+                        day_rounders.append(prov)
+            # Pick first eligible rounder as default on-call, else blank
+            oncall_row[date_col] = day_rounders[0] if day_rounders else ""
+        # Add the on-call row
+        grid_df = pd.concat([grid_df, pd.DataFrame([oncall_row])], ignore_index=True)
+    except Exception:
+        pass
     
     # Calculate height to avoid vertical scroll
-    height_px = min(2200, 110 + len(row_meta) * 38)
+    height_px = min(2200, 110 + (len(row_meta) + 1) * 38)
     
     # Calculate optimal width for first column based on longest label
     max_label_length = max(len(label) for label in color_labels)
@@ -245,9 +264,28 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             # This can be enhanced later with provider-specific restrictions
             available_providers.append(provider)
         
+        # For on-call row, restrict options to non-senior rounders for that day
+        if not providers:
+            day_options = provider_options
+        else:
+            try:
+                from core.provider_types import SENIORS
+                rounders = []
+                for idx, row in df.iterrows():
+                    if row.get("Shift Key") == "R12":
+                        val = row.get(date_col) or ""
+                        if val and val not in SENIORS:
+                            rounders.append(val)
+                # Keep unique while preserving order
+                seen = set()
+                filtered = [p for p in rounders if not (p in seen or seen.add(p))]
+                day_options = ["None"] + (filtered if filtered else providers)
+            except Exception:
+                day_options = provider_options
+
         col_config[date_col] = st.column_config.SelectboxColumn(
             date_col,
-            options=provider_options,
+            options=day_options,
             help=f"Assign provider to {date_col}",
             width="small"
         )
@@ -520,6 +558,32 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     if edited_grid is not None and not edited_grid.equals(grid_df):
         # Apply changes to events
         updated_events = apply_grid_changes_to_calendar(edited_grid, events, year, month, row_meta)
+        # Sync ONCALL events with the last row values
+        try:
+            if not edited_grid.empty:
+                oncall_series = edited_grid.iloc[-1]  # last row appended
+                for col in oncall_series.index:
+                    if col == "Shift Type":
+                        continue
+                    val = oncall_series[col]
+                    # Parse date
+                    try:
+                        m, d = col.split('/')
+                        dte = date(year, int(m), int(d))
+                    except Exception:
+                        continue
+                    # Remove existing ONCALL for that day
+                    updated_events = [e for e in updated_events if not (
+                        (hasattr(e, 'extendedProps') and e.extendedProps.get('shift_type') == 'ONCALL' and e.start.date() == dte) or
+                        (isinstance(e, dict) and e.get('extendedProps', {}).get('shift_type') == 'ONCALL' and datetime.fromisoformat(e['start']).date() == dte)
+                    )]
+                    # Add if selection is valid
+                    if val and val != "None":
+                        from core.shift_creation import create_shift_event
+                        new_e = create_shift_event(str(val), 'ONCALL', dte)
+                        updated_events.append(new_e)
+        except Exception:
+            pass
         # Persist updated events to session
         st.session_state.events = updated_events or []
         
@@ -561,7 +625,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         except Exception:
             pass
     
-    # Display read-only summary
+    # Display read-only summary and on-call integrity checks
     st.markdown("---")
     st.markdown("#### 📈 Schedule Summary")
     
@@ -602,6 +666,41 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         coverage_percent = (filled_slots / total_slots * 100) if total_slots > 0 else 0
         st.metric("Coverage", f"{coverage_percent:.1f}%")
     
+    # On-call integrity: warn if on-call provider is not assigned to rounding that day anymore
+    try:
+        from core.provider_types import SENIORS
+        issues = []
+        # Build map of date -> rounders
+        rounders_by_date: Dict[str, List[str]] = {}
+        for date_col in date_cols:
+            r = []
+            for idx, row in df.iterrows():
+                if row.get("Shift Key") == "R12":
+                    val = row.get(date_col) or ""
+                    if val:
+                        r.append(val)
+            rounders_by_date[date_col] = r
+        # Get on-call row from current grid
+        oncall = None
+        try:
+            oncall = grid_df.iloc[-1]
+        except Exception:
+            oncall = None
+        if oncall is not None and isinstance(oncall, pd.Series) and oncall.get("Shift Type") == "🟠 On-Call":
+            for date_col in date_cols:
+                oc = (oncall.get(date_col) or "").strip()
+                if not oc:
+                    continue
+                # Check valid
+                if oc in SENIORS:
+                    issues.append(f"{date_col}: On-call provider {oc} is a senior (not allowed)")
+                if oc not in rounders_by_date.get(date_col, []):
+                    issues.append(f"{date_col}: On-call provider {oc} is not assigned to rounding on this day")
+        if issues:
+            st.warning("\n".join([f"• {m}" for m in issues]))
+    except Exception:
+        pass
+
     # Provider statistics
     st.markdown("### 📊 Provider Statistics")
     

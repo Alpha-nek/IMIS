@@ -80,6 +80,12 @@ def get_shift_config(shift_type: str) -> Dict:
             "start": "07:00",
             "end": "19:00",
             "color": "#8b5cf6"
+        },
+        "ONCALL": {
+            "label": "On-Call",
+            "start": "00:00",
+            "end": "23:59",
+            "color": "#ff9800"
         }
     }
     
