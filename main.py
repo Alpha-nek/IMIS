@@ -456,9 +456,19 @@ def get_base64_logo():
     import base64
     
     try:
-        with open("brown logo.png", "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode()
-        return encoded_string
+        # Prefer the new logo; fall back to the old one if unavailable
+        for candidate in [
+            "New Logo.png",
+            "new logo.png",
+            "NewLogo.png",
+            "brown logo.png",
+        ]:
+            try:
+                with open(candidate, "rb") as image_file:
+                    return base64.b64encode(image_file.read()).decode()
+            except FileNotFoundError:
+                continue
+        return ""
     except FileNotFoundError:
         # Fallback if logo not found
         return ""
