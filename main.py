@@ -1175,8 +1175,73 @@ def render_desktop_interface():
     # Google Calendar Sync Tab
     with tab5:
         st.header("📅 Google Calendar Sync")
-        st.info("Google Calendar integration will be implemented in the next phase.")
-        st.write("This tab will allow providers to sync their shifts to their Google Calendar.")
+        st.caption("Authorize Google and sync only your shifts to your Google Calendar")
+
+        # Select provider identity for syncing
+        sync_provider = None
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            provider_list = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+            sync_provider = st.selectbox("Choose your provider initials", options=provider_list, key="gcal_sync_provider")
+        else:
+            st.warning("Load providers first.")
+
+        # Authorize and build service
+        from integrations.google_calendar import get_gcal_service, gcal_list_calendars, sync_events_to_gcal
+        service = get_gcal_service()
+        if service is None:
+            st.stop()
+
+        # List calendars to choose target
+        cals = gcal_list_calendars(service)
+        if not cals:
+            st.info("No calendars found for your account.")
+        else:
+            cal_names = [name for (_id, name) in cals]
+            cal_map = {name: _id for (_id, name) in cals}
+            sel_name = st.selectbox("Select destination calendar", options=cal_names, key="gcal_target_calendar")
+            calendar_id = cal_map.get(sel_name)
+
+            # Prepare this month's events filtered by selected provider
+            year = st.session_state.get("current_year")
+            month = st.session_state.get("current_month")
+            raw_events = st.session_state.get("events", [])
+            # Normalize to dict format for sync
+            to_sync = []
+            for e in raw_events:
+                try:
+                    if hasattr(e, 'to_json_event'):
+                        ev = e.to_json_event()
+                    elif isinstance(e, dict):
+                        ev = e
+                    else:
+                        continue
+                    prov = (ev.get('extendedProps', {}).get('provider') or '').strip().upper()
+                    if sync_provider and prov != sync_provider:
+                        continue
+                    # Only sync events in current year/month
+                    from datetime import datetime as _dt
+                    st_dt = ev.get('start')
+                    if isinstance(st_dt, str):
+                        dt = _dt.fromisoformat(st_dt)
+                    else:
+                        dt = st_dt
+                    if not (dt.year == year and dt.month == month):
+                        continue
+                    to_sync.append(ev)
+                except Exception:
+                    continue
+
+            st.write(f"Ready to sync {len(to_sync)} events for provider {sync_provider} → {sel_name}")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("🔄 Sync to Google", key="gcal_sync_now"):
+                    created, updated = sync_events_to_gcal(service, calendar_id, to_sync)
+                    st.success(f"Synced! Created: {created}, Updated: {updated}")
+            with col_b:
+                from integrations.google_calendar import remove_events_from_gcal
+                if st.button("🗑️ Remove this month's synced events", key="gcal_remove_month"):
+                    removed = remove_events_from_gcal(service, calendar_id, year, month)
+                    st.success(f"Removed {removed} events for {month}/{year}.")
     
     # Data Management Tab (sixth)
     with tab6:
