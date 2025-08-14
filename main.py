@@ -1014,26 +1014,7 @@ def render_desktop_interface():
                         st.session_state["active_tab_override"] = "Grid"
                         st.rerun()
         
-        # Provider statistics section
-        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
-            st.markdown("### 📈 Provider Statistics")
-            
-            providers_df = st.session_state.providers_df
-            
-            # Count by type
-            physician_count = len(providers_df[providers_df["type"] == "Physician"])
-            app_count = len(providers_df[providers_df["type"] == "APP"])
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Total Providers", len(providers_df))
-            
-            with col2:
-                st.metric("Physicians", physician_count)
-            
-            with col3:
-                st.metric("APPs", app_count)
+        # Removed front-page provider statistics to declutter the UI
     
     
 
@@ -1178,8 +1159,6 @@ def render_desktop_interface():
     # Providers Tab (third)
     with tab3:
         try:
-            # Clear any conflicting selectbox state keys to avoid duplicate keys on rerender
-            st.session_state.pop('provider_actions_select', None)
             providers_panel()
         except Exception as e:
             st.error(f"Failed to render providers panel: {e}")

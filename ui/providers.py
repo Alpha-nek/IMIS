@@ -85,7 +85,7 @@ def providers_panel():
         
         # Show selected provider details
         if selected_provider_full:
-            selected_initials = selected_provider_full.split(" - ")[0]
+            selected_initials = selected_provider_full.split(" - ")[0].strip().upper()
             # Persist selection so Rules panel uses the same provider
             st.session_state.selected_provider_for_rules = selected_initials
             provider_info = providers_df[providers_df["initials"] == selected_initials]
@@ -534,9 +534,17 @@ def provider_rules_selector():
         return None
     
     providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+    # Prefer previously selected provider if set
+    default_index = 0
+    if hasattr(st.session_state, 'selected_provider_for_rules') and st.session_state.selected_provider_for_rules in providers:
+        try:
+            default_index = providers.index(st.session_state.selected_provider_for_rules)
+        except Exception:
+            default_index = 0
     selected_provider = st.selectbox(
         "Select Provider to Edit Rules",
         options=providers,
+        index=default_index,
         key="provider_rules_selector"
     )
     

@@ -464,8 +464,10 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             
             // Find all cells containing the selected provider and highlight them
             const cells = root.querySelectorAll('[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] [role="gridcell"]');
+            const target = (selectedProvider || '').trim().toUpperCase();
             cells.forEach(cell => {{
-                if (cell.textContent.trim() === selectedProvider) {{
+                const text = (cell.innerText || cell.textContent || '').trim().toUpperCase();
+                if (text === target) {{
                     cell.classList.add('highlight-provider');
                 }}
             }});
@@ -488,9 +490,10 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         
         // Start observing when the data editor is available
         setTimeout(function() {{
-            const dataFrame = document.querySelector('[data-testid="stDataFrame"]');
-            if (dataFrame) {{
-                observer.observe(dataFrame, {{ childList: true, subtree: true }});
+            const gridRoot = (document.querySelector('#imis-grid-container') || document)
+                .querySelector('[data-testid="stDataFrame"], [data-testid="stDataEditor"]');
+            if (gridRoot) {{
+                observer.observe(gridRoot, {{ childList: true, subtree: true }});
             }}
         }}, 1000);
     </script>
@@ -714,26 +717,11 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     except Exception:
         pass
 
-    # Provider statistics
+    # Provider statistics (with expected shifts)
     st.markdown("### 📊 Provider Statistics")
     
     if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
         providers_df = st.session_state.providers_df
-        
-        # Count by type
-        physician_count = len(providers_df[providers_df["type"] == "Physician"])
-        app_count = len(providers_df[providers_df["type"] == "APP"])
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Providers", len(providers_df))
-        
-        with col2:
-            st.metric("Physicians", physician_count)
-        
-        with col3:
-            st.metric("APPs", app_count)
         
         # Show enhanced provider utilization
         st.markdown("#### 📊 Enhanced Provider Utilization")
@@ -805,7 +793,19 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                     "APP Shifts": stats["app_shifts"]
                 })
             
-            utilization_df = pd.DataFrame(utilization_data).sort_values("Total Shifts", ascending=False)
+            # Compute expected shifts per provider
+            from core.utils import get_adjusted_expected_shifts
+            expected_map: Dict[str, int] = {}
+            for prov in providers_df["initials"].astype(str).str.upper().tolist():
+                try:
+                    expected_map[prov] = get_adjusted_expected_shifts(prov, year, month, st.session_state.get("provider_rules", {}), st.session_state.get("global_rules"))
+                except Exception:
+                    expected_map[prov] = 0
+
+            utilization_df = pd.DataFrame(utilization_data)
+            # Merge expected shifts
+            utilization_df["Expected Shifts"] = utilization_df["Provider"].map(expected_map).fillna(0).astype(int)
+            utilization_df = utilization_df.sort_values(["Total Shifts", "Expected Shifts"], ascending=[False, False])
             
             # Add warning for providers with insufficient shifts
             insufficient_providers = []
@@ -823,6 +823,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
                 column_config={
                     "Provider": st.column_config.TextColumn("Provider", width="medium"),
                     "Total Shifts": st.column_config.NumberColumn("Total", width="small"),
+                    "Expected Shifts": st.column_config.NumberColumn("Expected", width="small"),
                     "Weekend Shifts": st.column_config.NumberColumn("Weekend", width="small"),
                     "Night Shifts": st.column_config.NumberColumn("Night", width="small"),
                     "Rounder Shifts": st.column_config.NumberColumn("Rounder", width="small"),
