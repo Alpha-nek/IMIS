@@ -197,14 +197,6 @@ def render_header_with_logo():
             transition: transform 0.3s ease;
             object-fit: contain;
         }
-        .logo-container svg {
-            height: 200px;
-            width: auto;
-            border-radius: 15px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-            position: relative;
-            z-index: 2;
-        }
         
         .logo-container:hover img {
             transform: scale(1.05);
@@ -457,8 +449,6 @@ def render_header_with_logo():
     media_kind, media_data = get_logo_media()
     if media_kind == "video":
         media_html = f"<video class=\"logo-video\" autoplay muted playsinline><source src=\"data:video/mp4;base64,{media_data}\" type=\"video/mp4\"></video>"
-    elif media_kind == "svg":
-        media_html = f"<img src=\"data:image/svg+xml;base64,{media_data}\" alt=\"IMIS Logo\"/>"
     else:
         media_html = f"<img src=\"data:image/png;base64,{media_data}\" alt=\"IMIS Logo\">"
 
@@ -480,22 +470,7 @@ def render_header_with_logo():
 def get_logo_media():
     """Return (kind, base64) where kind is 'video' or 'image'."""
     import base64
-    # Try animated SVG first
-    svg_candidates = [
-        "logo animated_000.svg",
-        "logo animated.svg",
-        "Logo Animated.svg",
-        "logo_animated.svg",
-    ]
-    for path in svg_candidates:
-        try:
-            with open(path, "rb") as f:
-                return "svg", base64.b64encode(f.read()).decode()
-        except FileNotFoundError:
-            continue
-        except Exception:
-            break
-    # Try animated video next
+    # Try animated video first
     video_candidates = [
         "logo animated.mp4",
         "Logo Animated.mp4",
@@ -508,7 +483,7 @@ def get_logo_media():
         except FileNotFoundError:
             continue
         except Exception:
-            break
+            pass
     # Fallback to images
     image_candidates = [
         "New Logo.png",
@@ -523,7 +498,7 @@ def get_logo_media():
         except FileNotFoundError:
             continue
         except Exception:
-            break
+            pass
     return "image", ""
 
 def initialize_session_state():
@@ -1227,7 +1202,7 @@ def render_desktop_interface():
         except Exception as e:
             st.error(f"Failed to render requests panel: {e}")
             st.error(f"Error details: {traceback.format_exc()}")
-
+    
     # Google Calendar Sync Tab
     with tab5:
         st.header("📅 Google Calendar Sync")
