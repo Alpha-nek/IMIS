@@ -967,10 +967,42 @@ def render_desktop_interface():
                 
                 with col1:
                     if st.button("🔄 Regenerate to Fix Issues", type="primary"):
-                        st.rerun()
+                        try:
+                            # Regenerate schedule using current session settings
+                            if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+                                providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+                                year = st.session_state.get("current_year", datetime.now().year)
+                                month = st.session_state.get("current_month", datetime.now().month)
+                                events = generate_schedule(
+                                    year,
+                                    month,
+                                    providers,
+                                    st.session_state.shift_types,
+                                    st.session_state.shift_capacity,
+                                    st.session_state.provider_rules,
+                                    st.session_state.global_rules,
+                                )
+                                st.session_state.events = events
+                                # Re-validate
+                                st.session_state.validation_results = validate_rules(
+                                    events,
+                                    providers,
+                                    st.session_state.global_rules,
+                                    st.session_state.provider_rules,
+                                    year,
+                                    month,
+                                )
+                                st.success("Regenerated schedule with current rules.")
+                                st.rerun()
+                            else:
+                                st.warning("No providers loaded. Please load providers first.")
+                        except Exception as e:
+                            st.error(f"❌ Failed to regenerate: {e}")
                 
                 with col2:
                     if st.button("📊 View Grid for Manual Fixes", type="secondary"):
+                        # Optionally switch to grid tab if such state exists
+                        st.session_state["active_tab_override"] = "Grid"
                         st.rerun()
         
         # Provider statistics section
@@ -1167,7 +1199,98 @@ def render_desktop_interface():
     # Data Management Tab
     with tab7:
         try:
-            render_data_status()
+            st.header("💾 Data Management")
+            st.caption("View and manage providers/rules, and saved schedules. Load/export JSON/CSV.")
+
+            from core.data_manager import load_providers, load_rules, save_providers, save_rules, load_schedule, save_schedule
+
+            # Providers and rules
+            st.subheader("👥 Providers & Rules")
+            providers_df, _ = load_providers()
+            global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Providers (CSV/JSON)")
+                if not providers_df.empty:
+                    st.dataframe(providers_df, use_container_width=True)
+                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers")
+                if uploaded_providers is not None:
+                    try:
+                        if uploaded_providers.name.endswith('.csv'):
+                            pdf = pd.read_csv(uploaded_providers)
+                        else:
+                            import json as _json
+                            pdf = pd.DataFrame(_json.load(uploaded_providers))
+                        save_providers(pdf, provider_rules)
+                        st.session_state.providers_df = pdf
+                        st.success("Providers file loaded and saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load providers: {e}")
+
+            with col2:
+                st.markdown("#### Provider Rules (JSON)")
+                st.json(provider_rules, expanded=False)
+                uploaded_rules = st.file_uploader("Upload rules JSON", type=["json"], key="upload_rules")
+                if uploaded_rules is not None:
+                    try:
+                        import json as _json
+                        new_rules = _json.load(uploaded_rules)
+                        st.session_state.provider_rules = new_rules
+                        save_rules(
+                            st.session_state.global_rules,
+                            st.session_state.shift_types,
+                            st.session_state.shift_capacity,
+                            new_rules
+                        )
+                        st.success("Provider rules loaded and saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load rules: {e}")
+
+            st.markdown("---")
+            # Saved schedules
+            st.subheader("📅 Saved Schedules")
+            year = st.session_state.get("current_year", datetime.now().year)
+            month = st.session_state.get("current_month", datetime.now().month)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                year = st.number_input("Year", min_value=2000, max_value=2100, value=year, step=1, key="dm_year")
+            with col2:
+                month = st.number_input("Month", min_value=1, max_value=12, value=month, step=1, key="dm_month")
+            with col3:
+                st.write("")
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("⬇️ Load Saved Schedule"):
+                    try:
+                        ev = load_schedule(int(year), int(month))
+                        if ev:
+                            st.session_state.events = ev
+                            st.success("Loaded saved schedule into app.")
+                        else:
+                            st.info("No saved schedule found for that month.")
+                    except Exception as e:
+                        st.error(f"Failed to load schedule: {e}")
+            with c2:
+                if st.button("⬆️ Save Current Schedule"):
+                    try:
+                        save_schedule(int(year), int(month), st.session_state.get("events", []))
+                        st.success("Current schedule saved.")
+                    except Exception as e:
+                        st.error(f"Failed to save schedule: {e}")
+            with c3:
+                if st.button("📤 Export Current Schedule JSON"):
+                    import json as _json
+                    st.download_button(
+                        label="Download schedule.json",
+                        data=_json.dumps(st.session_state.get("events", []), default=str, indent=2),
+                        file_name="schedule.json",
+                        mime="application/json",
+                    )
+
         except Exception as e:
             st.error(f"Failed to render data status: {e}")
             st.error(f"Error details: {traceback.format_exc()}")

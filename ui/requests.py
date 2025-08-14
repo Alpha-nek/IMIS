@@ -52,12 +52,11 @@ def vacation_request_form(provider: str):
     with col2:
         end_date = st.date_input("End Date", key="vacation_end")
     
-    reason = st.text_area("Reason for Vacation", key="vacation_reason")
-    
+    # Reason not required for vacation requests
     if st.button("Submit Vacation Request", type="primary"):
         # Validate inputs
-        if not provider or not reason:
-            st.error("Please fill in all fields correctly.")
+        if not provider:
+            st.error("Please select a provider.")
         elif start_date > end_date:
             st.error("Start date must be before or equal to end date.")
         else:
@@ -67,7 +66,8 @@ def vacation_request_form(provider: str):
                 "provider": provider,
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
-                "reason": reason,
+                # Reason optional, store empty string for backwards compatibility
+                "reason": "",
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -132,10 +132,9 @@ def shift_swap_request_form(provider: str):
     else:
         swap_with = st.text_input("Swap with Provider", key="swap_with_provider")
     
-    reason = st.text_area("Reason for Swap", key="swap_reason")
-    
+    # Reason not required for swap
     if st.button("Submit Swap Request", type="primary"):
-        if not provider or not swap_with or not reason:
+        if not provider or not swap_with:
             st.error("Please fill in all required fields including the provider to swap with.")
         else:
             request = {
@@ -147,7 +146,7 @@ def shift_swap_request_form(provider: str):
                 "desired_date": desired_date.isoformat(),
                 "desired_shift": desired_shift,
                 "swap_with": swap_with,
-                "reason": reason,
+                # Optional reason omitted
                 "status": "pending",
                 "submitted_at": datetime.now().isoformat()
             }
@@ -267,9 +266,30 @@ def apply_approved_request(request: Dict[str, Any]):
         st.session_state.events = []
     
     if request["type"] == "Vacation Request":
-        # Add vacation events to the schedule
+        # Add vacation to provider rules (so scheduler respects unavailability)
         start_date = datetime.fromisoformat(request["start_date"]).date()
         end_date = datetime.fromisoformat(request["end_date"]).date()
+        try:
+            if "provider_rules" not in st.session_state:
+                st.session_state.provider_rules = {}
+            prov = request["provider"].strip().upper()
+            rules = st.session_state.provider_rules.setdefault(prov, {})
+            vac_list = rules.setdefault("vacations", [])
+            vac_period = {"start": start_date.strftime("%Y-%m-%d"), "end": end_date.strftime("%Y-%m-%d")}
+            if vac_period not in vac_list:
+                vac_list.append(vac_period)
+            # Persist rules
+            from core.data_manager import save_rules
+            save_rules(
+                st.session_state.global_rules,
+                st.session_state.shift_types,
+                st.session_state.shift_capacity,
+                st.session_state.provider_rules
+            )
+        except Exception:
+            pass
+        
+        # Add vacation overlay events to the calendar for visibility
         
         current_date = start_date
         while current_date <= end_date:

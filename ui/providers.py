@@ -783,10 +783,24 @@ def provider_rules_panel():
         
         if st.button("Add Vacation", key=f"add_vacation_{selected_provider}"):
             if vacation_start <= vacation_end:
-                vacation_period = {"start": vacation_start, "end": vacation_end}
-                if vacation_period not in provider_rules["vacations"]:
-                    provider_rules["vacations"].append(vacation_period)
+                # Store as strings for consistency with JSON storage and utils parser
+                vacation_period = {"start": vacation_start.strftime("%Y-%m-%d"), "end": vacation_end.strftime("%Y-%m-%d")}
+                existing = provider_rules.get("vacations", [])
+                if vacation_period not in existing:
+                    existing.append(vacation_period)
+                    provider_rules["vacations"] = existing
                     st.success(f"Added vacation period: {vacation_start} to {vacation_end}")
+                    # Persist rules immediately
+                    try:
+                        from core.data_manager import save_rules
+                        save_rules(
+                            st.session_state.global_rules,
+                            st.session_state.shift_types,
+                            st.session_state.shift_capacity,
+                            st.session_state.provider_rules
+                        )
+                    except Exception:
+                        pass
                     st.rerun()
                 else:
                     st.warning("Vacation period already exists.")
@@ -794,12 +808,19 @@ def provider_rules_panel():
                 st.error("Start date must be before or equal to end date.")
         
         # Display current vacations
-        if provider_rules["vacations"]:
+        if provider_rules.get("vacations"):
             st.markdown("**Current Vacation Periods:**")
             for i, vacation in enumerate(provider_rules["vacations"]):
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"• {vacation['start']} to {vacation['end']}")
+                    # Display supports either string or date objects
+                    try:
+                        s = vacation['start'].strftime('%Y-%m-%d') if hasattr(vacation['start'], 'strftime') else str(vacation['start'])
+                        e = vacation['end'].strftime('%Y-%m-%d') if hasattr(vacation['end'], 'strftime') else str(vacation['end'])
+                    except Exception:
+                        s = str(vacation.get('start'))
+                        e = str(vacation.get('end'))
+                    st.write(f"• {s} to {e}")
                 with col2:
                     if st.button("Remove", key=f"remove_vacation_{selected_provider}_{i}"):
                         provider_rules["vacations"].remove(vacation)

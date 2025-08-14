@@ -10,7 +10,7 @@ import json
 
 from models.data_models import SEvent
 
-def render_calendar(events: List[Any], height: int = 600) -> None:
+def render_calendar(events: List[Any], height: int = 600, provider_filter_key: str = "calendar_provider_filter") -> None:
     """
     Render the calendar using Streamlit components with full width and improved styling.
     Handles both SEvent objects and dictionaries.
@@ -23,11 +23,11 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
                 providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
                 all_providers = ["All Providers"] + providers
                 
-                selected_provider = st.selectbox(
+        selected_provider = st.selectbox(
                     "Filter by Provider",
                     options=all_providers,
                     index=0,
-                    key="calendar_provider_filter"
+            key=provider_filter_key
                 )
                 
                 # Filter events by selected provider

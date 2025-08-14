@@ -21,15 +21,33 @@ def create_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     for day in range(1, calendar.monthrange(year, month)[1] + 1):
         month_days.append(date(year, month, day))
     
-    # Define the correct order of shift types for the grid with capacities
-    shift_type_order = [
-        {"key": "R12", "label": "7am–7pm Rounder", "color": "#16a34a", "capacity": 13},
-        {"key": "A12", "label": "7am–7pm Admitter", "color": "#f59e0b", "capacity": 1},
-        {"key": "A10", "label": "10am–10pm Admitter", "color": "#ef4444", "capacity": 2},
-        {"key": "N12", "label": "7pm–7am (Night)", "color": "#7c3aed", "capacity": 4},
-        {"key": "NB", "label": "Night Bridge", "color": "#06b6d4", "capacity": 1},
-        {"key": "APP", "label": "APP Provider", "color": "#8b5cf6", "capacity": 2},
-    ]
+    # Build shift types for the grid dynamically from settings with capacity
+    shift_type_order = []
+    try:
+        session_shift_types = st.session_state.get("shift_types", [])
+        capacity_map = st.session_state.get("shift_capacity", {})
+        for stype in session_shift_types:
+            key = stype.get("key")
+            if not key:
+                continue
+            shift_type_order.append({
+                "key": key,
+                "label": stype.get("label", key),
+                "color": stype.get("color", "#777777"),
+                "capacity": int(capacity_map.get(key, 1))
+            })
+        # Fallback to defaults if settings are missing
+        if not shift_type_order:
+            shift_type_order = [
+                {"key": "R12", "label": "7am–7pm Rounder", "color": "#16a34a", "capacity": 13},
+                {"key": "A12", "label": "7am–7pm Admitter", "color": "#f59e0b", "capacity": 1},
+                {"key": "A10", "label": "10am–10pm Admitter", "color": "#ef4444", "capacity": 2},
+                {"key": "N12", "label": "7pm–7am (Night)", "color": "#7c3aed", "capacity": 4},
+                {"key": "NB", "label": "Night Bridge", "color": "#06b6d4", "capacity": 1},
+                {"key": "APP", "label": "APP Provider", "color": "#8b5cf6", "capacity": 2},
+            ]
+    except Exception:
+        pass
     
     # Create grid data with multiple rows per shift type
     grid_data = []
@@ -219,7 +237,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         )
     
     # Get selected provider from calendar filter for highlighting
-    selected_provider = st.session_state.get("calendar_provider_filter", "All Providers")
+    # Use a unique key for grid context to avoid key collisions with main calendar
+    selected_provider = st.session_state.get("grid_calendar_provider_filter", st.session_state.get("calendar_provider_filter", "All Providers"))
     
     # Add visual indicator for selected provider
     if selected_provider != "All Providers":
