@@ -70,16 +70,12 @@ except ImportError as e:
     st.error(f"Failed to import requests UI: {e}")
     st.stop()
 
-try:
-    from ui.data_status import render_data_status
-except ImportError as e:
-    st.error(f"Failed to import data status UI: {e}")
-    st.stop()
+# Data status UI removed with Data tab
 
 try:
     from core.data_manager import (
         initialize_default_data, auto_load_session_state, auto_save_session_state,
-        save_providers, save_rules, save_schedule, load_providers, load_rules
+        save_providers, save_rules, load_providers, load_rules
     )
 except ImportError as e:
     st.error(f"Failed to import data manager: {e}")
@@ -646,9 +642,9 @@ def render_desktop_interface():
     st.markdown("</div>", unsafe_allow_html=True)
     
     # Main tabs with brown theme
-    # Tabs order: Calendar, Grid View, Providers, Requests, Sync, Data, Settings
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📅 Calendar", "📊 Grid View", "👥 Providers", "📝 Requests", "🔄 Sync", "💾 Data", "⚙️ Settings"
+    # Tabs order: Calendar, Grid View, Providers, Requests, Sync, Settings (Data tab removed)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📅 Calendar", "📊 Grid View", "👥 Providers", "📝 Requests", "🔄 Sync", "⚙️ Settings"
     ])
     
     # Calendar Tab
@@ -1021,7 +1017,7 @@ def render_desktop_interface():
     
 
     # Settings Tab (moved to last)
-    with tab7:
+    with tab6:
         st.header("⚙️ Global Settings")
         # Global Rules Configuration
         st.subheader("📋 Global Scheduling Rules")
@@ -1186,9 +1182,27 @@ def render_desktop_interface():
             st.warning("Load providers first.")
 
         # Authorize and build service
-        from integrations.google_calendar import get_gcal_service, gcal_list_calendars, sync_events_to_gcal
-        service = get_gcal_service()
+        from integrations.google_calendar import (
+            get_gcal_service, gcal_list_calendars, sync_events_to_gcal,
+            sign_in_google, sign_out_google
+        )
+        # Sign-in / status row
+        if sync_provider:
+            colS1, colS2 = st.columns([1,1])
+            with colS1:
+                if st.button("🔐 Sign in with Google", key="gcal_sign_in"):
+                    ok = sign_in_google(sync_provider)
+                    if ok:
+                        st.toast("Signed in successfully.")
+                        st.rerun()
+            with colS2:
+                if st.button("🚪 Sign out", key="gcal_sign_out"):
+                    sign_out_google(sync_provider)
+                    st.rerun()
+
+        service = get_gcal_service(sync_provider or "", interactive=False)
         if service is None:
+            st.info("Not signed in. Use the button above to authorize your Google account.")
             st.stop()
 
         # List calendars to choose target
@@ -1242,100 +1256,6 @@ def render_desktop_interface():
                 if st.button("🗑️ Remove this month's synced events", key="gcal_remove_month"):
                     removed = remove_events_from_gcal(service, calendar_id, year, month)
                     st.success(f"Removed {removed} events for {month}/{year}.")
-    
-    # Data Management Tab (sixth)
-    with tab6:
-        try:
-            st.header("💾 Data Management")
-            st.caption("View and manage providers/rules, and saved schedules. Load/export JSON/CSV.")
-            # Use existing top-level imports; avoid re-importing here to prevent shadowing
-            # Providers and rules
-            st.subheader("👥 Providers & Rules")
-            providers_df, _ = load_providers()
-            global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### Providers (CSV/JSON)")
-                if not providers_df.empty:
-                    st.dataframe(providers_df, use_container_width=True)
-                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers_dm_right")
-                if uploaded_providers is not None:
-                    try:
-                        if uploaded_providers.name.endswith('.csv'):
-                            pdf = pd.read_csv(uploaded_providers)
-                        else:
-                            import json as _json
-                            pdf = pd.DataFrame(_json.load(uploaded_providers))
-                        save_providers(pdf, provider_rules)
-                        st.session_state.providers_df = pdf
-                        st.success("Providers file loaded and saved.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to load providers: {e}")
-            with col2:
-                st.markdown("#### Provider Rules (JSON)")
-                st.json(provider_rules, expanded=False)
-                uploaded_rules = st.file_uploader("Upload rules JSON", type=["json"], key="upload_rules")
-                if uploaded_rules is not None:
-                    try:
-                        import json as _json
-                        new_rules = _json.load(uploaded_rules)
-                        st.session_state.provider_rules = new_rules
-                        save_rules(
-                            st.session_state.global_rules,
-                            st.session_state.shift_types,
-                            st.session_state.shift_capacity,
-                            new_rules
-                        )
-                        st.success("Provider rules loaded and saved.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to load rules: {e}")
-            st.markdown("---")
-            # Saved schedules
-            st.subheader("📅 Saved Schedules")
-            year_val = st.session_state.get("current_year", datetime.now().year)
-            month_val = st.session_state.get("current_month", datetime.now().month)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                year_val = st.number_input("Year", min_value=2000, max_value=2100, value=year_val, step=1, key="dm_year")
-            with col2:
-                month_val = st.number_input("Month", min_value=1, max_value=12, value=month_val, step=1, key="dm_month")
-            with col3:
-                st.write("")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("⬇️ Load Saved Schedule"):
-                    try:
-                        ev = load_schedule(int(year_val), int(month_val))
-                        if ev:
-                            st.session_state.events = ev
-                            st.success("Loaded saved schedule into app.")
-                        else:
-                            st.info("No saved schedule found for that month.")
-                    except Exception as e:
-                        st.error(f"Failed to load schedule: {e}")
-            with c2:
-                if st.button("⬆️ Save Current Schedule"):
-                    try:
-                        save_schedule(int(year_val), int(month_val), st.session_state.get("events", []))
-                        st.success("Current schedule saved.")
-                    except Exception as e:
-                        st.error(f"Failed to save schedule: {e}")
-            with c3:
-                if st.button("📤 Export Current Schedule JSON"):
-                    import json as _json
-                    st.download_button(
-                        label="Download schedule.json",
-                        data=_json.dumps(st.session_state.get("events", []), default=str, indent=2),
-                        file_name="schedule.json",
-                        mime="application/json",
-                    )
-        except Exception as e:
-            st.error(f"Failed to render data status: {e}")
-            st.error(f"Error details: {traceback.format_exc()}")
-    
-    # Data management previously duplicated under tab7 has been consolidated under tab6 above
     
     # Debug Test Tab removed to simplify the app
 

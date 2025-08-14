@@ -11,44 +11,119 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import pickle
+import json as _json
 
-from models.constants import GCAL_SCOPES, GCAL_TOKEN_FILE, GCAL_CREDENTIALS_FILE, APP_TIMEZONE
+from models.constants import GCAL_SCOPES, APP_TIMEZONE
 from models.data_models import SEvent
 
-def get_gcal_service():
-    """Get Google Calendar service."""
-    creds = None
-    
-    # Load existing token
-    if os.path.exists(GCAL_TOKEN_FILE):
-        with open(GCAL_TOKEN_FILE, 'rb') as token:
-            creds = pickle.load(token)
-    
-    # Refresh token if expired
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except Exception:
-            creds = None
-    
-    # Get new credentials if needed
-    if not creds or not creds.valid:
-        if os.path.exists(GCAL_CREDENTIALS_FILE):
-            flow = InstalledAppFlow.from_client_secrets_file(GCAL_CREDENTIALS_FILE, GCAL_SCOPES)
-            creds = flow.run_local_server(port=0)
-            
-            # Save token
-            with open(GCAL_TOKEN_FILE, 'wb') as token:
-                pickle.dump(creds, token)
-        else:
-            st.error(f"❌ Google Calendar credentials file not found: {GCAL_CREDENTIALS_FILE}")
-            st.info("Please download credentials.json from Google Cloud Console")
-            return None
-    
+
+def _tokens_dir() -> str:
+    base_dir = os.path.join("data", "tokens")
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
+
+
+def _token_path_for_provider(provider_initials: str) -> str:
+    initials = (provider_initials or "").strip().upper() or "UNKNOWN"
+    return os.path.join(_tokens_dir(), f"gcal_token_{initials}.json")
+
+
+def _load_provider_creds(provider_initials: str) -> Optional[Credentials]:
+    token_path = _token_path_for_provider(provider_initials)
+    if not os.path.exists(token_path):
+        return None
     try:
-        service = build('calendar', 'v3', credentials=creds)
-        return service
+        with open(token_path, "r", encoding="utf-8") as f:
+            info = _json.load(f)
+        creds = Credentials.from_authorized_user_info(info, scopes=GCAL_SCOPES)
+        # Refresh if needed
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                _save_provider_creds(provider_initials, creds)
+            except Exception:
+                return None
+        return creds
+    except Exception:
+        return None
+
+
+def _save_provider_creds(provider_initials: str, creds: Credentials) -> None:
+    token_path = _token_path_for_provider(provider_initials)
+    try:
+        with open(token_path, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+    except Exception:
+        pass
+
+
+def _get_client_config() -> Optional[Dict[str, Any]]:
+    # Prefer Streamlit secrets
+    secrets = getattr(st, "secrets", {}) or {}
+    client_id = None
+    client_secret = None
+    if isinstance(secrets, dict):
+        gsec = secrets.get("google_oauth") or secrets.get("gcal") or {}
+        client_id = gsec.get("client_id") or secrets.get("gcal_client_id")
+        client_secret = gsec.get("client_secret") or secrets.get("gcal_client_secret")
+    # Fallback to environment variables
+    client_id = client_id or os.environ.get("GCAL_CLIENT_ID")
+    client_secret = client_secret or os.environ.get("GCAL_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
+    return {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [
+                "http://localhost",
+                "http://localhost:8080/",
+                "http://localhost:8501/",
+            ]
+        }
+    }
+
+
+def sign_in_google(provider_initials: str) -> bool:
+    """Interactive OAuth sign-in for the given provider; stores token on success."""
+    client_config = _get_client_config()
+    if not client_config:
+        st.error("Google OAuth client is not configured. Set Streamlit secrets or GCAL_CLIENT_ID/GCAL_CLIENT_SECRET env vars.")
+        return False
+    try:
+        flow = InstalledAppFlow.from_client_config(client_config, scopes=GCAL_SCOPES)
+        creds = flow.run_local_server(port=0)
+        _save_provider_creds(provider_initials, creds)
+        return True
+    except Exception as e:
+        st.error(f"❌ Google sign-in failed: {e}")
+        return False
+
+
+def sign_out_google(provider_initials: str) -> None:
+    """Remove stored token for the provider."""
+    token_path = _token_path_for_provider(provider_initials)
+    try:
+        if os.path.exists(token_path):
+            os.remove(token_path)
+            st.success("Signed out from Google for this provider.")
+    except Exception:
+        pass
+
+
+def get_gcal_service(provider_initials: str, interactive: bool = False):
+    """Return Google Calendar service for provider. If interactive=True, will prompt sign-in if needed."""
+    creds = _load_provider_creds(provider_initials)
+    if not creds and interactive:
+        if not sign_in_google(provider_initials):
+            return None
+        creds = _load_provider_creds(provider_initials)
+    if not creds:
+        return None
+    try:
+        return build('calendar', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Failed to build Google Calendar service: {e}")
         return None
@@ -64,8 +139,8 @@ def gcal_list_calendars(service) -> List[Tuple[str, str]]:
 
 def local_event_to_gcal_body(event: Dict[str, Any]) -> Dict[str, Any]:
     """Convert local event to Google Calendar format."""
-    start_time = datetime.fromisoformat(event["start"])
-    end_time = datetime.fromisoformat(event["end"])
+    start_time = datetime.fromisoformat(event["start"]) if isinstance(event.get("start"), str) else event["start"]
+    end_time = datetime.fromisoformat(event["end"]) if isinstance(event.get("end"), str) else event["end"]
     
     # Handle timezone
     start_str = start_time.strftime("%Y-%m-%dT%H:%M:%S")
