@@ -468,7 +468,20 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         from core.data_manager import save_schedule
         save_schedule(year, month, st.session_state.events)
         
+        # Analyze for common violations and show warnings
+        provider_rules = st.session_state.get("provider_rules", {})
+        _show_grid_change_warnings(st.session_state.events, provider_rules)
+
         st.toast("Grid changes applied and saved. Calendar updated.")
+
+        # Live calendar preview below the grid so users immediately see updates
+        try:
+            from ui.calendar import render_calendar
+            st.markdown("---")
+            st.markdown("#### 📅 Live Calendar Preview (updates with grid changes)")
+            render_calendar(st.session_state.events, height=520)
+        except Exception:
+            pass
     
     # Display read-only summary
     st.markdown("---")
@@ -764,3 +777,81 @@ def apply_grid_changes_to_calendar(edited_grid: pd.DataFrame, original_events: L
             updated_events.append(event)
     
     return updated_events
+
+def _show_grid_change_warnings(events: List[Any], provider_rules: Dict[str, Dict]) -> None:
+    """Display warnings for double assignments, block > 7, and preference violations."""
+    # Normalize events
+    normalized: List[Dict[str, Any]] = []
+    for e in events:
+        try:
+            if hasattr(e, 'start') and hasattr(e, 'extendedProps'):
+                normalized.append({
+                    'start': e.start.isoformat() if hasattr(e.start, 'isoformat') else str(e.start),
+                    'extendedProps': {
+                        'provider': e.extendedProps.get('provider', ''),
+                        'shift_type': e.extendedProps.get('shift_type') or e.extendedProps.get('shift_key')
+                    }
+                })
+            elif isinstance(e, dict) and 'start' in e:
+                normalized.append(e)
+        except Exception:
+            continue
+
+    # Maps
+    date_to_provider_counts: Dict[date, Dict[str, int]] = {}
+    provider_dates: Dict[str, List[date]] = {}
+    pref_violations: List[str] = []
+
+    for ev in normalized:
+        try:
+            d = datetime.fromisoformat(ev['start']).date()
+        except Exception:
+            continue
+        provider = (ev.get('extendedProps', {}).get('provider') or '').strip().upper()
+        shift_type = ev.get('extendedProps', {}).get('shift_type')
+        if not provider:
+            continue
+
+        date_to_provider_counts.setdefault(d, {})
+        date_to_provider_counts[d][provider] = date_to_provider_counts[d].get(provider, 0) + 1
+
+        provider_dates.setdefault(provider, []).append(d)
+
+        pr = provider_rules.get(provider, {})
+        sp = pr.get('shift_preferences', {})
+        if shift_type in sp and sp[shift_type] is False:
+            pref_violations.append(f"{provider} assigned {shift_type} against preference on {d}")
+
+    warnings: List[str] = []
+
+    # Double assignment
+    for d, counts in date_to_provider_counts.items():
+        doubles = [p for p, c in counts.items() if c > 1]
+        if doubles:
+            warnings.append(f"Double assignment on {d}: {', '.join(sorted(doubles))}")
+
+    # Block length > 7
+    for provider, dates in provider_dates.items():
+        if not dates:
+            continue
+        ds = sorted(set(dates))
+        longest = 1
+        run = 1
+        for i in range(1, len(ds)):
+            if (ds[i] - ds[i-1]).days == 1:
+                run += 1
+                longest = max(longest, run)
+            else:
+                run = 1
+        if longest > 7:
+            warnings.append(f"Block longer than 7 days for {provider} (longest {longest})")
+
+    # Pref violations (limit list length)
+    if pref_violations:
+        uniq = sorted(set(pref_violations))
+        warnings.extend(uniq[:10])
+        if len(uniq) > 10:
+            warnings.append(f"… and {len(uniq) - 10} more preference violations")
+
+    if warnings:
+        st.warning("\n".join([f"• {w}" for w in warnings]))

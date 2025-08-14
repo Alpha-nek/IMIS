@@ -785,6 +785,7 @@ def validate_rules(events: List[SEvent], providers: List[str],
                     violations.append(violation_msg)
     
     # Calculate summary statistics
+    total_events = len(events)
     total_violations = len(violations)
     coverage_gaps_count = len(coverage_gaps)
     preference_violations_count = len(preference_violations)
@@ -801,6 +802,7 @@ def validate_rules(events: List[SEvent], providers: List[str],
         "rest_violations": rest_violations,
         "is_valid": is_valid,
         "summary": {
+            "total_events": total_events,
             "total_violations": total_violations,
             "coverage_gaps_count": coverage_gaps_count,
             "preference_violations_count": preference_violations_count,
