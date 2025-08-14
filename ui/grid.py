@@ -309,23 +309,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     selected_provider = st.session_state.get("grid_calendar_provider_filter", st.session_state.get("calendar_provider_filter", "All Providers"))
     
     # Add visual indicator for selected provider
-    if selected_provider != "All Providers":
-        st.markdown(f"""
-        <div style="
-            background: linear-gradient(90deg, #fff3cd 0%, #ffeaa7 100%);
-            border: 2px solid #ffc107;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 10px 0;
-            text-align: center;
-            font-weight: bold;
-            color: #856404;
-        ">
-            🎯 <strong>Highlighting Provider:</strong> {selected_provider}
-            <br>
-            <small>All cells containing "{selected_provider}" are highlighted in yellow</small>
-        </div>
-        """, unsafe_allow_html=True)
+    # No banner. Cells will be highlighted within the grid.
     
     # Removed freeze-pane banner for a cleaner UI
     

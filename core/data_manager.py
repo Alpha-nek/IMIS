@@ -64,7 +64,7 @@ def get_default_providers() -> pd.DataFrame:
         {"initials": "LN", "type": "Physician"},
         {"initials": "SM", "type": "Physician"},
         {"initials": "OI", "type": "Physician"},
-        {"initials": "NP", "type": "Physician"},
+        # removed NP (no longer active)
         {"initials": "PR", "type": "Physician"},
         {"initials": "UN", "type": "Physician"},
         {"initials": "DP", "type": "Physician"},
@@ -74,10 +74,10 @@ def get_default_providers() -> pd.DataFrame:
         {"initials": "SD", "type": "Physician"},
         {"initials": "JK", "type": "Physician"},
         {"initials": "NS", "type": "Physician"},
-        {"initials": "PD", "type": "Physician"},
+        # removed PD (no longer active)
         {"initials": "AB", "type": "Physician"},
         {"initials": "KF", "type": "Physician"},
-        {"initials": "AL", "type": "Physician"},
+        # removed AL (no longer active)
         {"initials": "GB", "type": "Physician"},
         {"initials": "KD", "type": "Physician"},
         {"initials": "NG", "type": "Physician"},
