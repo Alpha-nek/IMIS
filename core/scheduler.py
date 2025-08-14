@@ -212,6 +212,28 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
         if provider not in BRIDGE_QUALIFIED:
             return False
     
+    # Enforce maximum 7 consecutive-day blocks for all providers
+    try:
+        provider_events = [e for e in events if e.extendedProps.get("provider") == provider]
+        provider_dates = {e.start.date() for e in provider_events}
+        # Count consecutive days to the left (before target day)
+        left_run = 0
+        check = day - timedelta(days=1)
+        while check in provider_dates:
+            left_run += 1
+            check -= timedelta(days=1)
+        # Count consecutive days to the right (after target day)
+        right_run = 0
+        check = day + timedelta(days=1)
+        while check in provider_dates:
+            right_run += 1
+            check += timedelta(days=1)
+        # Adding today must not exceed 7
+        if left_run + 1 + right_run > 7:
+            return False
+    except Exception:
+        pass
+
     # Avoid immediate flips between night and day categories (safety/continuity)
     try:
         prev_date = day - timedelta(days=1)
