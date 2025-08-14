@@ -14,6 +14,7 @@ from googleapiclient.errors import HttpError
 import json as _json
 
 from models.constants import GCAL_SCOPES, APP_TIMEZONE
+import base64
 from models.data_models import SEvent
 
 
@@ -61,8 +62,36 @@ def _get_client_config() -> Optional[Dict[str, Any]]:
     # Prefer Streamlit secrets (Secrets acts like a dict but isn't an actual dict)
     client_id = None
     client_secret = None
+    project_id = None
+    full_client_json: Optional[Dict[str, Any]] = None
     try:
         secrets_obj = getattr(st, "secrets", {}) or {}
+        # Allow providing the full client JSON directly (as plain JSON or base64)
+        raw_client_json = None
+        try:
+            raw_client_json = secrets_obj.get("google_oauth_client_json", None)
+        except Exception:
+            raw_client_json = None
+        if not raw_client_json:
+            try:
+                raw_client_json = secrets_obj.get("gcal_client_json", None)
+            except Exception:
+                raw_client_json = None
+        if raw_client_json:
+            try:
+                text = raw_client_json
+                # Try base64-decode if it looks encoded
+                if isinstance(text, str) and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r' for c in text.strip()):
+                    try:
+                        decoded = base64.b64decode(text).decode("utf-8")
+                        text = decoded
+                    except Exception:
+                        pass
+                full = _json.loads(text)
+                if isinstance(full, dict) and ("installed" in full or "web" in full):
+                    full_client_json = full
+            except Exception:
+                full_client_json = None
         # Try nested sections first
         gsec = None
         try:
@@ -74,10 +103,11 @@ def _get_client_config() -> Optional[Dict[str, Any]]:
                 gsec = secrets_obj.get("gcal", None)
             except Exception:
                 gsec = None
-        if gsec:
+        if gsec and not full_client_json:
             try:
                 client_id = gsec.get("client_id", None)
                 client_secret = gsec.get("client_secret", None)
+                project_id = gsec.get("project_id", None)
             except Exception:
                 pass
         # Try top-level fallbacks
@@ -91,28 +121,48 @@ def _get_client_config() -> Optional[Dict[str, Any]]:
                 client_secret = secrets_obj.get("gcal_client_secret", None)
             except Exception:
                 client_secret = None
+        if not project_id:
+            try:
+                project_id = secrets_obj.get("gcal_project_id", None)
+            except Exception:
+                project_id = None
     except Exception:
         # Ignore and fallback to env
         pass
 
     # Fallback to environment variables
-    client_id = client_id or os.environ.get("GCAL_CLIENT_ID")
-    client_secret = client_secret or os.environ.get("GCAL_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        return None
-    return {
-        "installed": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [
-                "http://localhost",
-                "http://localhost:8080/",
-                "http://localhost:8501/",
-            ]
+    if full_client_json is None:
+        client_id = client_id or os.environ.get("GCAL_CLIENT_ID")
+        client_secret = client_secret or os.environ.get("GCAL_CLIENT_SECRET")
+        project_id = project_id or os.environ.get("GCAL_PROJECT_ID")
+        if not client_id or not client_secret:
+            return None
+        config = {
+            "installed": {
+                "client_id": client_id,
+                "project_id": project_id or "imis-scheduler",
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "redirect_uris": [
+                    "http://localhost",
+                    "http://localhost:8080/",
+                    "http://localhost:8501/",
+                ]
+            }
         }
-    }
+    else:
+        # If a full client json was provided, ensure it is the correct type (installed)
+        if "installed" in full_client_json:
+            config = full_client_json
+        elif "web" in full_client_json:
+            st.error("Provided OAuth client is of type 'Web'. Please create a 'Desktop app' client in Google Cloud and supply that instead.")
+            return None
+        else:
+            return None
+
+    return config
 
 
 def sign_in_google(provider_initials: str) -> bool:
