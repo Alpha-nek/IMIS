@@ -730,59 +730,64 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         days_in_month = len(date_cols)
         min_required_shifts = 15 if days_in_month == 30 else 16
         
-        provider_stats = {}
-        
+        # Initialize statistics for all providers so rows appear even with 0 shifts
+        provider_stats: Dict[str, Dict[str, int]] = {}
+        all_providers_list = providers_df["initials"].astype(str).str.upper().tolist()
+        for prov in all_providers_list:
+            provider_stats[prov] = {
+                "total_shifts": 0,
+                "weekend_shifts": 0,
+                "night_shifts": 0,
+                "rounder_shifts": 0,
+                "admitting_shifts": 0,
+                "app_shifts": 0
+            }
+
+        # Tally assigned shifts
         for event in events:
             if hasattr(event, 'extendedProps'):
-                provider = event.extendedProps.get("provider", "")
+                provider = (event.extendedProps.get("provider", "") or "").strip().upper()
                 shift_type = event.extendedProps.get("shift_type", "")
             elif isinstance(event, dict) and 'extendedProps' in event:
-                provider = event['extendedProps'].get("provider", "")
+                provider = (event['extendedProps'].get("provider", "") or "").strip().upper()
                 shift_type = event['extendedProps'].get("shift_type", "")
             else:
                 continue
-            
-            if provider:
-                if provider not in provider_stats:
-                    provider_stats[provider] = {
-                        "total_shifts": 0,
-                        "weekend_shifts": 0,
-                        "night_shifts": 0,
-                        "rounder_shifts": 0,
-                        "admitting_shifts": 0,
-                        "app_shifts": 0
-                    }
-                
-                provider_stats[provider]["total_shifts"] += 1
-                
-                # Count weekend shifts
-                if hasattr(event, 'start'):
-                    event_date = event.start.date()
-                elif isinstance(event, dict) and 'start' in event:
-                    try:
-                        event_date = datetime.fromisoformat(event['start']).date()
-                    except (ValueError, TypeError):
-                        continue
-                else:
+
+            if not provider or provider not in provider_stats:
+                continue
+
+            provider_stats[provider]["total_shifts"] += 1
+
+            # Weekend count
+            if hasattr(event, 'start'):
+                event_date = event.start.date()
+            elif isinstance(event, dict) and 'start' in event:
+                try:
+                    event_date = datetime.fromisoformat(event['start']).date()
+                except (ValueError, TypeError):
                     continue
-                
-                if event_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
-                    provider_stats[provider]["weekend_shifts"] += 1
-                
-                # Count shift types
-                if shift_type in ["N12", "NB"]:
-                    provider_stats[provider]["night_shifts"] += 1
-                elif shift_type == "R12":
-                    provider_stats[provider]["rounder_shifts"] += 1
-                elif shift_type in ["A12", "A10"]:
-                    provider_stats[provider]["admitting_shifts"] += 1
-                elif shift_type == "APP":
-                    provider_stats[provider]["app_shifts"] += 1
+            else:
+                continue
+
+            if event_date.weekday() >= 5:
+                provider_stats[provider]["weekend_shifts"] += 1
+
+            # Shift type counts
+            if shift_type in ["N12", "NB"]:
+                provider_stats[provider]["night_shifts"] += 1
+            elif shift_type == "R12":
+                provider_stats[provider]["rounder_shifts"] += 1
+            elif shift_type in ["A12", "A10"]:
+                provider_stats[provider]["admitting_shifts"] += 1
+            elif shift_type == "APP":
+                provider_stats[provider]["app_shifts"] += 1
         
         if provider_stats:
             # Create a DataFrame for enhanced provider utilization
             utilization_data = []
-            for provider, stats in provider_stats.items():
+            for provider in all_providers_list:
+                stats = provider_stats.get(provider, {})
                 utilization_data.append({
                     "Provider": provider,
                     "Total Shifts": stats["total_shifts"],

@@ -1183,7 +1183,7 @@ def render_desktop_interface():
         try:
             st.header("💾 Data Management")
             st.caption("View and manage providers/rules, and saved schedules. Load/export JSON/CSV.")
-            from core.data_manager import load_providers, load_rules, save_providers, save_rules, load_schedule, save_schedule
+            # Use existing top-level imports; avoid re-importing here to prevent shadowing
             # Providers and rules
             st.subheader("👥 Providers & Rules")
             providers_df, _ = load_providers()
