@@ -448,7 +448,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     
     # Wrap in container
     with st.container():
-        st.markdown('<div class="grid-container">', unsafe_allow_html=True)
+        st.markdown('<div id="imis-grid-container" class="grid-container">', unsafe_allow_html=True)
         
         # Use st.data_editor for the grid
         edited_grid = st.data_editor(
@@ -462,6 +462,43 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         )
         
         st.markdown('</div>', unsafe_allow_html=True)
+
+        # Inject a tiny helper to run in a sandboxed iframe that can access the parent DOM
+        # to apply highlights inside the grid editor (Streamlit blocks <script> in markdown).
+        try:
+            import streamlit.components.v1 as components
+            components.html(f"""
+            <script>
+            (function() {{
+                const selectedProvider = "{selected_provider}";
+                function highlight() {{
+                    try {{
+                        const doc = window.parent && window.parent.document ? window.parent.document : document;
+                        const container = doc.querySelector('#imis-grid-container');
+                        if (!container) return;
+                        // Clear previous highlights
+                        container.querySelectorAll('.highlight-provider').forEach(el => el.classList.remove('highlight-provider'));
+                        if (!selectedProvider || selectedProvider === 'All Providers') return;
+                        // Highlight exact matches in visible cells only
+                        const cells = container.querySelectorAll('[data-testid="stDataFrame"] td');
+                        cells.forEach(cell => {{
+                            const text = (cell.textContent || '').trim();
+                            if (text === selectedProvider) {{
+                                cell.classList.add('highlight-provider');
+                            }}
+                        }});
+                    }} catch (e) {{}}
+                }}
+                // Initial run and observe changes
+                setTimeout(highlight, 300);
+                const doc = window.parent && window.parent.document ? window.parent.document : document;
+                const observer = new MutationObserver(() => setTimeout(highlight, 200));
+                observer.observe(doc.body, {{childList: true, subtree: true}});
+            }})();
+            </script>
+            """, height=0)
+        except Exception:
+            pass
     
     # Handle grid changes without forcing a full rerun (keeps calendar visible)
     if edited_grid is not None and not edited_grid.equals(grid_df):
