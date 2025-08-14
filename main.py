@@ -1035,33 +1035,7 @@ def render_desktop_interface():
             with col3:
                 st.metric("APPs", app_count)
     
-    # Grid View Tab (moved to second)
-    with tab2:
-        if st.session_state.events:
-            try:
-                # Render grid view (includes editing functionality)
-                render_schedule_grid(st.session_state.events, year, month)
-            except Exception as e:
-                st.error(f"Failed to render grid view: {e}")
-                st.error(f"Error details: {traceback.format_exc()}")
-        else:
-            st.info("No schedule available. Generate a schedule to view it in grid format.")
-
-    # Providers Tab
-    with tab3:
-        try:
-            providers_panel()
-        except Exception as e:
-            st.error(f"Failed to render providers panel: {e}")
-            st.error(f"Error details: {traceback.format_exc()}")
-
-    # Requests Tab
-    with tab4:
-        try:
-            provider_requests_panel()
-        except Exception as e:
-            st.error(f"Failed to render requests panel: {e}")
-            st.error(f"Error details: {traceback.format_exc()}")
+    
 
     # Sync Tab
     with tab5:
@@ -1289,6 +1263,8 @@ def render_desktop_interface():
     # Providers Tab
     with tab3:
         try:
+            # Clear any conflicting selectbox state keys to avoid duplicate keys on rerender
+            st.session_state.pop('provider_actions_select', None)
             providers_panel()
         except Exception as e:
             st.error(f"Failed to render providers panel: {e}")
