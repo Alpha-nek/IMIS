@@ -111,7 +111,7 @@ def render_header_with_logo():
         
         /* Header styling with logo */
         .main-header {
-            background: linear-gradient(135deg, var(--primary-nile) 0%, var(--primary-coral) 50%, var(--light-nile) 100%);
+            background: linear-gradient(135deg, var(--secondary-nile) 0%, var(--primary-nile) 50%, var(--accent-nile) 100%);
             padding: 3rem 2rem;
             border-radius: 25px;
             margin-bottom: 2.5rem;
@@ -140,8 +140,8 @@ def render_header_with_logo():
             left: 0;
             right: 0;
             bottom: 0;
-            background: radial-gradient(circle at 30% 20%, rgba(255, 103, 77, 0.2) 0%, transparent 50%),
-                        radial-gradient(circle at 70% 80%, rgba(128, 164, 237, 0.2) 0%, transparent 50%);
+            background: radial-gradient(circle at 30% 20%, rgba(30, 58, 138, 0.22) 0%, transparent 55%),
+                        radial-gradient(circle at 70% 80%, rgba(128, 164, 237, 0.25) 0%, transparent 55%);
             pointer-events: none;
         }
         
@@ -459,7 +459,7 @@ def render_header_with_logo():
                 {media_html}
             </div>
             <div class="header-text">
-                <h1>🏥 IMIS Scheduler</h1>
+                <h1>IMIS Scheduler</h1>
                 <p>Hospitalist Management & Scheduling System</p>
                 <div class="header-subtitle">Professional • Efficient • Reliable</div>
             </div>
