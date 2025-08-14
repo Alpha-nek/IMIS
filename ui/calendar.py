@@ -233,9 +233,9 @@ def render_calendar(events: List[Any], height: int = 600, provider_filter_key: s
             }}
             
             /* Ensure calendar rows and event containers have adequate height */
-            .fc-daygrid-day-events {
+            .fc-daygrid-day-events {{
                 min-height: 80px;
-            }
+            }}
         </style>
     </head>
     <body>
