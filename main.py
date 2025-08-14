@@ -1164,7 +1164,6 @@ def render_desktop_interface():
     # Settings Tab (moved to last)
     with tab7:
         st.header("⚙️ Global Settings")
-        # existing settings content moved here unchanged
         # Global Rules Configuration
         st.subheader("📋 Global Scheduling Rules")
         if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
@@ -1173,84 +1172,36 @@ def render_desktop_interface():
         with col1:
             st.session_state.global_rules.max_consecutive_shifts = st.number_input(
                 "Max Consecutive Shifts", 
-                min_value=1, max_value=14, value=getattr(st.session_state.global_rules, 'max_consecutive_shifts', 7)
+                min_value=1, max_value=14, value=getattr(st.session_state.global_rules, 'max_consecutive_shifts', 7), key="gs_max_consec"
             )
             st.session_state.global_rules.min_days_between_shifts = st.number_input(
                 "Min Days Between Shifts", 
-                min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1)
+                min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1), key="gs_min_rest"
             )
             st.session_state.global_rules.expected_shifts_per_month = st.number_input(
                 "Expected Shifts Per Month", 
                 min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'expected_shifts_per_month', 15),
-                help="Expected shifts per month (15 for 30-day months, 16 for 31-day months)"
+                help="Expected shifts per month (15 for 30-day months, 16 for 31-day months)", key="gs_expected"
             )
         with col2:
             st.session_state.global_rules.max_weekend_shifts_per_month = st.number_input(
                 "Max Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'max_weekend_shifts_per_month', 4)
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'max_weekend_shifts_per_month', 4), key="gs_max_weekend"
             )
             st.session_state.global_rules.min_weekend_shifts_per_month = st.number_input(
                 "Min Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'min_weekend_shifts_per_month', 1)
+                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'min_weekend_shifts_per_month', 1), key="gs_min_weekend"
             )
             st.session_state.global_rules.max_night_shifts_per_month = st.number_input(
                 "Max Night Shifts Per Month", 
-                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'max_night_shifts_per_month', 8)
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'max_night_shifts_per_month', 8), key="gs_max_night"
             )
             st.session_state.global_rules.min_night_shifts_per_month = st.number_input(
                 "Min Night Shifts Per Month", 
-                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_night_shifts_per_month', 2)
+                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_night_shifts_per_month', 2), key="gs_min_night"
             )
         # Shift Types Configuration and Capacity - reuse existing blocks (omitted here for brevity)
-        # ... keep rest of settings content as before ...
-        st.header("⚙️ Global Settings")
-        
-        # Global Rules Configuration
-        st.subheader("📋 Global Scheduling Rules")
-        
-        # Safety check for global_rules
-        if not hasattr(st.session_state.global_rules, 'max_consecutive_shifts'):
-            st.session_state.global_rules = RuleConfig()
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.session_state.global_rules.max_consecutive_shifts = st.number_input(
-                "Max Consecutive Shifts", 
-                min_value=1, max_value=14, value=getattr(st.session_state.global_rules, 'max_consecutive_shifts', 7)
-            )
-            
-            st.session_state.global_rules.min_days_between_shifts = st.number_input(
-                "Min Days Between Shifts", 
-                min_value=0, max_value=7, value=getattr(st.session_state.global_rules, 'min_days_between_shifts', 1)
-            )
-            
-            st.session_state.global_rules.expected_shifts_per_month = st.number_input(
-                "Expected Shifts Per Month", 
-                min_value=1, max_value=31, value=getattr(st.session_state.global_rules, 'expected_shifts_per_month', 15),
-                help="Expected shifts per month (15 for 30-day months, 16 for 31-day months)"
-            )
-        
-        with col2:
-            st.session_state.global_rules.max_weekend_shifts_per_month = st.number_input(
-                "Max Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'max_weekend_shifts_per_month', 4)
-            )
-            
-            st.session_state.global_rules.min_weekend_shifts_per_month = st.number_input(
-                "Min Weekend Shifts Per Month", 
-                min_value=0, max_value=10, value=getattr(st.session_state.global_rules, 'min_weekend_shifts_per_month', 1)
-            )
-            
-            st.session_state.global_rules.max_night_shifts_per_month = st.number_input(
-                "Max Night Shifts Per Month", 
-                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'max_night_shifts_per_month', 8)
-            )
-            
-            st.session_state.global_rules.min_night_shifts_per_month = st.number_input(
-                "Min Night Shifts Per Month", 
-                min_value=0, max_value=31, value=getattr(st.session_state.global_rules, 'min_night_shifts_per_month', 2)
-            )
+        # Remove duplicated Global Settings block (was causing duplicate widget IDs)
         
         # Shift Types Configuration
         st.subheader("🔄 Shift Types")

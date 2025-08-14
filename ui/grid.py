@@ -135,6 +135,22 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     st.markdown("### 📊 Schedule Grid View")
     st.markdown("**Shift Types:** 7am–7pm Rounder (13 slots) | 7am–7pm Admitter (1 slot) | 10am–10pm Admitter (2 slots) | 7pm–7am Night (4 slots) | Night Bridge (1 slot) | APP Provider (2 slots)")
     st.markdown("**Instructions:** Each row represents a slot for that shift type. Use the dropdowns to assign providers to specific slots.")
+
+    # Provider highlighter select (grid-specific)
+    try:
+        highlight_options = ["All Providers"] + sorted(providers)
+        current_highlight = st.session_state.get("grid_calendar_provider_filter", "All Providers")
+        idx = highlight_options.index(current_highlight) if current_highlight in highlight_options else 0
+        sel = st.selectbox(
+            "Highlight provider in grid",
+            options=highlight_options,
+            index=idx,
+            key="grid_highlight_provider_select",
+            help="Pick a provider to highlight all their assigned cells in the grid"
+        )
+        st.session_state["grid_calendar_provider_filter"] = sel
+    except Exception:
+        st.session_state["grid_calendar_provider_filter"] = "All Providers"
     
     # Create a more compact grid for editing
     # Create row labels that combine shift type and slot
