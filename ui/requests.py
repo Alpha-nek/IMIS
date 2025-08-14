@@ -264,8 +264,9 @@ def display_existing_requests():
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     if st.button("✅ Approve", key=f"approve_{request['id']}"):
+                        from datetime import datetime as _dt
                         request["status"] = "approved"
-                        request["processed_at"] = datetime.now().isoformat()
+                        request["processed_at"] = _dt.now().isoformat()
                         
                         # Apply the approved request to the schedule
                         apply_approved_request(request)
@@ -336,8 +337,9 @@ def apply_approved_request(request: Dict[str, Any]):
     
     if request["type"] == "Vacation Request":
         # Add vacation to provider rules (so scheduler respects unavailability)
-        start_date = datetime.fromisoformat(request["start_date"]).date()
-        end_date = datetime.fromisoformat(request["end_date"]).date()
+        from datetime import datetime as _dt, timedelta
+        start_date = _dt.fromisoformat(request["start_date"]).date()
+        end_date = _dt.fromisoformat(request["end_date"]).date()
         try:
             if "provider_rules" not in st.session_state:
                 st.session_state.provider_rules = {}
@@ -366,8 +368,8 @@ def apply_approved_request(request: Dict[str, Any]):
             vacation_event = {
                 "id": f"vac_{request['provider']}_{current_date.isoformat()}",
                 "title": f"{request['provider']} - Vacation",
-                "start": datetime.combine(current_date, datetime.min.time()).isoformat(),
-                "end": datetime.combine(current_date, datetime.min.time()).isoformat(),
+                "start": _dt.combine(current_date, _dt.min.time()).isoformat(),
+                "end": _dt.combine(current_date, _dt.min.time()).isoformat(),
                 "extendedProps": {
                     "provider": request["provider"],
                     "shift_type": "VACATION",
@@ -396,9 +398,9 @@ def apply_approved_request(request: Dict[str, Any]):
                 approved_items = request["items"]
             else:
                 # Expand range into items
-                from datetime import datetime, timedelta
-                s = datetime.fromisoformat(request["start_date"]).date()
-                e = datetime.fromisoformat(request["end_date"]).date()
+                from datetime import datetime as _dt, timedelta
+                s = _dt.fromisoformat(request["start_date"]).date()
+                e = _dt.fromisoformat(request["end_date"]).date()
                 cur = s
                 while cur <= e:
                     approved_items.append({"date": cur.isoformat(), "shift_type": request.get("shift_type")})

@@ -388,9 +388,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         }}
         
         /* Provider highlighting styles (cell-level) */
-        td.highlight-provider {{
-            background-color: #fffbe6 !important; /* light yellow */
-            color: #0f172a !important; /* dark */
+        td.highlight-provider, [role="gridcell"].highlight-provider {{
+            background-color: #fffbe6 !important;
+            color: #0f172a !important;
             font-weight: 700 !important;
         }}
         
@@ -453,10 +453,9 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         function highlightSelectedProvider() {{
             const selectedProvider = "{selected_provider}";
             
-            // Remove existing highlights
-            document.querySelectorAll('.highlight-provider').forEach(el => {{
-                el.classList.remove('highlight-provider');
-            }});
+            // Remove existing highlights (limited to the grid container)
+            const root = document.querySelector('#imis-grid-container') || document;
+            root.querySelectorAll('.highlight-provider').forEach(el => el.classList.remove('highlight-provider'));
             
             // Don't highlight if "All Providers" is selected
             if (selectedProvider === "All Providers") {{
@@ -464,7 +463,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             }}
             
             // Find all cells containing the selected provider and highlight them
-            const cells = document.querySelectorAll('[data-testid="stDataFrame"] td');
+            const cells = root.querySelectorAll('[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] [role="gridcell"]');
             cells.forEach(cell => {{
                 if (cell.textContent.trim() === selectedProvider) {{
                     cell.classList.add('highlight-provider');
