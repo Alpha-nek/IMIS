@@ -197,6 +197,14 @@ def render_header_with_logo():
             transition: transform 0.3s ease;
             object-fit: contain;
         }
+        .logo-container svg {
+            height: 200px;
+            width: auto;
+            border-radius: 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 2;
+        }
         
         .logo-container:hover img {
             transform: scale(1.05);
@@ -448,7 +456,9 @@ def render_header_with_logo():
     # Header with logo (animated video preferred if available)
     media_kind, media_data = get_logo_media()
     if media_kind == "video":
-        media_html = f"<video class=\"logo-video\" autoplay loop muted playsinline><source src=\"data:video/mp4;base64,{media_data}\" type=\"video/mp4\"></video>"
+        media_html = f"<video class=\"logo-video\" autoplay muted playsinline><source src=\"data:video/mp4;base64,{media_data}\" type=\"video/mp4\"></video>"
+    elif media_kind == "svg":
+        media_html = f"<img src=\"data:image/svg+xml;base64,{media_data}\" alt=\"IMIS Logo\"/>"
     else:
         media_html = f"<img src=\"data:image/png;base64,{media_data}\" alt=\"IMIS Logo\">"
 
@@ -470,7 +480,22 @@ def render_header_with_logo():
 def get_logo_media():
     """Return (kind, base64) where kind is 'video' or 'image'."""
     import base64
-    # Try animated video first
+    # Try animated SVG first
+    svg_candidates = [
+        "logo animated_000.svg",
+        "logo animated.svg",
+        "Logo Animated.svg",
+        "logo_animated.svg",
+    ]
+    for path in svg_candidates:
+        try:
+            with open(path, "rb") as f:
+                return "svg", base64.b64encode(f.read()).decode()
+        except FileNotFoundError:
+            continue
+        except Exception:
+            break
+    # Try animated video next
     video_candidates = [
         "logo animated.mp4",
         "Logo Animated.mp4",
