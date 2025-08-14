@@ -146,9 +146,11 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                                                          provider_rules, global_rules, year, month)
                         if is_feasible:
                             feasible_providers.append(provider)
-                            # Use simple scoring for speed
-                            simple_score = 1.0  # All feasible candidates get equal weight
-                            candidates.append((provider, simple_score))
+                            # IMPROVED: Score based on current shift count to balance load
+                            current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
+                            # Lower current shifts = higher score (prefer providers with fewer shifts)
+                            balance_score = 100 - current_shifts  # Higher score for fewer shifts
+                            candidates.append((provider, balance_score))
                         else:
                             # DEBUG: Log why provider was rejected
                             pass  # The feasibility function will handle debug output
@@ -161,18 +163,19 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                         print(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
                         continue  # Skip this slot if no candidates
                     
-                    # Sort by score (highest first) and add some randomness for close scores
+                    # Sort by score (highest first) - providers with fewer shifts get priority
                     candidates.sort(key=lambda x: x[1], reverse=True)
                     
-                    # If top scores are close (within 10%), randomly choose to add variety
-                    if len(candidates) >= 2 and candidates[0][1] > 0:
-                        score_diff = candidates[0][1] - candidates[1][1]
-                        if score_diff / max(candidates[0][1], 1.0) < 0.1:
-                            best_provider = random.choice(candidates[:2])[0]
-                        else:
-                            best_provider = candidates[0][0]
-                    else:
-                        best_provider = candidates[0][0]
+                    # DEBUG: Show top candidates for load balancing
+                    if len(candidates) > 0:
+                        top_candidates = candidates[:3]  # Show top 3
+                        if shift_key == "R12" and slot < 3:  # Only for first few R12 slots to avoid spam
+                            candidate_info = [(name, score, len([e for e in events if e.extendedProps.get("provider") == name])) 
+                                            for name, score in top_candidates]
+                            print(f"    🏆 Top candidates: {candidate_info} (name, score, current_shifts)")
+                    
+                    # Select best candidate (highest score = fewest current shifts)
+                    best_provider = candidates[0][0]
                     
                     # Create and add the shift event
                     debug_logger.log(f"    ✅ Assigning {shift_key} to {best_provider}")
@@ -274,28 +277,46 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
             debug_reason = f"not bridge-qualified for NB"
             return False
     
-    # SIMPLIFIED: Skip preference checking for now to debug
-    # try:
-    #     if not validate_shift_type_preference(provider, shift_key, provider_rules):
-    #         debug_reason = f"preference check failed for {shift_key}"
-    #         return False
-    # except Exception as e:
-    #     print(f"      ⚠️ Error checking preferences for {provider}: {e}")
+    # RE-ENABLED: Check shift preferences but be more lenient
+    try:
+        if not validate_shift_type_preference(provider, shift_key, provider_rules):
+            # Only reject if provider explicitly refuses this shift type
+            provider_rule = provider_rules.get(provider, {})
+            shift_preferences = provider_rule.get("shift_preferences", {})
+            
+            # If preference is explicitly False, reject. If missing/None, allow
+            if shift_preferences.get(shift_key) is False:
+                debug_reason = f"explicitly refuses {shift_key}"
+                if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+                    print(f"        ❌ {provider} explicitly refuses {shift_key}")
+                return False
+            # Otherwise allow the assignment even if preference is not explicitly True
+    except Exception as e:
+        print(f"      ⚠️ Error checking preferences for {provider}: {e}")
+        # If there's an error, be lenient and allow the shift
     
-    # SIMPLIFIED: Skip shift count checking for now
-    # current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
-    # try:
-    #     expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
-    #     max_allowed_shifts = expected_shifts + 3
-    #     
-    #     if current_shifts >= max_allowed_shifts:
-    #         debug_reason = f"would exceed max shifts ({current_shifts} >= {max_allowed_shifts})"
-    #         return False
-    # except Exception as e:
-    #     print(f"      ⚠️ Error calculating expected shifts for {provider}: {e}")
-    #     if current_shifts >= 20:
-    #         debug_reason = f"too many shifts ({current_shifts} >= 20)"
-    #         return False
+    # RE-ENABLED: Check shift count limits to ensure fair distribution
+    current_shifts = len([e for e in events if e.extendedProps.get("provider") == provider])
+    try:
+        expected_shifts = get_adjusted_expected_shifts(provider, year, month, provider_rules, global_rules)
+        # Allow some flexibility but prevent extreme overloading
+        max_allowed_shifts = expected_shifts + 5  # Allow 5 extra shifts for coverage
+        
+        if current_shifts >= max_allowed_shifts:
+            debug_reason = f"would exceed max shifts ({current_shifts} >= {max_allowed_shifts})"
+            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+                print(f"        ❌ {provider} would exceed max shifts ({current_shifts} >= {max_allowed_shifts})")
+            return False
+        elif provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+            print(f"        ✅ {provider} shift count OK ({current_shifts}/{max_allowed_shifts})")
+    except Exception as e:
+        print(f"      ⚠️ Error calculating expected shifts for {provider}: {e}")
+        # Fallback: Hard limit at 25 shifts per month to prevent overloading
+        if current_shifts >= 25:
+            debug_reason = f"too many shifts ({current_shifts} >= 25)"
+            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
+                print(f"        ❌ {provider} exceeds fallback limit ({current_shifts} >= 25)")
+            return False
     
     # SIMPLIFIED: Skip night shift limits for now
     # if shift_key in ["N12", "NB"]:
