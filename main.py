@@ -179,13 +179,23 @@ def render_header_with_logo():
         }
         
         .logo-container img {
-            height: 140px;
+            height: 200px;
             width: auto;
             border-radius: 15px;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
             position: relative;
             z-index: 2;
             transition: transform 0.3s ease;
+        }
+        .logo-container video {
+            height: 200px;
+            width: auto;
+            border-radius: 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 2;
+            transition: transform 0.3s ease;
+            object-fit: contain;
         }
         
         .logo-container:hover img {
@@ -435,12 +445,18 @@ def render_header_with_logo():
     </style>
     """, unsafe_allow_html=True)
     
-    # Header with logo
-    st.markdown("""
+    # Header with logo (animated video preferred if available)
+    media_kind, media_data = get_logo_media()
+    if media_kind == "video":
+        media_html = f"<video class=\"logo-video\" autoplay loop muted playsinline><source src=\"data:video/mp4;base64,{media_data}\" type=\"video/mp4\"></video>"
+    else:
+        media_html = f"<img src=\"data:image/png;base64,{media_data}\" alt=\"IMIS Logo\">"
+
+    st.markdown(f"""
     <div class="main-header">
         <div class="header-content">
             <div class="logo-container">
-                <img src="data:image/png;base64,{}" alt="IMIS Logo">
+                {media_html}
             </div>
             <div class="header-text">
                 <h1>🏥 IMIS Scheduler</h1>
@@ -449,32 +465,41 @@ def render_header_with_logo():
             </div>
         </div>
     </div>
-    """.format(get_base64_logo()), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-def get_base64_logo():
-    """Convert the logo to base64 for embedding in HTML."""
+def get_logo_media():
+    """Return (kind, base64) where kind is 'video' or 'image'."""
     import base64
-    
-    try:
-        # Prefer the new logo; fall back to the old one if unavailable
-        for candidate in [
-            "New Logo.png",
-            "new logo.png",
-            "NewLogo.png",
-            "brown logo.png",
-        ]:
-            try:
-                with open(candidate, "rb") as image_file:
-                    return base64.b64encode(image_file.read()).decode()
-            except FileNotFoundError:
-                continue
-        return ""
-    except FileNotFoundError:
-        # Fallback if logo not found
-        return ""
-    except Exception as e:
-        st.warning(f"Could not load logo: {e}")
-        return ""
+    # Try animated video first
+    video_candidates = [
+        "logo animated.mp4",
+        "Logo Animated.mp4",
+        "logo_animated.mp4",
+    ]
+    for path in video_candidates:
+        try:
+            with open(path, "rb") as f:
+                return "video", base64.b64encode(f.read()).decode()
+        except FileNotFoundError:
+            continue
+        except Exception:
+            break
+    # Fallback to images
+    image_candidates = [
+        "New Logo.png",
+        "new logo.png",
+        "NewLogo.png",
+        "brown logo.png",
+    ]
+    for path in image_candidates:
+        try:
+            with open(path, "rb") as f:
+                return "image", base64.b64encode(f.read()).decode()
+        except FileNotFoundError:
+            continue
+        except Exception:
+            break
+    return "image", ""
 
 def initialize_session_state():
     """Initialize Streamlit session state variables with automatic data loading."""
