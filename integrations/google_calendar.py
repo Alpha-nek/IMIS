@@ -123,7 +123,18 @@ def sign_in_google(provider_initials: str) -> bool:
         return False
     try:
         flow = InstalledAppFlow.from_client_config(client_config, scopes=GCAL_SCOPES)
-        creds = flow.run_local_server(port=0)
+        try:
+            # Attempt normal flow (opens system browser)
+            creds = flow.run_local_server(port=0)
+        except Exception as e:
+            # Fallback for environments without a runnable browser
+            auth_url, _ = flow.authorization_url(
+                prompt='consent', access_type='offline', include_granted_scopes='true'
+            )
+            st.info("Open the Google sign-in page in your browser, complete consent, and return to this app.")
+            st.link_button("Open Google Sign-In", auth_url)
+            # Run a local loopback server without trying to open a browser
+            creds = flow.run_local_server(port=0, open_browser=False)
         _save_provider_creds(provider_initials, creds)
         return True
     except Exception as e:
