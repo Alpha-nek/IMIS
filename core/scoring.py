@@ -28,8 +28,8 @@ class ScheduleScorer:
     def __init__(self, events: List[SEvent], providers: List[str], 
                  provider_rules: Dict, global_rules: RuleConfig,
                  year: int, month: int):
-        from core.debug_logger import debug_logger
-        debug_logger.log(f"      🧮 Initializing scorer with {len(events)} events, {len(providers)} providers")
+        # Lightweight initialization without UI debug side-effects
+        logger.debug(f"Initializing scorer with {len(events)} events, {len(providers)} providers")
         self.events = events
         self.providers = providers
         self.provider_rules = provider_rules
@@ -38,9 +38,9 @@ class ScheduleScorer:
         self.month = month
         
         # Pre-calculate provider statistics for efficiency
-        debug_logger.log(f"      📊 Calculating provider statistics...")
+        logger.debug("Calculating provider statistics for scorer…")
         self._provider_stats = self._calculate_provider_stats()
-        debug_logger.log(f"      ✅ Scorer initialized")
+        logger.debug("Scorer initialized")
     
     def _calculate_provider_stats(self) -> Dict[str, Dict]:
         """Pre-calculate provider statistics for efficient scoring."""
