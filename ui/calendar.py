@@ -15,34 +15,55 @@ def render_calendar(events: List[Any], height: int = 600) -> None:
     Render the calendar using Streamlit components with full width and improved styling.
     Handles both SEvent objects and dictionaries.
     """
-    # Add provider filter
-    if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
-        providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
-        all_providers = ["All Providers"] + providers
-        
-        selected_provider = st.selectbox(
-            "Filter by Provider",
-            options=all_providers,
-            index=0,
-            key="calendar_provider_filter"
-        )
-        
-        # Filter events by selected provider
-        if selected_provider != "All Providers":
-            filtered_events = []
-            for event in events:
-                if hasattr(event, 'extendedProps'):
-                    event_provider = event.extendedProps.get("provider", "")
-                elif isinstance(event, dict) and 'extendedProps' in event:
-                    event_provider = event['extendedProps'].get("provider", "")
-                else:
-                    continue
+    # Add provider filter with error handling
+    try:
+        if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
+            # Check if 'initials' column exists
+            if "initials" in st.session_state.providers_df.columns:
+                providers = st.session_state.providers_df["initials"].astype(str).str.upper().tolist()
+                all_providers = ["All Providers"] + providers
                 
-                if event_provider == selected_provider:
-                    filtered_events.append(event)
-            events = filtered_events
-    else:
-        events = events  # No filtering if no providers loaded
+                selected_provider = st.selectbox(
+                    "Filter by Provider",
+                    options=all_providers,
+                    index=0,
+                    key="calendar_provider_filter"
+                )
+                
+                # Filter events by selected provider
+                if selected_provider != "All Providers":
+                    filtered_events = []
+                    for event in events:
+                        try:
+                            if hasattr(event, 'extendedProps'):
+                                event_provider = event.extendedProps.get("provider", "")
+                            elif isinstance(event, dict) and 'extendedProps' in event:
+                                event_provider = event['extendedProps'].get("provider", "")
+                            else:
+                                continue
+                            
+                            if event_provider == selected_provider:
+                                filtered_events.append(event)
+                        except Exception as e:
+                            # Skip problematic events but continue processing
+                            continue
+                    events = filtered_events
+            else:
+                # If 'initials' column doesn't exist, show error
+                st.error("Provider data is missing 'initials' column. Please check the provider setup.")
+                st.write("Available columns:", list(st.session_state.providers_df.columns))
+        else:
+            # No providers loaded - just continue without filtering
+            pass
+    except Exception as e:
+        # Handle any unexpected errors gracefully
+        st.error(f"Error in provider filtering: {e}")
+        st.write("Debug info:")
+        st.write("- providers_df exists:", "providers_df" in st.session_state)
+        if "providers_df" in st.session_state:
+            st.write("- providers_df type:", type(st.session_state.providers_df))
+            st.write("- providers_df shape:", getattr(st.session_state.providers_df, 'shape', 'No shape attribute'))
+        # Continue without filtering to prevent total crash
     
     # Convert events to JSON format
     events_json = []

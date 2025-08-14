@@ -2551,10 +2551,10 @@ def main():
                     provider_options.append("--- APPs ---")
                     provider_options.extend(app_provs)
                 
-                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provider_options else "(All providers)"
+                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provider_options else "(Select Provider)"
                 idx = provider_options.index(default) if default in provider_options else 0
                 sel = st.selectbox("Highlight provider", options=provider_options, index=idx)
-                st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+                st.session_state.highlight_provider = "" if sel == "(Select Provider)" or sel.startswith("---") else sel
             else:
                 st.warning("No providers loaded. Please check the Providers tab.")
                 st.session_state.highlight_provider = ""
@@ -6345,10 +6345,10 @@ def main():
                     provider_options.append("--- APPs ---")
                     provider_options.extend(app_provs)
                 
-                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provider_options else "(All providers)"
+                default = st.session_state.highlight_provider if st.session_state.highlight_provider in provider_options else "(Select Provider)"
                 idx = provider_options.index(default) if default in provider_options else 0
                 sel = st.selectbox("Highlight provider", options=provider_options, index=idx)
-                st.session_state.highlight_provider = "" if sel == "(All providers)" else sel
+                st.session_state.highlight_provider = "" if sel == "(Select Provider)" or sel.startswith("---") else sel
             else:
                 st.warning("No providers loaded. Please check the Providers tab.")
                 st.session_state.highlight_provider = ""
