@@ -58,7 +58,8 @@ def providers_panel():
             selected_provider_full = st.selectbox(
                 "Select a provider for actions:",
                 options=provider_options,
-                help="Choose a provider to view details, edit rules, or perform actions"
+                help="Choose a provider to view details, edit rules, or perform actions",
+                key="provider_actions_select"
             )
         
         with col2:
@@ -192,7 +193,8 @@ def add_new_provider():
             provider_type = st.selectbox(
                 "Provider Type *",
                 options=["Physician", "APP"],
-                help="Select whether this is a Physician or APP provider"
+                help="Select whether this is a Physician or APP provider",
+                key="add_provider_type"
             )
             # Removed duplicate quick day/night preference (exists in detailed rules below)
         
@@ -293,7 +295,8 @@ def add_new_provider():
         timing_preference = st.selectbox(
             "When should shifts be scheduled?",
             options=["Even Distribution - No preference", "Front-Loaded - Prefer shifts in first half of month", "Back-Loaded - Prefer shifts in second half of month"],
-            help="Choose when this provider prefers to work their shifts during the month"
+            help="Choose when this provider prefers to work their shifts during the month",
+            key="add_provider_timing_pref"
         )
         
         # Convert to value
@@ -685,7 +688,7 @@ def provider_rules_panel():
             index=["No Preference", "Day Shifts Preferred", "Night Shifts Preferred", "Day Shifts Only", "Night Shifts Only"].index(
                 provider_rules.get("day_night_preference", "No Preference")
             ),
-            key=f"day_night_pref_{selected_provider}",
+            key=f"day_night_pref_{selected_provider}_rules",
             help="Select the provider's preference for day vs night shifts"
         )
     
@@ -721,7 +724,7 @@ def provider_rules_panel():
                 provider_rules["shift_preferences"][shift_key] = st.checkbox(
                     f"{shift_label} ({shift_key})",
                     value=current_value,
-                    key=f"shift_pref_{selected_provider}_{shift_key}",
+                    key=f"shift_pref_{selected_provider}_{shift_key}_rules",
                     help=f"HARD RULE: Must be checked to assign {shift_label} shifts to this provider"
                 )
     
@@ -847,7 +850,7 @@ def provider_rules_panel():
             "Shift Timing Preference",
             options=timing_options,
             index=current_index,
-            key=f"timing_pref_{selected_provider}",
+            key=f"timing_pref_{selected_provider}_rules",
             help="Choose when this provider prefers to work their shifts during the month"
         )
         
