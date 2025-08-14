@@ -212,20 +212,49 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     
     grid_df = pd.DataFrame(grid_data)
 
-    # Append On-Call row at the bottom based on same-day rounders excluding seniors
+    # Append On-Call row at the bottom based on same-day rounders excluding seniors,
+    # ensuring a provider is not on-call more than once within any contiguous rounding block
     try:
         from core.provider_types import SENIORS
         oncall_row = {"Shift Type": "🟠 On-Call"}
-        for date_col in date_cols:
+        prev_rounders: set[str] = set()
+        block_id_by_provider: Dict[str, int] = {}
+        used_in_block: set[tuple[str, int]] = set()
+        for day_index, date_col in enumerate(date_cols):
             # Collect all rounders for that day from original df (Shift Key == R12)
-            day_rounders: List[str] = []
-            for idx, row in df.iterrows():
+            day_rounders_ordered: List[str] = []
+            day_rounders_set: set[str] = set()
+            for _idx, row in df.iterrows():
                 if row.get("Shift Key") == "R12":
-                    prov = row.get(date_col) or ""
-                    if prov and prov not in SENIORS:
-                        day_rounders.append(prov)
-            # Pick first eligible rounder as default on-call, else blank
-            oncall_row[date_col] = day_rounders[0] if day_rounders else ""
+                    prov = (row.get(date_col) or "").strip()
+                    if prov and prov not in SENIORS and prov not in day_rounders_set:
+                        day_rounders_ordered.append(prov)
+                        day_rounders_set.add(prov)
+
+            # Assign block ids for providers present today
+            for prov in day_rounders_ordered:
+                if prov in prev_rounders:
+                    # keep existing block id
+                    _ = block_id_by_provider.get(prov)
+                else:
+                    # start a new block id using current index
+                    block_id_by_provider[prov] = day_index
+
+            # Choose on-call: first provider whose (prov, block_id) not yet used
+            selected = ""
+            for prov in day_rounders_ordered:
+                blk = block_id_by_provider.get(prov, day_index)
+                if (prov, blk) not in used_in_block:
+                    selected = prov
+                    used_in_block.add((prov, blk))
+                    break
+            # Fallback if none available
+            if not selected:
+                selected = day_rounders_ordered[0] if day_rounders_ordered else ""
+
+            oncall_row[date_col] = selected
+            prev_rounders = day_rounders_set
+
         # Add the on-call row
         grid_df = pd.concat([grid_df, pd.DataFrame([oncall_row])], ignore_index=True)
     except Exception:
@@ -264,28 +293,11 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             # This can be enhanced later with provider-specific restrictions
             available_providers.append(provider)
         
-        # For on-call row, restrict options to non-senior rounders for that day
-        if not providers:
-            day_options = provider_options
-        else:
-            try:
-                from core.provider_types import SENIORS
-                rounders = []
-                for idx, row in df.iterrows():
-                    if row.get("Shift Key") == "R12":
-                        val = row.get(date_col) or ""
-                        if val and val not in SENIORS:
-                            rounders.append(val)
-                # Keep unique while preserving order
-                seen = set()
-                filtered = [p for p in rounders if not (p in seen or seen.add(p))]
-                day_options = ["None"] + (filtered if filtered else providers)
-            except Exception:
-                day_options = provider_options
-
+        # Keep a uniform provider options list for all rows to avoid values being cleared
+        # Validation for On-Call selections is handled after edits with warnings and auto-sync
         col_config[date_col] = st.column_config.SelectboxColumn(
             date_col,
-            options=day_options,
+            options=provider_options,
             help=f"Assign provider to {date_col}",
             width="small"
         )
@@ -687,15 +699,32 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         except Exception:
             oncall = None
         if oncall is not None and isinstance(oncall, pd.Series) and oncall.get("Shift Type") == "🟠 On-Call":
-            for date_col in date_cols:
+            # Track blocks to ensure no provider is on-call more than once within a block
+            prev_set: set[str] = set()
+            block_id: Dict[str, int] = {}
+            oncall_used: set[tuple[str, int]] = set()
+            for day_index, date_col in enumerate(date_cols):
+                todays_rounders = set(rounders_by_date.get(date_col, []))
+                # assign block ids for todays providers
+                for p in todays_rounders:
+                    if p not in prev_set:
+                        block_id[p] = day_index
+                # check on-call choice
                 oc = (oncall.get(date_col) or "").strip()
                 if not oc:
+                    prev_set = todays_rounders
                     continue
-                # Check valid
                 if oc in SENIORS:
                     issues.append(f"{date_col}: On-call provider {oc} is a senior (not allowed)")
-                if oc not in rounders_by_date.get(date_col, []):
+                if oc not in todays_rounders:
                     issues.append(f"{date_col}: On-call provider {oc} is not assigned to rounding on this day")
+                blk = block_id.get(oc, day_index)
+                key = (oc, blk)
+                if key in oncall_used:
+                    issues.append(f"{date_col}: {oc} is on-call more than once in the same rounding block")
+                else:
+                    oncall_used.add(key)
+                prev_set = todays_rounders
         if issues:
             st.warning("\n".join([f"• {m}" for m in issues]))
     except Exception:
