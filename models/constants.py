@@ -32,7 +32,8 @@ PROVIDER_INITIALS_DEFAULT = [
 ]
 
 # APP Provider roster - these providers can only take APP shifts
-APP_PROVIDER_INITIALS = ["JA", "DN", "KP", "AR"]
+# Updated to include JL
+APP_PROVIDER_INITIALS = ["JA", "DN", "KP", "AR", "JL"]
 
 # Default shift capacities
 DEFAULT_SHIFT_CAPACITY = {"N12": 4, "NB": 1, "R12": 13, "A12": 1, "A10": 2, "APP": 2}
