@@ -58,14 +58,43 @@ def _save_provider_creds(provider_initials: str, creds: Credentials) -> None:
 
 
 def _get_client_config() -> Optional[Dict[str, Any]]:
-    # Prefer Streamlit secrets
-    secrets = getattr(st, "secrets", {}) or {}
+    # Prefer Streamlit secrets (Secrets acts like a dict but isn't an actual dict)
     client_id = None
     client_secret = None
-    if isinstance(secrets, dict):
-        gsec = secrets.get("google_oauth") or secrets.get("gcal") or {}
-        client_id = gsec.get("client_id") or secrets.get("gcal_client_id")
-        client_secret = gsec.get("client_secret") or secrets.get("gcal_client_secret")
+    try:
+        secrets_obj = getattr(st, "secrets", {}) or {}
+        # Try nested sections first
+        gsec = None
+        try:
+            gsec = secrets_obj.get("google_oauth", None)
+        except Exception:
+            gsec = None
+        if not gsec:
+            try:
+                gsec = secrets_obj.get("gcal", None)
+            except Exception:
+                gsec = None
+        if gsec:
+            try:
+                client_id = gsec.get("client_id", None)
+                client_secret = gsec.get("client_secret", None)
+            except Exception:
+                pass
+        # Try top-level fallbacks
+        if not client_id:
+            try:
+                client_id = secrets_obj.get("gcal_client_id", None)
+            except Exception:
+                client_id = None
+        if not client_secret:
+            try:
+                client_secret = secrets_obj.get("gcal_client_secret", None)
+            except Exception:
+                client_secret = None
+    except Exception:
+        # Ignore and fallback to env
+        pass
+
     # Fallback to environment variables
     client_id = client_id or os.environ.get("GCAL_CLIENT_ID")
     client_secret = client_secret or os.environ.get("GCAL_CLIENT_SECRET")

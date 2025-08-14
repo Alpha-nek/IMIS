@@ -723,12 +723,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
     if "providers_df" in st.session_state and not st.session_state.providers_df.empty:
         providers_df = st.session_state.providers_df
         
-        # Show enhanced provider utilization
-        st.markdown("#### 📊 Enhanced Provider Utilization")
-        
-        # Add warning for providers with insufficient shifts
-        days_in_month = len(date_cols)
-        min_required_shifts = 15 if days_in_month == 30 else 16
+        # Utilization summary without extra label
         
         # Initialize statistics for all providers so rows appear even with 0 shifts
         provider_stats: Dict[str, Dict[str, int]] = {}
@@ -812,14 +807,16 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             utilization_df["Expected Shifts"] = utilization_df["Provider"].map(expected_map).fillna(0).astype(int)
             utilization_df = utilization_df.sort_values(["Total Shifts", "Expected Shifts"], ascending=[False, False])
             
-            # Add warning for providers with insufficient shifts
+            # Add warning for providers below their expected shifts
             insufficient_providers = []
             for _, row in utilization_df.iterrows():
-                if row["Total Shifts"] < min_required_shifts:
-                    insufficient_providers.append(f"{row['Provider']} ({row['Total Shifts']} shifts)")
-            
+                expected = int(row.get("Expected Shifts", 0))
+                total = int(row.get("Total Shifts", 0))
+                if expected > 0 and total < expected:
+                    insufficient_providers.append(f"{row['Provider']} ({total}/{expected})")
+
             if insufficient_providers:
-                st.warning(f"⚠️ **Providers with insufficient shifts (need {min_required_shifts}):** {', '.join(insufficient_providers)}")
+                st.warning(f"⚠️ Providers below expected shifts: {', '.join(insufficient_providers)}")
             
             st.dataframe(
                 utilization_df,
