@@ -1260,7 +1260,18 @@ def render_desktop_interface():
             st.success("Settings saved successfully!")
             st.rerun()
     
-    # Providers Tab
+    # Grid View Tab (second)
+    with tab2:
+        if st.session_state.get('events'):
+            try:
+                render_schedule_grid(st.session_state.events, year, month)
+            except Exception as e:
+                st.error(f"Failed to render grid view: {e}")
+                st.error(f"Error details: {traceback.format_exc()}")
+        else:
+            st.info("No schedule available. Generate a schedule to view it in grid format.")
+
+    # Providers Tab (third)
     with tab3:
         try:
             # Clear any conflicting selectbox state keys to avoid duplicate keys on rerender
@@ -1270,17 +1281,13 @@ def render_desktop_interface():
             st.error(f"Failed to render providers panel: {e}")
             st.error(f"Error details: {traceback.format_exc()}")
     
-    # Grid View Tab
+    # Requests Tab (fourth)
     with tab4:
-        if st.session_state.events:
-            try:
-                # Render grid view (now includes editing functionality)
-                render_schedule_grid(st.session_state.events, year, month)
-            except Exception as e:
-                st.error(f"Failed to render grid view: {e}")
-                st.error(f"Error details: {traceback.format_exc()}")
-        else:
-            st.info("No schedule available. Generate a schedule to view it in grid format.")
+        try:
+            provider_requests_panel()
+        except Exception as e:
+            st.error(f"Failed to render requests panel: {e}")
+            st.error(f"Error details: {traceback.format_exc()}")
         
 
     
@@ -1290,27 +1297,16 @@ def render_desktop_interface():
         st.info("Google Calendar integration will be implemented in the next phase.")
         st.write("This tab will allow providers to sync their shifts to their Google Calendar.")
     
-    # Provider Requests Tab
+    # Data Management Tab (sixth)
     with tab6:
-        try:
-            provider_requests_panel()
-        except Exception as e:
-            st.error(f"Failed to render requests panel: {e}")
-            st.error(f"Error details: {traceback.format_exc()}")
-    
-    # Data Management Tab
-    with tab7:
         try:
             st.header("💾 Data Management")
             st.caption("View and manage providers/rules, and saved schedules. Load/export JSON/CSV.")
-
             from core.data_manager import load_providers, load_rules, save_providers, save_rules, load_schedule, save_schedule
-
             # Providers and rules
             st.subheader("👥 Providers & Rules")
             providers_df, _ = load_providers()
             global_rules_dict, shift_types, shift_capacity, provider_rules = load_rules()
-
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("#### Providers (CSV/JSON)")
@@ -1330,7 +1326,6 @@ def render_desktop_interface():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to load providers: {e}")
-
             with col2:
                 st.markdown("#### Provider Rules (JSON)")
                 st.json(provider_rules, expanded=False)
@@ -1350,25 +1345,23 @@ def render_desktop_interface():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to load rules: {e}")
-
             st.markdown("---")
             # Saved schedules
             st.subheader("📅 Saved Schedules")
-            year = st.session_state.get("current_year", datetime.now().year)
-            month = st.session_state.get("current_month", datetime.now().month)
+            year_val = st.session_state.get("current_year", datetime.now().year)
+            month_val = st.session_state.get("current_month", datetime.now().month)
             col1, col2, col3 = st.columns(3)
             with col1:
-                year = st.number_input("Year", min_value=2000, max_value=2100, value=year, step=1, key="dm_year")
+                year_val = st.number_input("Year", min_value=2000, max_value=2100, value=year_val, step=1, key="dm_year")
             with col2:
-                month = st.number_input("Month", min_value=1, max_value=12, value=month, step=1, key="dm_month")
+                month_val = st.number_input("Month", min_value=1, max_value=12, value=month_val, step=1, key="dm_month")
             with col3:
                 st.write("")
-
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("⬇️ Load Saved Schedule"):
                     try:
-                        ev = load_schedule(int(year), int(month))
+                        ev = load_schedule(int(year_val), int(month_val))
                         if ev:
                             st.session_state.events = ev
                             st.success("Loaded saved schedule into app.")
@@ -1379,7 +1372,7 @@ def render_desktop_interface():
             with c2:
                 if st.button("⬆️ Save Current Schedule"):
                     try:
-                        save_schedule(int(year), int(month), st.session_state.get("events", []))
+                        save_schedule(int(year_val), int(month_val), st.session_state.get("events", []))
                         st.success("Current schedule saved.")
                     except Exception as e:
                         st.error(f"Failed to save schedule: {e}")
@@ -1392,10 +1385,11 @@ def render_desktop_interface():
                         file_name="schedule.json",
                         mime="application/json",
                     )
-
         except Exception as e:
             st.error(f"Failed to render data status: {e}")
             st.error(f"Error details: {traceback.format_exc()}")
+    
+    # Data management previously duplicated under tab7 has been consolidated under tab6 above
     
     # Debug Test Tab removed to simplify the app
 
