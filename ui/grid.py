@@ -151,6 +151,8 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         st.session_state["grid_calendar_provider_filter"] = sel
     except Exception:
         st.session_state["grid_calendar_provider_filter"] = "All Providers"
+
+    # Remove banner; only use visual cell highlighting
     
     # Create a more compact grid for editing
     # Create row labels that combine shift type and slot
@@ -401,12 +403,11 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
             border-right: 3px solid #ff5722 !important;
         }}
         
-        /* Provider highlighting styles */
-        .highlight-provider {{
-            background-color: #fff3cd !important;
-            border: 2px solid #ffc107 !important;
-            font-weight: bold !important;
-            color: #856404 !important;
+        /* Provider highlighting styles (cell-level) */
+        td.highlight-provider {{
+            background-color: #fffbe6 !important; /* light yellow */
+            color: #0f172a !important; /* dark */
+            font-weight: 700 !important;
         }}
         
         /* Date columns styling - optimized for scrolling */

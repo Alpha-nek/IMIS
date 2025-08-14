@@ -1058,7 +1058,7 @@ def render_desktop_interface():
                 st.markdown("#### Providers (CSV/JSON)")
                 if not providers_df.empty:
                     st.dataframe(providers_df, use_container_width=True)
-                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers")
+                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers_dm_left")
                 if uploaded_providers is not None:
                     try:
                         if uploaded_providers.name.endswith('.csv'):
@@ -1312,7 +1312,7 @@ def render_desktop_interface():
                 st.markdown("#### Providers (CSV/JSON)")
                 if not providers_df.empty:
                     st.dataframe(providers_df, use_container_width=True)
-                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers")
+                uploaded_providers = st.file_uploader("Upload providers CSV/JSON", type=["csv", "json"], key="upload_providers_dm_right")
                 if uploaded_providers is not None:
                     try:
                         if uploaded_providers.name.endswith('.csv'):

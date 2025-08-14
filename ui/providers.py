@@ -86,6 +86,8 @@ def providers_panel():
         # Show selected provider details
         if selected_provider_full:
             selected_initials = selected_provider_full.split(" - ")[0]
+            # Persist selection so Rules panel uses the same provider
+            st.session_state.selected_provider_for_rules = selected_initials
             provider_info = providers_df[providers_df["initials"] == selected_initials]
             
             if not provider_info.empty:
