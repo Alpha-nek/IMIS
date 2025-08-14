@@ -108,15 +108,12 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
         
         # Main assignment loop - assign shifts day by day using scoring
         debug_logger.log("🔄 Starting main assignment loop...")
-        print(f"🔄 SCHEDULER: Starting assignment for {len(month_days)} days, {len(providers)} providers")
-        print(f"🔄 SCHEDULER: Shift types: {[st.get('key') for st in shift_types]}")
         day_count = 0
         total_days = len(month_days)
         
         for current_day in month_days:
             day_count += 1
             debug_logger.log(f"📅 Processing day {day_count}/{total_days}: {current_day}")
-            print(f"📅 Day {day_count}: {current_day}")
             
             for shift_type_dict in shift_types:
                 shift_key = shift_type_dict.get("key", shift_type_dict.get("name", ""))
@@ -125,7 +122,6 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                 # Get capacity for this shift type on this day
                 capacity = get_shift_capacity(shift_key, current_day, shift_capacity)
                 debug_logger.log(f"  📊 Capacity for {shift_key}: {capacity}")
-                print(f"  🎯 {shift_key}: capacity {capacity}")
                 
                 # Assign shifts up to capacity
                 for slot in range(capacity):
@@ -156,37 +152,24 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
                             pass  # The feasibility function will handle debug output
                     
                     debug_logger.log(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
-                    print(f"    ✅ Found {len(candidates)} feasible candidates: {feasible_providers}")
                     
                     if not candidates:
                         debug_logger.log(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
-                        print(f"    ❌ No feasible candidates for {shift_key} slot {slot + 1}")
                         continue  # Skip this slot if no candidates
                     
                     # Sort by score (highest first) - providers with fewer shifts get priority
                     candidates.sort(key=lambda x: x[1], reverse=True)
-                    
-                    # DEBUG: Show top candidates for load balancing
-                    if len(candidates) > 0:
-                        top_candidates = candidates[:3]  # Show top 3
-                        if shift_key == "R12" and slot < 3:  # Only for first few R12 slots to avoid spam
-                            candidate_info = [(name, score, len([e for e in events if e.extendedProps.get("provider") == name])) 
-                                            for name, score in top_candidates]
-                            print(f"    🏆 Top candidates: {candidate_info} (name, score, current_shifts)")
                     
                     # Select best candidate (highest score = fewest current shifts)
                     best_provider = candidates[0][0]
                     
                     # Create and add the shift event
                     debug_logger.log(f"    ✅ Assigning {shift_key} to {best_provider}")
-                    print(f"    ✅ Assigning {shift_key} to {best_provider}")
                     event = create_shift_event(best_provider, shift_key, current_day)
                     events.append(event)
                     debug_logger.log(f"    📝 Total events so far: {len(events)}")
-                    print(f"    📝 Total events so far: {len(events)}")
         
         debug_logger.log(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
-        print(f"🎉 COMPLETED ASSIGNMENT: {len(events)} shifts assigned")
         
         # Analyze what was assigned
         shift_type_counts = {}
@@ -194,7 +177,7 @@ def assign_with_scoring(year: int, month: int, providers: List[str],
             shift_type = event.extendedProps.get('shift_type', 'Unknown')
             shift_type_counts[shift_type] = shift_type_counts.get(shift_type, 0) + 1
         
-        print(f"📊 Shift type distribution: {shift_type_counts}")
+        debug_logger.log(f"📊 Shift type distribution: {shift_type_counts}")
         
         # Skip validation for speed during testing
         # events = validate_and_adjust_schedule(events, providers, provider_rules, global_rules, year, month)
@@ -225,10 +208,7 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     # DETAILED DEBUG: Track why providers are rejected
     debug_reason = None
     
-    # DEBUG: Log start of feasibility check for first few providers
-    if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-        print(f"        🔍 Checking {provider} for {shift_key} on {day}")
-        print(f"        📊 Current events count: {len(events)}")
+    # Removed debug prints for cleaner output
     
     # Check basic availability
     try:
@@ -236,7 +216,7 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
             debug_reason = f"unavailable on {day}"
             return False
     except Exception as e:
-        print(f"      ⚠️ Error checking availability for {provider}: {e}")
+        logger.warning(f"Error checking availability for {provider}: {e}")
         # Be lenient - if we can't check, assume available
     
     # Check if provider already has a shift on this day
@@ -245,13 +225,9 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
         provider_events = [e for e in events if e.extendedProps.get("provider") == provider]
         if has_shift_on_date(provider, day, provider_events):
             debug_reason = f"already has shift on {day}"
-            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-                print(f"        ❌ {provider} already has shift on {day}")
             return False
-        elif provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-            print(f"        ✅ {provider} has no shift on {day} (provider events: {len(provider_events)})")
     except Exception as e:
-        print(f"      ⚠️ Error checking existing shifts for {provider}: {e}")
+        logger.warning(f"Error checking existing shifts for {provider}: {e}")
         # Be lenient - if we can't check, assume no conflict
     
     # Check shift type eligibility based on provider type and qualifications
@@ -287,12 +263,10 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
             # If preference is explicitly False, reject. If missing/None, allow
             if shift_preferences.get(shift_key) is False:
                 debug_reason = f"explicitly refuses {shift_key}"
-                if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-                    print(f"        ❌ {provider} explicitly refuses {shift_key}")
                 return False
             # Otherwise allow the assignment even if preference is not explicitly True
     except Exception as e:
-        print(f"      ⚠️ Error checking preferences for {provider}: {e}")
+        logger.warning(f"Error checking preferences for {provider}: {e}")
         # If there's an error, be lenient and allow the shift
     
     # RE-ENABLED: Check shift count limits to ensure fair distribution
@@ -304,18 +278,12 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
         
         if current_shifts >= max_allowed_shifts:
             debug_reason = f"would exceed max shifts ({current_shifts} >= {max_allowed_shifts})"
-            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-                print(f"        ❌ {provider} would exceed max shifts ({current_shifts} >= {max_allowed_shifts})")
             return False
-        elif provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-            print(f"        ✅ {provider} shift count OK ({current_shifts}/{max_allowed_shifts})")
     except Exception as e:
-        print(f"      ⚠️ Error calculating expected shifts for {provider}: {e}")
+        logger.warning(f"Error calculating expected shifts for {provider}: {e}")
         # Fallback: Hard limit at 25 shifts per month to prevent overloading
         if current_shifts >= 25:
             debug_reason = f"too many shifts ({current_shifts} >= 25)"
-            if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-                print(f"        ❌ {provider} exceeds fallback limit ({current_shifts} >= 25)")
             return False
     
     # SIMPLIFIED: Skip night shift limits for now
@@ -344,8 +312,6 @@ def is_provider_feasible(provider: str, day: date, shift_key: str, events: List[
     #             return False
     
     # If we get here, provider is feasible
-    if provider in ['AB', 'DI', 'JK', 'MA', 'MS']:
-        print(f"        ✅ {provider} is feasible for {shift_key}")
     return True
 
 def assign_app_shifts(month_days: List[date], app_providers: List[str], 
