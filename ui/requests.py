@@ -55,8 +55,11 @@ def vacation_request_form(provider: str):
     reason = st.text_area("Reason for Vacation", key="vacation_reason")
     
     if st.button("Submit Vacation Request", type="primary"):
-        if not provider or not reason or start_date >= end_date:
-            st.error("Please fill in all fields correctly. Start date must be before end date.")
+        # Validate inputs
+        if not provider or not reason:
+            st.error("Please fill in all fields correctly.")
+        elif start_date > end_date:
+            st.error("Start date must be before or equal to end date.")
         else:
             request = {
                 "id": f"vac_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
