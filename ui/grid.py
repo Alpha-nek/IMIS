@@ -458,7 +458,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Handle grid changes
+    # Handle grid changes without forcing a full rerun (keeps calendar visible)
     if edited_grid is not None and not edited_grid.equals(grid_df):
         # Apply changes to events
         updated_events = apply_grid_changes_to_calendar(edited_grid, events, year, month, row_meta)
@@ -468,8 +468,7 @@ def render_schedule_grid(events: List[Any], year: int, month: int) -> pd.DataFra
         from core.data_manager import save_schedule
         save_schedule(year, month, st.session_state.events)
         
-        st.success("✅ Grid changes applied to calendar and saved!")
-        st.rerun()
+        st.toast("Grid changes applied and saved. Calendar updated.")
     
     # Display read-only summary
     st.markdown("---")

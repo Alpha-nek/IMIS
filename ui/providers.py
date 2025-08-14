@@ -31,10 +31,13 @@ def providers_panel():
             if st.session_state.events:
                 unique_providers = set()
                 for event in st.session_state.events:
-                    if isinstance(event, dict) and 'extendedProps' in event:
-                        provider = event['extendedProps'].get("provider", "")
-                        if provider:
-                            unique_providers.add(provider)
+                    provider_val = None
+                    if hasattr(event, 'extendedProps'):
+                        provider_val = event.extendedProps.get("provider", "")
+                    elif isinstance(event, dict) and 'extendedProps' in event:
+                        provider_val = event['extendedProps'].get("provider", "")
+                    if provider_val:
+                        unique_providers.add(provider_val)
                 st.metric("Currently Scheduled", len(unique_providers))
             else:
                 st.metric("Currently Scheduled", 0)
@@ -102,9 +105,13 @@ def providers_panel():
                     if st.session_state.events:
                         provider_events = 0
                         for event in st.session_state.events:
-                            if isinstance(event, dict) and 'extendedProps' in event:
-                                if event['extendedProps'].get("provider", "") == selected_initials:
-                                    provider_events += 1
+                            provider_val = None
+                            if hasattr(event, 'extendedProps'):
+                                provider_val = event.extendedProps.get("provider", "")
+                            elif isinstance(event, dict) and 'extendedProps' in event:
+                                provider_val = event['extendedProps'].get("provider", "")
+                            if provider_val == selected_initials:
+                                provider_events += 1
                         st.metric("Current Shifts", provider_events)
                     else:
                         st.metric("Current Shifts", 0)
@@ -721,6 +728,8 @@ def provider_rules_panel():
     with tab3:
         st.markdown("#### Unavailable Dates")
         st.markdown("Add specific dates when this provider cannot work.")
+        # Ensure key exists for older saved rules
+        provider_rules.setdefault("unavailable_dates", [])
         
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -739,7 +748,7 @@ def provider_rules_panel():
                     st.warning("Date already marked as unavailable.")
         
         # Display current unavailable dates
-        if provider_rules["unavailable_dates"]:
+        if provider_rules.get("unavailable_dates"):
             st.markdown("**Current Unavailable Dates:**")
             for i, date_val in enumerate(sorted(provider_rules["unavailable_dates"])):
                 col1, col2 = st.columns([3, 1])
@@ -756,6 +765,8 @@ def provider_rules_panel():
     with tab4:
         st.markdown("#### Vacation Periods")
         st.markdown("Add vacation periods when this provider will be away.")
+        # Ensure key exists for older saved rules
+        provider_rules.setdefault("vacations", [])
         
         col1, col2 = st.columns(2)
         with col1:
